@@ -114,7 +114,7 @@ def sep_findings(facts):
             findings.append((BAD, "Wrong kernel",
                              "Touch ID needs the Aurora SEP kernel; this boot is running "
                              f"{facts.get('kernel')}.",
-                             "See mseries/REBOOT-QUEUE.md before selecting an Aurora boot entry"))
+                             "See docs/REBOOT-QUEUE.md before selecting an Aurora boot entry"))
         else:
             findings.append((BAD, "No /dev/sep-bio",
                              "The Aurora kernel is running but the enclave device is missing "

@@ -32,7 +32,7 @@
 set -u
 
 PIN="${BASELINE_COMMIT:-6dad972155aeb09672708615d69738ba68504b15}"
-BASE="https://raw.githubusercontent.com/techmore/ElementaryOS_MSeries/${PIN}/mseries/fairydust/usb4"
+BASE="https://raw.githubusercontent.com/techmore/ElementaryOS_MSeries/${PIN}/fairydust/usb4"
 
 EXP_COLLECTOR="5da6ad5502b08a021a458291fafa71197ed1151b72634af4dcd304ffb63523a3"
 EXP_PARSER="ce39c6a416c459bb60d2f5632c420441a6cf2e2ac2412a2607f25eee73b152c7"

@@ -20,7 +20,7 @@ cmp -s /boot/m1n1/boot.bin /boot/m1n1/boot.bin.KNOWN-GOOD-usb4-test \
 mountpoint -q $R/boot || mount --bind /boot $R/boot
 install -D -m 0644 "$NEW" "$R$DEST"
 cat > $R/etc/default/update-m1n1 <<EOF
-# Managed by ElementaryOS_MSeries mseries/fairydust/usb4/install-m1n1.sh
+# Managed by ElementaryOS_MSeries fairydust/usb4/install-m1n1.sh
 # Newer m1n1 with ACIO/USB4 tunables (distro m1n1 1.6.1 lacks them) ...
 M1N1=$DEST
 # ... and the USB4 kernel's DTBs, so pacman's 95-m1n1-install.hook cannot swap in stock ones.

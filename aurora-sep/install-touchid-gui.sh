@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the Touch ID settings app for the current user.
-#   bash mseries/aurora-sep/install-touchid-gui.sh              # install
-#   bash mseries/aurora-sep/install-touchid-gui.sh --uninstall  # remove
+#   bash aurora-sep/install-touchid-gui.sh              # install
+#   bash aurora-sep/install-touchid-gui.sh --uninstall  # remove
 #
 # Needs: python3-gi (GTK3). The app talks to fprintd directly; the PAM button
 # calls mseries-aurora-touchid-apply-pam through pkexec, which is installed

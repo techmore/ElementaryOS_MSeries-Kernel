@@ -23,7 +23,7 @@ fi
 [[ $EUID != 0 ]] || { echo 'Run as an ordinary user, not root' >&2; exit 2; }
 mkdir -p "$FAIRYDUST_WORKDIR"
 work=$(realpath "$FAIRYDUST_WORKDIR")
-repo=$(realpath "$here/../../..")
+repo=$(realpath "$here/../..")
 case "$work/" in "$repo/"*) echo 'Build outside the repository' >&2; exit 2;; esac
 exec > >(tee -a "$work/build.log") 2>&1
 [[ $work != / && $work != "$here" && $work != "$kit" ]] || exit 2
@@ -100,7 +100,7 @@ if ! grep -Fq 'kvcalloc(segments' drivers/media/platform/apple/avd/avd-drv.c; th
 fi
 export DEBEMAIL=builder@localhost DEBFULLNAME="Elementary MSeries Builder"
 export KDEB_CHANGELOG_DIST=resolute
-if ! python3 "$here/../../check-kernel-config.py" "$out/.config" --require fairydust > "$work/kernel-config-report.json"; then
+if ! python3 "$here/../../tools/check-kernel-config.py" "$out/.config" --require fairydust > "$work/kernel-config-report.json"; then
     cat "$work/kernel-config-report.json"
     exit 1
 fi

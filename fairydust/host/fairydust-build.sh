@@ -18,7 +18,7 @@
 set -euo pipefail
 
 REPO=${REPO:-/home/USER/ElementaryOS_MSeries}
-KIT="$REPO/mseries/fairydust"
+KIT="$REPO/fairydust"
 TOROOT=/mnt/fdbuild/top
 R=/mnt/fdbuild/root
 DRIVER=/home/USER/fairydust-driver.sh

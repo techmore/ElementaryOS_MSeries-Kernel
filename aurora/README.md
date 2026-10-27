@@ -54,7 +54,7 @@ Requirements: Python 3.12+, `zstd`, `fdtget` (device-tree-compiler). This works
 on macOS or Linux and does not need root or a kernel compiler.
 
 ```sh
-python3 mseries/aurora/package-release.py \
+python3 aurora/package-release.py \
   --cache /absolute/work/aurora-cache --output /absolute/work/aurora-packages
 ```
 
@@ -84,7 +84,7 @@ the older tree lacked the full sensor/display wiring. Stage from an explicit
 copy of the current boot image:
 
 ```sh
-python3 mseries/aurora/stage-boot.py --cache /absolute/work/aurora-cache \
+python3 aurora/stage-boot.py --cache /absolute/work/aurora-cache \
   --existing-boot /absolute/work/current-boot.bin \
   --output /absolute/work/aurora20-boot-candidate
 ```
@@ -113,9 +113,9 @@ The inherited defaults describe the owner's btrfs elementary subvolume;
 they are not a generic disk layout.
 
 ```sh
-bash mseries/aurora-sep/install-aurora-sep.sh
+bash aurora-sep/install-aurora-sep.sh
 # After reviewing the preview on the target Linux installation:
-sudo bash mseries/aurora-sep/install-aurora-sep.sh --apply
+sudo bash aurora-sep/install-aurora-sep.sh --apply
 ```
 
 The new versioned entry is **`elementary-aurora20`**. The installer replaces

@@ -32,8 +32,8 @@ active stable rustup toolchain before building.
 ```bash
 export FAIRYDUST_WORKDIR=/absolute/path/to/fresh-work-directory
 export FAIRYDUST_SOURCE_ARCHIVE=/absolute/path/to/pinned-source.tar.gz
-bash mseries/fairydust/debian/build.sh --prepare
-bash mseries/fairydust/debian/build.sh --compile
+bash fairydust/debian/build.sh --prepare
+bash fairydust/debian/build.sh --compile
 ```
 
 When updating a prepared tree to a newer repository config, run
@@ -85,7 +85,7 @@ kernel image first, uses the host's statically linked BusyBox only inside the
 temporary guest initramfs, and attaches no disk or network device:
 
 ```bash
-VM_CPUS=2 mseries/fairydust/debian/vm-kernel-smoke-test.sh \
+VM_CPUS=2 fairydust/debian/vm-kernel-smoke-test.sh \
   /path/to/linux-image-7.1.13-elementary-fairydust-usb4_7.1.13+elementary.usb4.3_arm64.deb
 ```
 

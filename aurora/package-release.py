@@ -68,8 +68,8 @@ def main():
         (docs / "README").write_text(
             "Unmodified upstream Aurora kernel, modules and device trees.\n"
             "Payload package only: no maintainer scripts, /boot writes, bootloader changes or reboot.\n"
-            "Use mseries/aurora-sep/install-aurora-sep.sh for explicit candidate installation.\n"
-            "Pair with the pinned m1n1 and J314S DTB; see mseries/aurora/README.md.\n"
+            "Use aurora-sep/install-aurora-sep.sh for explicit candidate installation.\n"
+            "Pair with the pinned m1n1 and J314S DTB; see aurora/README.md.\n"
             "The original source archive accompanies this package. Not hardware-qualified on J314S/WD22TB4.\n")
         size = sum(path.stat().st_size for path in payload.rglob("*") if path.is_file()) // 1024
         (control / "control").write_text(

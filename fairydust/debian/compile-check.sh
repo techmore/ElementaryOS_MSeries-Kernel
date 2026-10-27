@@ -1,7 +1,7 @@
 #!/bin/bash
 # Compile-only check of every kernel patch in this kit, without the 40 GiB full build.
 #
-#   FAIRYDUST_CHECK_DIR=~/kernel-check bash mseries/fairydust/debian/compile-check.sh
+#   FAIRYDUST_CHECK_DIR=~/kernel-check bash fairydust/debian/compile-check.sh
 #
 # Fetches the pinned fairydust source (sha256-checked), applies the patches in the same order as
 # build.sh (the USB4 series, then the packaging patches and the AVD fix), uses the repository's kernel

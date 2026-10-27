@@ -1,0 +1,1 @@
+Vendored unchanged from techmore/ElementaryOS_MSeries `mseries/power/display_status.py` (last change 877dc69b), because `aurora/qualification.py` imports it. The OS repo remains the owner; refresh this copy when it changes.

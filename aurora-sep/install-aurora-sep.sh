@@ -282,8 +282,8 @@ cat <<EOF
 
 Candidate entry: $ENTRY_ID. No reboot or one-shot boot is armed.
 Before a hardware test, stage/review the matched Aurora m1n1 + J314S DTB with
-mseries/aurora/stage-boot.py. Shared boot.bin is NOT updated by this installer.
-Follow mseries/aurora/README.md; retain the existing Fairydust/.19 recovery paths.
+aurora/stage-boot.py. Shared boot.bin is NOT updated by this installer.
+Follow aurora/README.md; retain the existing Fairydust/.19 recovery paths.
 
 Then verify:
   uname -r                                   # $KVER

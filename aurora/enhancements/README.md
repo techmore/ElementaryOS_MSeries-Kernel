@@ -43,9 +43,9 @@ These are outstanding enhancements, not features claimed as merged by this batch
 From the repository root, use new private output directories:
 
 ```bash
-python3 mseries/aurora/candidate.py prepare \
+python3 aurora/candidate.py prepare \
   --cache /absolute/work/aurora-cache --output /absolute/work/aurora-enh1
-python3 mseries/aurora/candidate.py check --prepared /absolute/work/aurora-enh1
+python3 aurora/candidate.py check --prepared /absolute/work/aurora-enh1
 ```
 
 Preparation verifies the original source and full recipe hashes, applies the
@@ -62,7 +62,7 @@ kernel build dependencies, zstd, dtc, kmod and rsync:
 ```bash
 export PATH=/usr/lib/llvm-22/bin:$PATH
 export LIBCLANG_PATH=/usr/lib/llvm-22/lib
-python3 mseries/aurora/candidate.py build --prepared /absolute/work/aurora-enh1 \
+python3 aurora/candidate.py build --prepared /absolute/work/aurora-enh1 \
   --output /absolute/work/aurora-enh1-artifacts --jobs 4
 ```
 

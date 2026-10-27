@@ -164,5 +164,5 @@ Done. $( ((apply)) || echo '(dry run: nothing was changed.)' )
 Reboot and pick the "$sfx test" entry in GRUB. The default entry is unchanged.
 Checks: uname -r; lsmod | grep thunderbolt; ls /sys/bus/thunderbolt/devices; lsusb -t
 Rollback: pick the normal entry in GRUB. If the Mac stops before GRUB, restore boot.bin from macOS
-(mseries/fairydust/usb4/RECOVERY.md); the copy is $bak/boot.bin and $esp/m1n1/boot.bin.KNOWN-GOOD-pre-usb4-$stamp.
+(fairydust/usb4/RECOVERY.md); the copy is $bak/boot.bin and $esp/m1n1/boot.bin.KNOWN-GOOD-pre-usb4-$stamp.
 EOM

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Select the installed Fairydust USB4 entry persistently; retain stock recovery.
-# Preview: bash mseries/fairydust/usb4/set-default-kernel.sh
-# Apply: sudo bash mseries/fairydust/usb4/set-default-kernel.sh --apply
+# Preview: bash fairydust/usb4/set-default-kernel.sh
+# Apply: sudo bash fairydust/usb4/set-default-kernel.sh --apply
 set -euo pipefail
 apply=0
 case ${1:-} in

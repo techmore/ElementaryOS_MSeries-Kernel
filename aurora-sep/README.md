@@ -46,8 +46,8 @@ M1") merged 2026-10-08, and releases ship from `omacom/linux-aurora`.
 ## Install
 
 ```sh
-mseries/aurora-sep/install-aurora-sep.sh            # dry run, changes nothing
-sudo mseries/aurora-sep/install-aurora-sep.sh --apply
+aurora-sep/install-aurora-sep.sh            # dry run, changes nothing
+sudo aurora-sep/install-aurora-sep.sh --apply
 # Boot-chain staging/review is separate; see ../aurora/README.md before booting.
 ```
 
@@ -68,7 +68,7 @@ fprintd-verify "$USER"                          # a good finger unlocks
 ## Remove
 
 ```sh
-sudo mseries/aurora-sep/install-aurora-sep.sh --uninstall --apply
+sudo aurora-sep/install-aurora-sep.sh --uninstall --apply
 ```
 
 Removes the .20 GRUB entry, image, initramfs and manually installed modules.
@@ -107,7 +107,7 @@ settings app does the same without a terminal, the way GNOME's Users panel
 does for USB readers:
 
 ```sh
-bash mseries/aurora-sep/install-touchid-gui.sh
+bash aurora-sep/install-touchid-gui.sh
 ```
 
 Then "Touch ID (M-series)" appears in the applications menu: sensor status
@@ -122,7 +122,7 @@ after the first boot.
 
 ## Related
 
-- `mseries/fairydust/usb4/install-ci-kernel.sh` — the same side-by-side kernel
+- `fairydust/usb4/install-ci-kernel.sh` — the same side-by-side kernel
   pattern for the fairydust lane
 - `mseries/BUG-FIX-ROADMAP.md` — Touch ID row and test order
 - `mseries/local-ai/touchid-watch.py` — upstream signal watcher

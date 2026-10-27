@@ -41,12 +41,12 @@ class KernelGateTests(unittest.TestCase):
             self.report('not a config\n', ())
 
     def test_preserved_running_kernel_meets_strict_gate(self):
-        report = gate.inspect(Path(__file__).parent / 'fairydust/usb4/running-config', gate.BASELINE + gate.EXPERIMENTAL)
+        report = gate.inspect(Path(__file__).resolve().parent.parent / 'fairydust/usb4/running-config', gate.BASELINE + gate.EXPERIMENTAL)
         self.assertEqual(report['missing_required'], [])
 
     def test_preserved_kernel_configs_have_the_peripheral_drivers(self):
         for name in ('running-config', 'config'):
-            report = gate.inspect(Path(__file__).parent / 'fairydust/usb4' / name, gate.PERIPHERALS)
+            report = gate.inspect(Path(__file__).resolve().parent.parent / 'fairydust/usb4' / name, gate.PERIPHERALS)
             self.assertEqual(report['missing_required'], [], name)
 
     def test_peripherals_flag_names_the_missing_driver(self):
@@ -62,7 +62,7 @@ class KernelGateTests(unittest.TestCase):
             self.assertIn('HID_MAGICMOUSE', result.stdout)
 
     def test_fairydust_build_config_has_builtin_vm_console(self):
-        config = Path(__file__).parent / 'fairydust/usb4/config'
+        config = Path(__file__).resolve().parent.parent / 'fairydust/usb4/config'
         report = gate.inspect(config, gate.VM_CONSOLE)
         self.assertEqual(report['missing_required'], [])
         self.assertEqual(report['symbols']['SERIAL_AMBA_PL011'], 'y')

@@ -8,8 +8,8 @@ import sys
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
-VERIFY = ROOT / 'mseries/fairydust/debian/verify-m1n1-esp.py'
+ROOT = Path(__file__).resolve().parents[1]
+VERIFY = ROOT / 'fairydust/debian/verify-m1n1-esp.py'
 TOOLS = ('sfdisk', 'mformat', 'mmd', 'mcopy')
 AVAILABLE = all(shutil.which(command) for command in TOOLS)
 

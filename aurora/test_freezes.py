@@ -16,7 +16,7 @@ class FrozenHistoryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self.tmp.name)
-        self.root = self.repo / "mseries/aurora"
+        self.root = self.repo / "aurora"
         self.root.mkdir(parents=True)
         shutil.copy2(HERE / "release.json", self.root / "release.json")
         shutil.copytree(HERE / "frozen", self.root / "frozen")

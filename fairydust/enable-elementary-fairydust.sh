@@ -2,7 +2,7 @@
 # enable-elementary-fairydust.sh — make the already-built fairydust kernel
 # bootable with the *elementary* root (not just the Arch/omarchy one).
 #
-# Run from elementary as root:   sudo mseries/fairydust/enable-elementary-fairydust.sh
+# Run from elementary as root:   sudo fairydust/enable-elementary-fairydust.sh
 #
 # What it does:
 #   1. Copies the fairydust module tree out of the Arch (@) subvolume into the

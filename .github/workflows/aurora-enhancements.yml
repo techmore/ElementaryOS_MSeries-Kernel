@@ -4,12 +4,12 @@ on:
   pull_request:
     paths:
       - "mseries/ci/**"
-      - "mseries/aurora/candidate.py"
-      - "mseries/aurora/release.py"
-      - "mseries/aurora/release.json"
-      - "mseries/aurora/enhancements/**"
-      - "mseries/aurora/unified72/series.json"
-      - "mseries/aurora/unified72/patches/**"
+      - "aurora/candidate.py"
+      - "aurora/release.py"
+      - "aurora/release.json"
+      - "aurora/enhancements/**"
+      - "aurora/unified72/series.json"
+      - "aurora/unified72/patches/**"
       - ".github/workflows/aurora-enhancements.yml"
   workflow_dispatch:
     inputs:
@@ -47,18 +47,18 @@ jobs:
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
-          python3 -m unittest discover -s mseries/aurora -p 'test_*.py' -v
-          python3 mseries/aurora/candidate.py prepare --cache "$RUNNER_TEMP/aurora-cache" \
+          python3 -m unittest discover -s aurora -p 'test_*.py' -v
+          python3 aurora/candidate.py prepare --cache "$RUNNER_TEMP/aurora-cache" \
             --output "$RUNNER_TEMP/aurora-prepared" --profile "$PROFILE"
       - name: Exercise selected production kernel logic
         env:
           RUSTUP_TOOLCHAIN: 1.93.1
-        run: python3 mseries/aurora/candidate.py check --prepared "$RUNNER_TEMP/aurora-prepared"
+        run: python3 aurora/candidate.py check --prepared "$RUNNER_TEMP/aurora-prepared"
       - name: Build kernel, modules, DTBs and payload-only Debian package
         env:
           LIBCLANG_PATH: /usr/lib/llvm-22/lib
         run: |
-          python3 mseries/aurora/candidate.py build --prepared "$RUNNER_TEMP/aurora-prepared" \
+          python3 aurora/candidate.py build --prepared "$RUNNER_TEMP/aurora-prepared" \
             --output "$RUNNER_TEMP/aurora-enhancements" --jobs 4
       - name: Inspect package boundaries
         run: |

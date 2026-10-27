@@ -1,0 +1,16 @@
+name: Validate kernel
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash validate.sh

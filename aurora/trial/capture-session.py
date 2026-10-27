@@ -102,7 +102,7 @@ def capture(config_path):
             diagnostics = {'before': state_before, 'after': inventory(), 'cpu_total_ticks': total,
                            'cpu_busy_fraction': (total - idle) / total if total > 0 else None}
             q.write_new(output / 'inventory.json', diagnostics)
-            subprocess.run([sys.executable, str(HERE.parents[1] / 'hardware/kernel-smoke.py'),
+            subprocess.run([sys.executable, str(HERE.parents[1] / 'qualification/kernel-smoke.py'),
                             '--receipt', str(receipt_path), '--work', str(output), '--output', str(output / 'smoke.json'),
                             '--kernel-image', str(image), '--boot-image', str(boot_image)], check=True, timeout=90)
             status.update(status='complete-scoped', completed_at=datetime.now(timezone.utc).isoformat(),

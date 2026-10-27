@@ -3,7 +3,7 @@
 # without touching the system: no pip, no apt, no sudo.
 # Prints the resulting PYTHONPATH and the trace recipe.
 #
-#   bash mseries/fairydust/usb4/m1n1-trace-deps.sh
+#   bash fairydust/usb4/m1n1-trace-deps.sh
 #
 # See DP-TUNNEL-RE.md section 7. Safe to re-run (idempotent).
 set -euo pipefail

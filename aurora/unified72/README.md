@@ -122,10 +122,10 @@ bus and unknown display/power fields. It refuses the old running release.
 ## Reproduce in an isolated builder
 
 ```sh
-python3 mseries/aurora/candidate.py prepare --profile unified72 \
+python3 aurora/candidate.py prepare --profile unified72 \
   --cache /absolute/work/cache --output /absolute/work/unified72
-python3 mseries/aurora/candidate.py check --prepared /absolute/work/unified72
-python3 mseries/aurora/candidate.py build --prepared /absolute/work/unified72 \
+python3 aurora/candidate.py check --prepared /absolute/work/unified72
+python3 aurora/candidate.py build --prepared /absolute/work/unified72 \
   --output /absolute/work/unified72-artifacts --jobs 4
 ```
 

@@ -67,7 +67,7 @@ to a new freeze ID.
 Reproduce without a display-mode change or destructive disk testing:
 
 ```sh
-python3 mseries/hardware/kernel-smoke.py --receipt /absolute/work/j314s-test.json \
+python3 qualification/kernel-smoke.py --receipt /absolute/work/j314s-test.json \
   --work /absolute/work --output /absolute/work/j314s-smoke.json \
   --kernel-image /boot/vmlinuz-aurora-sep-20261017.20 --boot-image /boot/m1n1/boot.bin
 ```
@@ -106,7 +106,7 @@ messages. Pass the exact kernel/boot payload files explicitly:
 
 ```sh
 sudo journalctl -b -k -o json --no-pager > /absolute/work/kernel.jsonl
-python3 mseries/aurora/qualification.py collect --duration 30 \
+python3 aurora/qualification.py collect --duration 30 \
   --kernel-image /boot/vmlinuz-aurora-sep-20261017.20 \
   --boot-image /boot/m1n1/boot.bin --kernel-log /absolute/work/kernel.jsonl \
   --output /absolute/work/j314s-test.json
@@ -146,13 +146,13 @@ not a matched workload or an idle session. No efficiency claim follows.
 ## Freeze and verify
 
 ```sh
-python3 mseries/aurora/qualification.py freeze --id NEW-LOWERCASE-RELEASE-ID \
+python3 aurora/qualification.py freeze --id NEW-LOWERCASE-RELEASE-ID \
   --evidence /absolute/work/j314s-test.json --output /absolute/work/frozen.json
-python3 mseries/aurora/qualification.py verify /absolute/work/frozen.json \
+python3 aurora/qualification.py verify /absolute/work/frozen.json \
   --evidence /absolute/work/j314s-test.json
 ```
 
-`python3 mseries/aurora/check_freezes.py --base BASE_COMMIT` also rejects
+`python3 aurora/check_freezes.py --base BASE_COMMIT` also rejects
 changes or deletion of existing frozen manifests/pin snapshots relative to the
 reviewed Git base. CI runs this history guard. Archived pin bytes in
 `frozen/pins/aurora20.json` keep exp1 verifiable when the active `release.json`
