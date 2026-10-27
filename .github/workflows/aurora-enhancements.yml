@@ -43,6 +43,16 @@ jobs:
           sudo --preserve-env=GITHUB_ACTIONS python3 mseries/ci/install_aurora_tools.py
           timeout --kill-after=15s 300 rustup toolchain install 1.93.1 --profile minimal --component rust-src --component rustfmt
           echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
+      # After the LLVM PATH entry above: the shims must come first on PATH.
+      - uses: ./.github/actions/ccache
+      - name: Restore compiler cache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-aurora-${{ matrix.profile }}-${{ hashFiles('aurora/release.json', 'aurora/unified72/series.json', 'aurora/unified72/patches/**', 'aurora/enhancements/**') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-aurora-${{ matrix.profile }}-
       - name: Prepare pinned sources and patches
         env:
           PROFILE: ${{ matrix.profile }}
@@ -60,6 +70,19 @@ jobs:
         run: |
           python3 aurora/candidate.py build --prepared "$RUNNER_TEMP/aurora-prepared" \
             --output "$RUNNER_TEMP/aurora-enhancements" --jobs 4
+      - name: Compiler cache statistics
+        id: ccache-stats
+        if: always()
+        run: |
+          ccache -s
+          echo "misses=$(ccache --print-stats | awk -F'\t' '$1=="cache_miss" {print $2}')" >> "$GITHUB_OUTPUT"
+      # Only a run that compiled something new has anything worth storing.
+      - name: Save compiler cache
+        if: always() && steps.ccache-stats.outputs.misses != '0'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-aurora-${{ matrix.profile }}-${{ hashFiles('aurora/release.json', 'aurora/unified72/series.json', 'aurora/unified72/patches/**', 'aurora/enhancements/**') }}-${{ github.run_id }}
       - name: Inspect package boundaries
         run: |
           cd "$RUNNER_TEMP/aurora-enhancements"

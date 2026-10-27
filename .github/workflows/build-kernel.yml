@@ -42,6 +42,15 @@ jobs:
           rustup show active-toolchain
           rustup component add rust-src --toolchain stable
           rustc --version
+      - uses: ./.github/actions/ccache
+      - name: Restore compiler cache
+        id: ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-fairydust-${{ inputs.tunnel }}-${{ hashFiles('fairydust/debian/**', 'fairydust/PKGBUILD') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-fairydust-${{ inputs.tunnel }}-
       - name: Build pinned Fairydust kernel Debian package
         shell: bash
         run: |
@@ -79,6 +88,18 @@ jobs:
             --output out/fairydust-m1n1-boot.bin
           (cd out && sha256sum fairydust-m1n1-boot.bin > FAIRYDUST-BOOT-SHA256SUMS)
           (cd out && sha256sum *.deb > SHA256SUMS)
+      - name: Compiler cache statistics
+        id: ccache-stats
+        if: always()
+        run: |
+          ccache -s
+          echo "misses=$(ccache --print-stats | awk -F'\t' '$1=="cache_miss" {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Save compiler cache
+        if: always() && steps.ccache-stats.outputs.misses != '0'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-fairydust-${{ inputs.tunnel }}-${{ hashFiles('fairydust/debian/**', 'fairydust/PKGBUILD') }}-${{ github.run_id }}
       - name: Write manifest and checksums
         run: python3 tools/make-manifest.py --out out --channel "fairydust-usb4" --commit "$GITHUB_SHA" --tunnel "${{ inputs.tunnel || 'false' }}"
       - uses: actions/upload-artifact@v7

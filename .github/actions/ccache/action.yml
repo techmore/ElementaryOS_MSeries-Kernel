@@ -1,0 +1,38 @@
+name: ccache for kernel builds
+description: >-
+  Install ccache and put compiler shims first on PATH, so the unchanged `make` (gcc for Fairydust,
+  LLVM=1 clang for Aurora) compiles through ccache. Nothing about what is built changes: ccache
+  returns the exact object a real compile would. Pair with actions/cache/restore before the build
+  and actions/cache/save + the stats step after it. CCACHE_DIR is $RUNNER_TEMP/ccache.
+inputs:
+  max-size:
+    description: Upper bound for the cache directory (GitHub allows 10 GB of caches per repository).
+    default: 2G
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MAX_SIZE: ${{ inputs.max-size }}
+      run: |
+        set -euo pipefail
+        command -v ccache >/dev/null || {
+          sudo apt-get install -y --no-install-recommends ccache ||
+            { sudo apt-get update && sudo apt-get install -y --no-install-recommends ccache; }
+        }
+        shims="$RUNNER_TEMP/ccache-shims"
+        mkdir -p "$shims" "$RUNNER_TEMP/ccache"
+        ccache_bin=$(command -v ccache)
+        for name in gcc cc clang clang-22; do ln -sf "$ccache_bin" "$shims/$name"; done
+        echo "$shims" >> "$GITHUB_PATH"
+        {
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache"
+          echo "CCACHE_MAXSIZE=$MAX_SIZE"
+          echo "CCACHE_BASEDIR=$RUNNER_TEMP"
+          # Hash the compiler binary itself: the runner image reinstalls it, so its mtime differs per run.
+          echo "CCACHE_COMPILERCHECK=content"
+          # Sources are freshly extracted every run (new mtimes) and KBUILD_BUILD_TIMESTAMP is pinned.
+          echo "CCACHE_SLOPPINESS=include_file_mtime,include_file_ctime,time_macros"
+          echo "CCACHE_COMPRESS=1"
+        } >> "$GITHUB_ENV"
+        ccache --version | head -1
