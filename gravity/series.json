@@ -1,0 +1,470 @@
+{
+  "schema": 1,
+  "source": {
+    "repo": "https://github.com/GravityLinux/linux",
+    "branch": "gravity-m4",
+    "commit": "4fc326f6c25ccceb7515e2635c22e01fde5d3bac",
+    "date": "2026-10-09"
+  },
+  "base": "v7.1-4537-gbadc4fe5a9c1 (merge-base with aurora-silicon/linux integration/aurora)",
+  "profile": "gravity-m4-mini-j773g",
+  "status": "candidate",
+  "note": "Gravity-original M4 commits (authors Niklas Sheth, Cody Ho, Yureka Lilian, Josh Rodd, plus a Thomas Glanzmann fix) since 2026-09-10. Not boot-tested by this project.",
+  "patches": [
+    {
+      "file": "0001-arm64-dts-apple-Add-minimal-t8132-M4-device-trees.patch",
+      "sha256": "325c26e01578b34103b3d94428ad5f8b78b3841b5370deda75760fdf4368f0d3",
+      "upstream": "https://github.com/GravityLinux/linux/commit/cd5f25a0e4b68ac8bc3a731a312bb1b7f75dfca3",
+      "head": "cd5f25a0e4b68ac8bc3a731a312bb1b7f75dfca3",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0002-t8132-smc.patch",
+      "sha256": "493b9bf4e17edb2dfcc448122f72eec7dc110810ef1ade80a437c7399f4383c6",
+      "upstream": "https://github.com/GravityLinux/linux/commit/be925f37d4ef327166b8a94f7303aa038c40b8e5",
+      "head": "be925f37d4ef327166b8a94f7303aa038c40b8e5",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0003-dts-apple-t8132-Add-usb-atcphy-nodes.patch",
+      "sha256": "dfd467c21357e52d9cf8bc6557704ac19ed23b319f69c6695f5ab585e44fd986",
+      "upstream": "https://github.com/GravityLinux/linux/commit/840ac90252e2ef1962c318fbd567efcf29031661",
+      "head": "840ac90252e2ef1962c318fbd567efcf29031661",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0004-t8132-pcie.patch",
+      "sha256": "f2892f429bceea3b99965591400420fbf111582898c7bc98c6b2f8e77e19fd79",
+      "upstream": "https://github.com/GravityLinux/linux/commit/9edf52c13ea3957e2cf949120e0dc257facea49e",
+      "head": "9edf52c13ea3957e2cf949120e0dc257facea49e",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0005-PCI-pwrctrl-Export-per-device-APIs.patch",
+      "sha256": "5f89fefbf1ebe1098986655cb9e792b0e7e1d6eeaeecee6794072643f02adf9f",
+      "upstream": "https://github.com/GravityLinux/linux/commit/42efdd3e653f6eaf839f9d3cb06ac24af28aa359",
+      "head": "42efdd3e653f6eaf839f9d3cb06ac24af28aa359",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0006-PCI-apple-Integrate-pwrctrl-API.patch",
+      "sha256": "317cc4ac45f5736f41d74e29e22298521cc4cd838feb685c2ce9e6f2cacc8a69",
+      "upstream": "https://github.com/GravityLinux/linux/commit/de08843902c40706ae6ef57e910aef7e80fadc0d",
+      "head": "de08843902c40706ae6ef57e910aef7e80fadc0d",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0007-t8132-wifi-pwren.patch",
+      "sha256": "52155c1553602a897473bee02b6974bf99f506be3a3bad13b5e4afb63a5d4f8e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/bdafece9eddb4f6c107448f85671f5bec6baadf9",
+      "head": "bdafece9eddb4f6c107448f85671f5bec6baadf9",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0008-dt-bindings-nvme-Add-apple-t8132-nvme-ans2-compatibl.patch",
+      "sha256": "9af1618f6f24cb852a5359bdd7b656ae013d277f64c90d4d3834e303a5ffba7e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/6d5a5c6cbc14d23cf595183ff81286d7fac31ddc",
+      "head": "6d5a5c6cbc14d23cf595183ff81286d7fac31ddc",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0009-nvme-apple-add-t8132-M4-ANS2-NVMe-support.patch",
+      "sha256": "f9e3bccd8af9544368785175137275369f9b7135602d7160948cbd292d426447",
+      "upstream": "https://github.com/GravityLinux/linux/commit/8178b0adc2143b3ba2d77c788f19e45a4c9a3ede",
+      "head": "8178b0adc2143b3ba2d77c788f19e45a4c9a3ede",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0010-arm64-dts-apple-t8132-Add-NVMe-nodes.patch",
+      "sha256": "d8113856f5016742a9c421eadd76198c3aa61794aa101fd94080d99450a8c66c",
+      "upstream": "https://github.com/GravityLinux/linux/commit/79b86cbb447349043f626b43d03027556c28c840",
+      "head": "79b86cbb447349043f626b43d03027556c28c840",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0011-drm-apple-bring-up-T8132-DCP-hotplug.patch",
+      "sha256": "cc4f9abaf5c877a1c826c0ab6dca73d6a88343052491fbadafbd760e5a998f2b",
+      "upstream": "https://github.com/GravityLinux/linux/commit/877c574dfa4f31434129b05da6d907abfb21bbef",
+      "head": "877c574dfa4f31434129b05da6d907abfb21bbef",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0012-drm-apple-bring-up-T8132-HDMI-audio.patch",
+      "sha256": "6251ef5393f654d17ccc032dcb2c539ad2dbd89e65fd1111fbf524718cead5a3",
+      "upstream": "https://github.com/GravityLinux/linux/commit/49045c3465d21bec855666831e927edf4b3da1cf",
+      "head": "49045c3465d21bec855666831e927edf4b3da1cf",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0013-drm-apple-add-writable-DPTX-HPD-debug-control.patch",
+      "sha256": "64acbc642037b08d54faa138be9f24288cdc6cb62ab993670c4235607660df1a",
+      "upstream": "https://github.com/GravityLinux/linux/commit/c23269c95cbdcb9f05dc6844c1d71b233a42dd8f",
+      "head": "c23269c95cbdcb9f05dc6844c1d71b233a42dd8f",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0014-KVM-arm64-Add-Apple-M4-Donan-to-broken-SEIS-workarou.patch",
+      "sha256": "ce2e4a052716662b7b50a7046570a01b7d8f8d4ceefe4b95cc1776240a0773a5",
+      "upstream": "https://github.com/GravityLinux/linux/commit/5964a02f144628ae1840a083ce683e4cc2926854",
+      "head": "5964a02f144628ae1840a083ce683e4cc2926854",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0015-arm64-dts-apple-enable-the-T8132-Mac-mini-SSD.patch",
+      "sha256": "483ec20259e27a8c12889c418dee241c51880a604ff383cba42c129b89e53bd0",
+      "upstream": "https://github.com/GravityLinux/linux/commit/b8d4a99bfec8046c99f2e391ab804d6677bcae44",
+      "head": "b8d4a99bfec8046c99f2e391ab804d6677bcae44",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0016-drm-asahi-add-asynchronous-M4-GPU-prototype-driver.patch",
+      "sha256": "4f57b5f93a43432f729faa5a3a02e4e9767622adca2736c102ef7b7b57649286",
+      "upstream": "https://github.com/GravityLinux/linux/commit/bd25d194b0a295a75692a0e6caed3793603b9e65",
+      "head": "bd25d194b0a295a75692a0e6caed3793603b9e65",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0017-drm-asahi-simplify-M4-validation-and-firmware-encode.patch",
+      "sha256": "ba866e215ce6ed476e7372e54791aa5a4d7adf5534f7e78049151758b5de2b5e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/47140964b7f3249a852a82c86b58bd7e7c17b143",
+      "head": "47140964b7f3249a852a82c86b58bd7e7c17b143",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0018-drm-asahi-batch-M4-memory-publication-and-clean-only.patch",
+      "sha256": "304a12c984eb18811429075365d196312035a035a157e7bfacbb0a4bdd21fb28",
+      "upstream": "https://github.com/GravityLinux/linux/commit/e1a4f50d0fe3ffcb62c2807a8a87e9fd278080c9",
+      "head": "e1a4f50d0fe3ffcb62c2807a8a87e9fd278080c9",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0019-drm-asahi-enable-local-indirect-compute-on-M4.patch",
+      "sha256": "051b5d731c2c04cd6e8f32da1bfa68a4d30d7bcf8c0c44da538407d9a10cc7cc",
+      "upstream": "https://github.com/GravityLinux/linux/commit/2338f7c84c461fc91b37dc728ae8a01379ab9339",
+      "head": "2338f7c84c461fc91b37dc728ae8a01379ab9339",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0020-drm-asahi-pipeline-M4-firmware-submissions-and-retir.patch",
+      "sha256": "1902ef9f76c3fa32483e48b82763c0f41479288c7c288dbe3cc2203d044cbc35",
+      "upstream": "https://github.com/GravityLinux/linux/commit/542c48f2d6c84d0cdb64769e5c8ff4932ed0624f",
+      "head": "542c48f2d6c84d0cdb64769e5c8ff4932ed0624f",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0021-drm-asahi-give-M4-userspace-queues-independent-firmw.patch",
+      "sha256": "71a19d389688698fc82fb47423980bd919022e5dbcb1b4751657e37310988180",
+      "upstream": "https://github.com/GravityLinux/linux/commit/6e3b4af97495528e9a838444ea5008b0e5b013f2",
+      "head": "6e3b4af97495528e9a838444ea5008b0e5b013f2",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0022-drm-asahi-retire-M4-work-on-firmware-notifications.patch",
+      "sha256": "b32e0b67d312995e03bf4d76720118ff79abe82f4aa5dc5216a0d1c127507a20",
+      "upstream": "https://github.com/GravityLinux/linux/commit/dc55a9529787b79a5dce587e5bb19e8a418ca0d8",
+      "head": "dc55a9529787b79a5dce587e5bb19e8a418ca0d8",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0023-drm-asahi-pipeline-M4-engines-with-independent-resou.patch",
+      "sha256": "8cb694c4076fbf7108bb381e7867d677e4c6344a37f9feda0b9b4ae4b2d81a81",
+      "upstream": "https://github.com/GravityLinux/linux/commit/037892793e680ef6783f2a12352fb687a0cdb33c",
+      "head": "037892793e680ef6783f2a12352fb687a0cdb33c",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0024-drm-asahi-batch-M4-submissions-and-scope-mapping-syn.patch",
+      "sha256": "ba1d59b134701797207bded215c00c7cf5a5fa91b0054f4c51c111d5692bb7b1",
+      "upstream": "https://github.com/GravityLinux/linux/commit/4f7fe10829db4fb7d0a2601d7981b8b929b9dbf7",
+      "head": "4f7fe10829db4fb7d0a2601d7981b8b929b9dbf7",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0025-drm-asahi-queue-M4-dependencies-in-firmware-and-shar.patch",
+      "sha256": "36b7c41bade7d27daa06486aca7deaeae771e41a8fb78c652c2f75c5805492d2",
+      "upstream": "https://github.com/GravityLinux/linux/commit/038dab903d3ee943199d6b87830aa53df23b889f",
+      "head": "038dab903d3ee943199d6b87830aa53df23b889f",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0026-drm-asahi-index-M4-memory-and-queue-pending-cache-cl.patch",
+      "sha256": "a276b16459b652c47e35b9c8ba08bf02311572cd8453dcf13ed4b085e1b99c8a",
+      "upstream": "https://github.com/GravityLinux/linux/commit/74e2713772ee4fa90e47551741276a4e0aa9cd6a",
+      "head": "74e2713772ee4fa90e47551741276a4e0aa9cd6a",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0027-drm-asahi-reuse-M4-Work-and-scratch-after-notifier-r.patch",
+      "sha256": "4e4202b2d6464146f6bed934e491ea091670e9b810a4571ad97061dfb38a7047",
+      "upstream": "https://github.com/GravityLinux/linux/commit/eb68e9220f87a6208c7581a50f88373973fccf15",
+      "head": "eb68e9220f87a6208c7581a50f88373973fccf15",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0028-drm-asahi-enable-native-M4-render-scheduling-and-sha.patch",
+      "sha256": "d9baf59e5d19d1575cf1572dbdaaef3dc96f0059fcef7c4b330b46940372db4a",
+      "upstream": "https://github.com/GravityLinux/linux/commit/d3ed57579b19fbcc4a1d35da9d89194e8505016a",
+      "head": "d3ed57579b19fbcc4a1d35da9d89194e8505016a",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0029-drm-asahi-adapt-M4-to-the-desktop-kernel.patch",
+      "sha256": "4a312ad2882368f1eeeeb1f9978a5d4556d3d140b2463bf2e6e234559e7242b7",
+      "upstream": "https://github.com/GravityLinux/linux/commit/c41b69fe9a3a6cdd9efe7697efa69a40eba17c83",
+      "head": "c41b69fe9a3a6cdd9efe7697efa69a40eba17c83",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0030-drm-asahi-retire-M4-GEM-mappings-when-handles-close.patch",
+      "sha256": "4eebcc5b657c61a33a231cc29e4dc4a889430c8d02c62484cd6ff9a8ead855f3",
+      "upstream": "https://github.com/GravityLinux/linux/commit/63e8a1d7268ca75c32b9bde543d3b4f6e59d6a75",
+      "head": "63e8a1d7268ca75c32b9bde543d3b4f6e59d6a75",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0031-drm-asahi-report-pending-M4-work-on-unowned-firmware.patch",
+      "sha256": "28424843180af6e116c09b389df679de498a49a6423d1dd27379b85250b3571c",
+      "upstream": "https://github.com/GravityLinux/linux/commit/2a8d511f64eaf70aa1099ac352e4a9e95d8418e5",
+      "head": "2a8d511f64eaf70aa1099ac352e4a9e95d8418e5",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0032-drm-asahi-wire-M4-GPU-into-the-T8132-desktop-platfor.patch",
+      "sha256": "e36053927a5a117435ed46b4eefba29f04e6a5291d25c46b5e4217bb0d6c9f96",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3a2ad760d7316813f37c0ddc653ef783827f855b",
+      "head": "3a2ad760d7316813f37c0ddc653ef783827f855b",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0033-drm-asahi-share-software-floating-point-with-the-M4-.patch",
+      "sha256": "4cdeebb6fa127d63cfadbd6d153955db5f378f29ebfc0bbe0d6895d3f232b276",
+      "upstream": "https://github.com/GravityLinux/linux/commit/11b95e898731a2a17971db899b1fa88002430bc7",
+      "head": "11b95e898731a2a17971db899b1fa88002430bc7",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0034-drm-asahi-handle-M4-firmware-counter-rollover.patch",
+      "sha256": "35ed24bf183ad8bc1f20bb7604b4f937bbb16e3d1c6af63503df836d9b4fed30",
+      "upstream": "https://github.com/GravityLinux/linux/commit/1ab42a3a62f629b08cb874bf19f49a990e8c764b",
+      "head": "1ab42a3a62f629b08cb874bf19f49a990e8c764b",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0035-drm-asahi-report-the-M4-GPU-revision-from-hardware.patch",
+      "sha256": "f6d31bf16bb125c8d6520467e6b4378040c83ca1878a3ce5cf126da4909b7e34",
+      "upstream": "https://github.com/GravityLinux/linux/commit/7c3d0bb604fe641d62577bd6276e50e5b3cc7754",
+      "head": "7c3d0bb604fe641d62577bd6276e50e5b3cc7754",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0036-drm-asahi-release-M4-buffer-backing-after-VM-unmap.patch",
+      "sha256": "fb83e6a8d53fafe84cc1661062fca531a0c9b9530220fdb9f216a2c26806e515",
+      "upstream": "https://github.com/GravityLinux/linux/commit/9807df349e5c8903f81a25c24c1fc72a523d2e10",
+      "head": "9807df349e5c8903f81a25c24c1fc72a523d2e10",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0037-drm-asahi-restore-the-M4-128-KiB-tile-memory-limit.patch",
+      "sha256": "0186f0d5885eaedf67f27f62d1ae0360b881524e67a2d0bb9117c5c7bf90affd",
+      "upstream": "https://github.com/GravityLinux/linux/commit/7af0f6c3789eb6393bfd56052a4b0fa34daa67ea",
+      "head": "7af0f6c3789eb6393bfd56052a4b0fa34daa67ea",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0038-drm-asahi-support-fragment-stage-render-barriers-on-.patch",
+      "sha256": "ee7568b9865cfbd120cdf902d929851e2fd9eef7728750e142e882b6c5a9ceb8",
+      "upstream": "https://github.com/GravityLinux/linux/commit/84462e19ddcddd04ac37e01ecbf25602f2d64d5c",
+      "head": "84462e19ddcddd04ac37e01ecbf25602f2d64d5c",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0039-drm-asahi-grow-M4-tiler-backing-from-a-shared-VM-are.patch",
+      "sha256": "5da096a9a043f7967bb2ed6753c625ad99c6279cd50dd3d5b6494e38fe78fa89",
+      "upstream": "https://github.com/GravityLinux/linux/commit/e9ebd9e130f607e35d872e33caec694efefa41c0",
+      "head": "e9ebd9e130f607e35d872e33caec694efefa41c0",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0040-drm-apple-recognize-the-26.6.2-DCP-firmware-compatib.patch",
+      "sha256": "5f620f164e7764e4cb6fdaa09e54c6b9a45c38366c161219b792f4378c56edb8",
+      "upstream": "https://github.com/GravityLinux/linux/commit/e4be873f328281453483f19e0967962f97e95c9b",
+      "head": "e4be873f328281453483f19e0967962f97e95c9b",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0041-drm-apple-support-fragmented-compact-AFK-messages.patch",
+      "sha256": "1cc14236b2ad6ca4c5c68e3a9a9492e8136daa3baeaa1e5aa1d3a6993b2c88f2",
+      "upstream": "https://github.com/GravityLinux/linux/commit/4594b476b50f46be8b709aa23692ec31e5995778",
+      "head": "4594b476b50f46be8b709aa23692ec31e5995778",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0042-drm-apple-fetch-and-validate-complete-DCP-audio-capa.patch",
+      "sha256": "dc652abc91ff73b435ef41fbcc52d3bdcf96eec28b9123c3d4306c2096befbdc",
+      "upstream": "https://github.com/GravityLinux/linux/commit/d4af0c461f92dfec8a43a375d2a8fe26ee2499e3",
+      "head": "d4af0c461f92dfec8a43a375d2a8fe26ee2499e3",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0043-drm-apple-constrain-PCM-formats-to-the-retained-T813.patch",
+      "sha256": "c8fdd4df0e9c652bac9094b4f15c389c30cc517b4551c9bb8fdfd0fdc001c11e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/b149b30f74f42b00b1a84125e4cfbecd02916bde",
+      "head": "b149b30f74f42b00b1a84125e4cfbecd02916bde",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0044-dt-bindings-iommu-apple-dart-describe-the-usable-DMA.patch",
+      "sha256": "1d29b766737d6ee57f44779adc9f47f514013bcf31da1adf6e1aac5ccfe93d53",
+      "upstream": "https://github.com/GravityLinux/linux/commit/0c693e069b6452dfa5ab1a4f64f4052cd424999f",
+      "head": "0c693e069b6452dfa5ab1a4f64f4052cd424999f",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0045-dmaengine-apple-admac-support-T8132-split-channel-ba.patch",
+      "sha256": "5df42d2bd924b44cd6202763be805dc8d229c0f332fab107522fa492e7378af6",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3f7b289b5804b9fcff2781f9f29d9cb1f9e756d6",
+      "head": "3f7b289b5804b9fcff2781f9f29d9cb1f9e756d6",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0046-ASoC-apple-mca-support-the-T8132-banked-TX-path.patch",
+      "sha256": "9e2b2a55c712765592b76612aa2850577bf7f7baa988f074274ba617bde9b6ca",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3abcc2c929f5919372db6ea5b7c2f53c5653cc9a",
+      "head": "3abcc2c929f5919372db6ea5b7c2f53c5653cc9a",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0047-ASoC-tas2764-add-fail-closed-protected-attenuation-h.patch",
+      "sha256": "94f74866dd1cbc83dc42a0cebc618bbc1f5ee05d43480882b61bee8eacf49bf2",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3d8f93470eb83dd98ca6acb1ee54dab7fc39cad8",
+      "head": "3d8f93470eb83dd98ca6acb1ee54dab7fc39cad8",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0048-ASoC-apple-add-kernel-protected-J773g-speaker-playba.patch",
+      "sha256": "8143c24e7ab3da7c3b4d065e3a5ffe89418fc4aad648c0b833d7f9e11bd91e84",
+      "upstream": "https://github.com/GravityLinux/linux/commit/9cec671477e6916dbcfaca1b6dc9046e62b65cdb",
+      "head": "9cec671477e6916dbcfaca1b6dc9046e62b65cdb",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0049-arm64-dts-apple-add-T8132-audio-controllers-and-powe.patch",
+      "sha256": "4fb18c4917eedcf3665f9cb89830358150dc06b4071b8c508f467bb361aaf9eb",
+      "upstream": "https://github.com/GravityLinux/linux/commit/bab8e9680feebe913b6e39c0b85199af630521ed",
+      "head": "bab8e9680feebe913b6e39c0b85199af630521ed",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0050-arm64-dts-apple-enable-the-J773g-internal-speaker.patch",
+      "sha256": "6970f9fd68b5664e61f6dc06984bd6b77e23bd6a03287fa30a09e47b48c9ca8e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/497a835b7ccf0637041aa886954dba4cacbbd063",
+      "head": "497a835b7ccf0637041aa886954dba4cacbbd063",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0051-arm64-dts-apple-use-the-display-FE-domain-for-J773g-.patch",
+      "sha256": "3520f46b8985a9869593d257f1eeaf080da2f1f76c5dc2b1e09b6f8a33c2c086",
+      "upstream": "https://github.com/GravityLinux/linux/commit/1c374608abd47b59d47faae30a4e4bb447fffab0",
+      "head": "1c374608abd47b59d47faae30a4e4bb447fffab0",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0052-Bluetooth-hci_bcm4377-require-only-beamforming-calib.patch",
+      "sha256": "8e1d01961ceb278d060269f38bafc4632f2bc362f244a00f7293ee3bfbaa5673",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3cd0faa9ba07cc520c8e57bc5342d59660313753",
+      "head": "3cd0faa9ba07cc520c8e57bc5342d59660313753",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0053-ASoC-apple-t8132-rely-on-ALSA-for-underrun-stopping.patch",
+      "sha256": "4ed3f2a9111b7ea2108945ea3bf7e5014daa6d79e99601f2e9b03181e182a25c",
+      "upstream": "https://github.com/GravityLinux/linux/commit/843350e1ee5ccc5e3959e8e8c7b97a25d370fc9b",
+      "head": "843350e1ee5ccc5e3959e8e8c7b97a25d370fc9b",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0054-drm-apple-dcp-match-26.6.0-firmware-compatibility-st.patch",
+      "sha256": "0e1a5fffa900ef84a0d2c4fafad4d9b489f81ad7cdc268c3679eaf2190f9ea15",
+      "upstream": "https://github.com/GravityLinux/linux/commit/7b9ba99a50084ce5bf19a4e07a29f68269c39856",
+      "head": "7b9ba99a50084ce5bf19a4e07a29f68269c39856",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0055-ASoC-apple-t8132-remove-the-codec-speaker-volume-con.patch",
+      "sha256": "f6d0691e5652386b9c3ccd8adcedd4d7e54c3927e6bb3991fd62b7907e6ef45d",
+      "upstream": "https://github.com/GravityLinux/linux/commit/d45c71e4b0404e9eced41f5bdfe9a289c9835364",
+      "head": "d45c71e4b0404e9eced41f5bdfe9a289c9835364",
+      "applies_cleanly_to_aurora_m4": true
+    },
+    {
+      "file": "0056-drm-apple-select-T8132-DCP-protocol-from-exact-OS-fi.patch",
+      "sha256": "4e0fa0e5f07b075ac228caa4519f3b123a17c421f03e5dfd3e0e24009f534b02",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3c08d26a0bd084e462ddc97d2587e0e6840a404f",
+      "head": "3c08d26a0bd084e462ddc97d2587e0e6840a404f",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0057-Add-MacBook-Air-M4-MTP-keyboard-trackpad-support.patch",
+      "sha256": "5c5bba0f6c483eab6c18165e200855f68586fe8d61fc462643b391989ef27950",
+      "upstream": "https://github.com/GravityLinux/linux/commit/3f56fba5e1c3fec817f8d4b981adef174fca35dd",
+      "head": "3f56fba5e1c3fec817f8d4b981adef174fca35dd",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0058-HID-dockchannel-retain-BUG_ON-removal-and-defer-tear.patch",
+      "sha256": "5e79eb8841d87d5884e776c94b4f0f3b9897e970bf423181661befc08bf6871e",
+      "upstream": "https://github.com/GravityLinux/linux/commit/bd7b318d7b28dcdb4d79c39c674455ecf114fd4b",
+      "head": "bd7b318d7b28dcdb4d79c39c674455ecf114fd4b",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0059-HID-dockchannel-use-native-LE-protocol-fields.patch",
+      "sha256": "33aeb0f23b9d30056f01a3140fcbf673dc94378064e8ec794b700ed3a9bcd609",
+      "upstream": "https://github.com/GravityLinux/linux/commit/313226188dd16719d8bd678ae6bc8921bcaacd38",
+      "head": "313226188dd16719d8bd678ae6bc8921bcaacd38",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0060-HID-dockchannel-preserve-baseline-command-and-failur.patch",
+      "sha256": "f84adfebec5cd2032a1f5c1910be692a95f824a97606784f77d45be126ec4592",
+      "upstream": "https://github.com/GravityLinux/linux/commit/2d1c2b55e0feb971ad3a98e9616db6e28c2ad6a6",
+      "head": "2d1c2b55e0feb971ad3a98e9616db6e28c2ad6a6",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0061-HID-dockchannel-retain-baseline-firmware-allocation-.patch",
+      "sha256": "f418d6476170c8fcbed7709d2dd42a448882cf6b79358f8365a959b6dd8bfc9d",
+      "upstream": "https://github.com/GravityLinux/linux/commit/ba7b4a7e394d618b34cf0e32179deeef0d8f3dd4",
+      "head": "ba7b4a7e394d618b34cf0e32179deeef0d8f3dd4",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0062-HID-dockchannel-leave-legacy-parsing-and-GPIO-discov.patch",
+      "sha256": "f7ec5d73cd9c279a7a26f3f1d01a025dcef75d79a86107fa86dc87f0d835003d",
+      "upstream": "https://github.com/GravityLinux/linux/commit/d93489134413cfe54f028a018a5faf9d442b9387",
+      "head": "d93489134413cfe54f028a018a5faf9d442b9387",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0063-HID-dockchannel-retain-FIFO-reads-and-baseline-packe.patch",
+      "sha256": "a3c38bfe20b2d70c4769eec0d2bd394f1c462f75ee1ae2e4f32a1675f076a314",
+      "upstream": "https://github.com/GravityLinux/linux/commit/a48a449524c4ac507c90c1598e5ee2b35d1e49a4",
+      "head": "a48a449524c4ac507c90c1598e5ee2b35d1e49a4",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0064-iommu-apple-dart-leave-existing-probe-power-cleanup-.patch",
+      "sha256": "b32061f111d62d491114006a9cc5b00ea5647c423bbc8ce7bb0c73a13ae56052",
+      "upstream": "https://github.com/GravityLinux/linux/commit/0c724f06f5bfdf68f1d253bffc6132261e512ecb",
+      "head": "0c724f06f5bfdf68f1d253bffc6132261e512ecb",
+      "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0065-drm-apple-bring-up-the-J715-internal-panel-on-firmwa.patch",
+      "sha256": "a19ce1f5af23e1d6a9f994acbdf5929b7eb35b24f636fb74e5f7d14217fea808",
+      "upstream": "https://github.com/GravityLinux/linux/commit/1a0bfae9821e08c59c9044b0a347ab12e545a4f4",
+      "head": "1a0bfae9821e08c59c9044b0a347ab12e545a4f4",
+      "applies_cleanly_to_aurora_m4": false
+    }
+  ]
+}

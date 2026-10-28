@@ -1,0 +1,123 @@
+From 843350e1ee5ccc5e3959e8e8c7b97a25d370fc9b Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Sat, 19 Sep 2026 02:38:26 -0400
+Subject: [PATCH] ASoC: apple: t8132: rely on ALSA for underrun stopping
+
+Remove the low-queue mute and recovery thresholds, which can mute healthy low-latency playback. Retain the STOP-trigger amplifier mute, replay and held-sample thermal accounting, and DMA-stall protection.
+
+Silent playback starvation testing confirmed that the normal ALSA DMA-period path initiates XRUN stop with the current PipeWire configuration. The driver compilation and adapted progress-accounting regression checks pass.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ sound/soc/apple/t8132/pcm.c      | 28 +++++++++-------------------
+ sound/soc/apple/t8132/progress.h |  6 +-----
+ 2 files changed, 10 insertions(+), 24 deletions(-)
+
+diff --git a/sound/soc/apple/t8132/pcm.c b/sound/soc/apple/t8132/pcm.c
+index c00a20354d95d..ea71f68d7d5da 100644
+--- a/sound/soc/apple/t8132/pcm.c
++++ b/sound/soc/apple/t8132/pcm.c
+@@ -50,10 +50,10 @@ struct j773g_audio {
+ 	struct snd_pcm_substream *stream;
+ 	struct thermal thermal;
+ 	struct progress progress;
+-	bool running, faulted, muted;
++	bool running, faulted;
+ 	const char *reason;
+ 	int volume;
+-	u64 held_frames, replay_frames, stalls, underruns, sumsq_total, preload_sumsq;
++	u64 held_frames, replay_frames, stalls, sumsq_total, preload_sumsq;
+ 	u32 slot_peak[MAX_SLOTS];
+ };
+ 
+@@ -105,28 +105,19 @@ static u64 speaker_position(struct snd_pcm_substream *s)
+ 	return fine < hw ? fine + rt->buffer_size : fine;
+ }
+ 
+-/* Charge playback the ring cannot explain, held or replayed samples, at the
+- * ring peak. A replayed ring is muted in hardware until the application is
+- * ahead again; the model keeps charging at the ceiling, so the register may
+- * move in either direction at any time. lock is held, stream running. */
++/* Charge held or replayed samples at the ring peak and volume ceiling.
++ * ALSA handles underrun stopping; the STOP trigger mutes the amplifier.
++ * lock is held, stream running. */
+ static void speaker_account(struct j773g_audio *a, u64 now)
+ {
+ 	struct snd_pcm_runtime *rt = a->stream->runtime;
+ 	u64 peak = speaker_peak(a);
+ 	struct progress_charge c = progress_account(&a->progress, now, speaker_position(a->stream),
+-						    READ_ONCE(rt->control->appl_ptr), FIFO_FRAMES,
+-						    rt->period_size);
++						    READ_ONCE(rt->control->appl_ptr), FIFO_FRAMES);
+ 
+ 	thermal_charge(&a->thermal, peak * peak * (c.held + c.replay));
+ 	a->held_frames += c.held;
+ 	a->replay_frames += c.replay;
+-	if (c.underrun && !a->muted) {
+-		a->underruns++;
+-		a->muted = true;
+-		audio_amp_set_dvc(AUDIO_AMP_MUTE);
+-	} else if (c.ahead && a->muted && !audio_amp_set_dvc(ceiling_dvc)) {
+-		a->muted = false;
+-	}
+ }
+ 
+ static void speaker_monitor(struct work_struct *work)
+@@ -243,7 +234,6 @@ static int speaker_trigger(struct snd_soc_component *component,
+ 			break;
+ 		}
+ 		a->stream = s;
+-		a->muted = false;
+ 		progress_start(&a->progress, now, speaker_position(s));
+ 		thermal_advance(&a->thermal, now);
+ 		/* The preloaded ring starts playing now. */
+@@ -480,11 +470,11 @@ static ssize_t state_show(struct device *dev, struct device_attribute *attr, cha
+ 
+ 	mutex_lock(&a->lock);
+ 	thermal_advance(t, ktime_get_ns());
+-	n = sysfs_emit(buf, "running=%u muted=%u faulted=%u reason=%s coil_mdeg=%lld magnet_mdeg=%lld attenuation=%u att_min=%u ceiling=%u p_ceiling_mw=%u p_max_mw=%u held_frames=%llu replay_frames=%llu stalls=%llu underruns=%llu sumsq=%llu peak=%u volume=%d hardware_dvc=%d\n",
+-		       a->running, a->muted, a->faulted, a->reason, div_s64(t->coil, 1000),
++	n = sysfs_emit(buf, "running=%u faulted=%u reason=%s coil_mdeg=%lld magnet_mdeg=%lld attenuation=%u att_min=%u ceiling=%u p_ceiling_mw=%u p_max_mw=%u held_frames=%llu replay_frames=%llu stalls=%llu sumsq=%llu peak=%u volume=%d hardware_dvc=%d\n",
++		       a->running, a->faulted, a->reason, div_s64(t->coil, 1000),
+ 		       div_s64(t->magnet, 1000), t->attenuation, t->att_min, ceiling_dvc,
+ 		       t->p_ceiling_mw, t->p_max_mw, a->held_frames, a->replay_frames, a->stalls,
+-		       a->underruns, a->sumsq_total, speaker_peak(a), a->volume, audio_amp_read_dvc());
++		       a->sumsq_total, speaker_peak(a), a->volume, audio_amp_read_dvc());
+ 	mutex_unlock(&a->lock);
+ 	return n;
+ }
+diff --git a/sound/soc/apple/t8132/progress.h b/sound/soc/apple/t8132/progress.h
+index c33c355798d71..6023f797a5a7a 100644
+--- a/sound/soc/apple/t8132/progress.h
++++ b/sound/soc/apple/t8132/progress.h
+@@ -32,7 +32,6 @@ struct progress {
+ 
+ struct progress_charge {
+ 	u64 held, replay;     /* frames to charge at the ring peak */
+-	bool underrun, ahead; /* fill below fifo; fill at least fifo + margin */
+ };
+ 
+ static inline void progress_start(struct progress *p, u64 now, u64 fine)
+@@ -44,8 +43,7 @@ static inline void progress_start(struct progress *p, u64 now, u64 fine)
+ }
+ 
+ static inline struct progress_charge progress_account(struct progress *p, u64 now, u64 fine,
+-						      u64 appl, unsigned int fifo,
+-						      unsigned int margin)
++						      u64 appl, unsigned int fifo)
+ {
+ 	struct progress_charge c = { 0 };
+ 	u64 expected = mul_u64_u64_div_u64(now - p->start_ns, PROGRESS_RATE, 1000000000ULL);
+@@ -59,8 +57,6 @@ static inline struct progress_charge progress_account(struct progress *p, u64 no
+ 		c.replay = fine + fifo - mark;
+ 		p->replay_mark = fine + fifo;
+ 	}
+-	c.underrun = fine + fifo > appl;
+-	c.ahead = appl >= fine + fifo + margin;
+ 	return c;
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

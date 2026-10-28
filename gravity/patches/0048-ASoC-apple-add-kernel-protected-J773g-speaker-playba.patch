@@ -1,0 +1,1091 @@
+From 9cec671477e6916dbcfaca1b6dc9046e62b65cdb Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Fri, 18 Sep 2026 03:08:36 -0400
+Subject: [PATCH] ASoC: apple: add kernel-protected J773g speaker playback
+
+Add the J773g machine driver on shared MCA, ADMAC and TAS2764 interfaces. Limit playback to mono 48 kHz S24_LE and attenuate and charge sample energy before copying into the DMA ring. Disable mmap and rewinds, and reserve gain controls for the protection policy.
+
+Maintain an integer coil/magnet thermal model across playback sessions, account for held and replayed samples, and monitor DMA progress and amplifier faults. Default the hardware ceiling to -10 dB and mute the amplifier while idle. Expose protection state through sysfs; no userspace protection daemon is required.
+
+Validation: driver objects build and binding schema validation passed. Thermal and progress host regressions pass under ASan/UBSan. Native kernel #109 passed PCM constraints, protected-control checks, underrun recovery, drain and repeated start/drop checks, plus quiet speaker playback. This does not establish a new physical speaker calibration.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Assisted-By: Claude Code (Claude Fable 5.1)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ .../bindings/sound/apple,j773g-speaker.yaml   |  34 +
+ sound/soc/apple/Kconfig                       |  19 +
+ sound/soc/apple/Makefile                      |   2 +
+ sound/soc/apple/t8132/Makefile                |   3 +
+ sound/soc/apple/t8132/amplifier.c             |  42 ++
+ sound/soc/apple/t8132/pcm.c                   | 584 ++++++++++++++++++
+ sound/soc/apple/t8132/playback.h              |   7 +
+ sound/soc/apple/t8132/progress.h              |  76 +++
+ sound/soc/apple/t8132/thermal.h               | 229 +++++++
+ 9 files changed, 996 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/sound/apple,j773g-speaker.yaml
+ create mode 100644 sound/soc/apple/t8132/Makefile
+ create mode 100644 sound/soc/apple/t8132/amplifier.c
+ create mode 100644 sound/soc/apple/t8132/pcm.c
+ create mode 100644 sound/soc/apple/t8132/playback.h
+ create mode 100644 sound/soc/apple/t8132/progress.h
+ create mode 100644 sound/soc/apple/t8132/thermal.h
+
+diff --git a/Documentation/devicetree/bindings/sound/apple,j773g-speaker.yaml b/Documentation/devicetree/bindings/sound/apple,j773g-speaker.yaml
+new file mode 100644
+index 0000000000000..536ff99b0db09
+--- /dev/null
++++ b/Documentation/devicetree/bindings/sound/apple,j773g-speaker.yaml
+@@ -0,0 +1,34 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/sound/apple,j773g-speaker.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Apple J773g internal speaker
++
++maintainers:
++  - Niklas Sheth <hi@niklassheth.com>
++
++description: |
++  Mono internal speaker on the M4 Mac mini, using MCA TX0 and an SN012776
++  amplifier. The machine driver limits playback with an in-kernel thermal model while
++  MCA, ADMAC, DART and TAS2764 provide the hardware interfaces.
++
++properties:
++  compatible:
++    const: apple,j773g-speaker
++
++  apple,mca:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: MCA controller carrying the internal speaker on TX0.
++
++  apple,codec:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: SN012776 amplifier on the speaker I2C bus.
++
++required:
++  - compatible
++  - apple,mca
++  - apple,codec
++
++additionalProperties: false
+diff --git a/sound/soc/apple/Kconfig b/sound/soc/apple/Kconfig
+index eac1b416d2bd6..a6c88dd80fead 100644
+--- a/sound/soc/apple/Kconfig
++++ b/sound/soc/apple/Kconfig
+@@ -37,4 +37,23 @@ config SND_SOC_APPLE_MACAUDIO
+ 	  and it also enables the required SoC and codec drivers for overall
+ 	  sound support on these machines.
+ 
++config SND_SOC_APPLE_T8132_SPEAKER
++	tristate "Experimental T8132 Mac mini internal speaker"
++	depends on ARCH_APPLE && ARM64_16K_PAGES && I2C && GPIOLIB && OF
++	depends on DMADEVICES
++	select SND_PCM
++	select SND_SOC_APPLE_MCA
++	select SND_SOC_TAS2764
++	select APPLE_ADMAC
++	help
++	  Fixed-format J773g internal-speaker playback with an in-kernel
++	  voice-coil thermal model. Samples are attenuated and their energy
++	  is charged before they reach the DMA ring, so no userspace daemon
++	  or V/I feedback is needed. The amplifier is held at a hardware
++	  ceiling set by the ceiling_dvc module parameter.
++
++	  Uses the shared MCA, ADMAC, DART and TAS2764 drivers with J773g
++	  routing and protected PCM copies. This driver can be built into
++	  the kernel or as the snd-t8132-speaker module.
++
+ endmenu
+diff --git a/sound/soc/apple/Makefile b/sound/soc/apple/Makefile
+index 9e6f245f934b8..de8c90ab5aca2 100644
+--- a/sound/soc/apple/Makefile
++++ b/sound/soc/apple/Makefile
+@@ -10,3 +10,5 @@ obj-$(CONFIG_SND_SOC_APPLE_MCA)	+= snd-soc-apple-mca.o
+ snd-soc-macaudio-objs	:= macaudio.o
+ 
+ obj-$(CONFIG_SND_SOC_APPLE_MACAUDIO)	+= snd-soc-macaudio.o
++
++obj-$(CONFIG_SND_SOC_APPLE_T8132_SPEAKER) += t8132/
+diff --git a/sound/soc/apple/t8132/Makefile b/sound/soc/apple/t8132/Makefile
+new file mode 100644
+index 0000000000000..b14334f52711a
+--- /dev/null
++++ b/sound/soc/apple/t8132/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_SND_SOC_APPLE_T8132_SPEAKER) += snd-t8132-speaker.o
++snd-t8132-speaker-y := pcm.o amplifier.o
+diff --git a/sound/soc/apple/t8132/amplifier.c b/sound/soc/apple/t8132/amplifier.c
+new file mode 100644
+index 0000000000000..c3942a3eeae53
+--- /dev/null
++++ b/sound/soc/apple/t8132/amplifier.c
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Board protection policy; amplifier lifecycle belongs to the TAS2764 codec. */
++#include <linux/mutex.h>
++#include <sound/soc.h>
++#include "../../codecs/tas2764.h"
++#include "playback.h"
++
++static DEFINE_MUTEX(amp_lock);
++static struct snd_soc_component *amp;
++
++int audio_amp_bind(struct snd_soc_component *component)
++{
++	amp = component;
++	return audio_amp_set_dvc(AUDIO_AMP_MUTE);
++}
++
++int audio_amp_set_dvc(unsigned int dvc)
++{
++	int ret;
++
++	if (dvc > AUDIO_AMP_MUTE)
++		return -EINVAL;
++	mutex_lock(&amp_lock);
++	ret = tas2764_set_protected_attenuation(amp, dvc);
++	mutex_unlock(&amp_lock);
++	return ret;
++}
++
++int audio_amp_read_dvc(void)
++{
++	int ret;
++
++	mutex_lock(&amp_lock);
++	ret = tas2764_get_protected_attenuation(amp);
++	mutex_unlock(&amp_lock);
++	return ret;
++}
++
++int audio_amp_check_fault(void)
++{
++	return tas2764_check_fault(amp);
++}
+diff --git a/sound/soc/apple/t8132/pcm.c b/sound/soc/apple/t8132/pcm.c
+new file mode 100644
+index 0000000000000..c00a20354d95d
+--- /dev/null
++++ b/sound/soc/apple/t8132/pcm.c
+@@ -0,0 +1,584 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* J773g machine routing, protected PCM copies and in-kernel speaker limiting. */
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/uio.h>
++#include <linux/vmalloc.h>
++#include <linux/workqueue.h>
++#include <sound/soc.h>
++#include <sound/pcm_params.h>
++#include <sound/dmaengine_pcm.h>
++#include "../../codecs/tas2764.h"
++#include "playback.h"
++#include "thermal.h"
++#include "progress.h"
++
++#define SPEAKER_FMT (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_IF | SND_SOC_DAIFMT_CBC_CFC)
++#define MONITOR_MS 20
++#define MAX_BUFFER_FRAMES 8192 /* 32 KiB of mono S24 in 32 bits */
++#define MAX_PERIOD_FRAMES 1024
++#define MAX_SLOTS (MAX_BUFFER_FRAMES / 256)
++#define FIFO_FRAMES 512 /* ADMAC 2 KiB per-channel carveout */
++#define STALL_FAULT_FRAMES 4800 /* deficit growth within the history window: 100 ms */
++/* A charged sample plays within one ring, the FIFO and a monitor tick. */
++#define DELIVERY_NS ((MAX_BUFFER_FRAMES + FIFO_FRAMES + 960) * (NSEC_PER_SEC / THERMAL_RATE))
++/* A held sample keeps playing until the deficit growth is seen at a tick,
++ * with a tick of jitter, plus the FIFO it can hide in and the I2C mute. */
++#define STALL_FRAMES (STALL_FAULT_FRAMES + 2 * 960 + FIFO_FRAMES + 240)
++
++static unsigned int ceiling_dvc = 20;
++module_param(ceiling_dvc, uint, 0444);
++MODULE_PARM_DESC(ceiling_dvc, "TAS2764 digital volume ceiling in half-dB steps (default 20, -10 dB)");
++static unsigned int full_scale_mv = 17000;
++module_param(full_scale_mv, uint, 0444);
++MODULE_PARM_DESC(full_scale_mv, "Assumed peak amplifier output at digital full scale and DVC 0");
++static unsigned int resistance_mohm = 4000;
++module_param(resistance_mohm, uint, 0444);
++MODULE_PARM_DESC(resistance_mohm, "Assumed minimum speaker resistance");
++static unsigned int power_margin_pct = 200;
++module_param(power_margin_pct, uint, 0444);
++MODULE_PARM_DESC(power_margin_pct, "Multiplier on the electrical power bound, percent");
++
++struct j773g_audio {
++	struct snd_soc_card card;
++	struct snd_soc_dai_link links[2];
++	struct snd_soc_dai_link_component cpus[2], codecs[2], platforms[2];
++	struct mutex lock;
++	struct delayed_work monitor;
++	struct snd_pcm_substream *stream;
++	struct thermal thermal;
++	struct progress progress;
++	bool running, faulted, muted;
++	const char *reason;
++	int volume;
++	u64 held_frames, replay_frames, stalls, underruns, sumsq_total, preload_sumsq;
++	u32 slot_peak[MAX_SLOTS];
++};
++
++static struct j773g_audio *speaker_data(struct snd_soc_component *component)
++{
++	return dev_get_drvdata(component->dev);
++}
++
++/* lock is held for everything below that touches the ring or the model. */
++static u32 speaker_slot_peak(struct snd_pcm_runtime *rt, unsigned int slot)
++{
++	const s32 *ring = (const s32 *)rt->dma_area + slot * rt->period_size;
++	u32 peak = 0;
++	unsigned int i;
++
++	for (i = 0; i < rt->period_size; i++)
++		peak = max_t(u32, peak, abs((s32)le32_to_cpu(ring[i])));
++	return peak;
++}
++
++static u32 speaker_peak(struct j773g_audio *a)
++{
++	struct snd_pcm_runtime *rt = a->stream ? a->stream->runtime : NULL;
++	u32 peak = 0;
++	unsigned int i;
++
++	if (rt)
++		for (i = 0; i < rt->buffer_size / rt->period_size; i++)
++			peak = max(peak, a->slot_peak[i]);
++	return peak;
++}
++
++static void speaker_fault(struct j773g_audio *a, const char *reason)
++{
++	a->faulted = true;
++	a->reason = reason;
++	audio_amp_set_dvc(AUDIO_AMP_MUTE);
++}
++
++/* Burst-granular DMA fetch position on the monotonic hw_ptr lap. The status
++ * pointer is at most one period stale, so the fresh position is ahead of it
++ * by less than one ring. */
++static u64 speaker_position(struct snd_pcm_substream *s)
++{
++	struct snd_pcm_runtime *rt = s->runtime;
++	u64 hw = READ_ONCE(rt->status->hw_ptr);
++	u64 fine = hw - hw % rt->buffer_size + snd_dmaengine_pcm_pointer(s);
++
++	return fine < hw ? fine + rt->buffer_size : fine;
++}
++
++/* Charge playback the ring cannot explain, held or replayed samples, at the
++ * ring peak. A replayed ring is muted in hardware until the application is
++ * ahead again; the model keeps charging at the ceiling, so the register may
++ * move in either direction at any time. lock is held, stream running. */
++static void speaker_account(struct j773g_audio *a, u64 now)
++{
++	struct snd_pcm_runtime *rt = a->stream->runtime;
++	u64 peak = speaker_peak(a);
++	struct progress_charge c = progress_account(&a->progress, now, speaker_position(a->stream),
++						    READ_ONCE(rt->control->appl_ptr), FIFO_FRAMES,
++						    rt->period_size);
++
++	thermal_charge(&a->thermal, peak * peak * (c.held + c.replay));
++	a->held_frames += c.held;
++	a->replay_frames += c.replay;
++	if (c.underrun && !a->muted) {
++		a->underruns++;
++		a->muted = true;
++		audio_amp_set_dvc(AUDIO_AMP_MUTE);
++	} else if (c.ahead && a->muted && !audio_amp_set_dvc(ceiling_dvc)) {
++		a->muted = false;
++	}
++}
++
++static void speaker_monitor(struct work_struct *work)
++{
++	struct j773g_audio *a = container_of(to_delayed_work(work), struct j773g_audio, monitor);
++	struct snd_pcm_substream *stop = NULL;
++	u64 now = ktime_get_ns();
++
++	mutex_lock(&a->lock);
++	if (!a->running)
++		goto out;
++	thermal_advance(&a->thermal, now);
++	speaker_account(a, now);
++	if (progress_tick(&a->progress, STALL_FAULT_FRAMES)) {
++		/* Silence before stopping: a stalled serializer holds its sample. */
++		a->stalls++;
++		a->reason = "dma-stall";
++		audio_amp_set_dvc(AUDIO_AMP_MUTE);
++		stop = a->stream;
++	} else if (audio_amp_check_fault()) {
++		speaker_fault(a, "amp-fault");
++		stop = a->stream;
++	} else {
++		thermal_admit(&a->thermal, 0, 0, speaker_peak(a), 0);
++		schedule_delayed_work(&a->monitor, msecs_to_jiffies(MONITOR_MS));
++	}
++out:
++	mutex_unlock(&a->lock);
++	if (stop)
++		snd_pcm_stop_xrun(stop);
++}
++
++static int speaker_open(struct snd_soc_component *component, struct snd_pcm_substream *s)
++{
++	int ret;
++
++	s->runtime->hw.info &= ~(SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
++				SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME);
++	s->runtime->hw.info |= SNDRV_PCM_INFO_NO_REWINDS;
++	ret = snd_pcm_hw_constraint_mask64(s->runtime, SNDRV_PCM_HW_PARAM_FORMAT,
++					 SNDRV_PCM_FMTBIT_S24_LE);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_single(s->runtime, SNDRV_PCM_HW_PARAM_RATE, THERMAL_RATE);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_single(s->runtime, SNDRV_PCM_HW_PARAM_CHANNELS, 1);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_minmax(s->runtime, SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
++					 4096, MAX_BUFFER_FRAMES * 4);
++	if (ret < 0)
++		return ret;
++	ret = snd_pcm_hw_constraint_minmax(s->runtime, SNDRV_PCM_HW_PARAM_PERIOD_BYTES,
++					 1024, MAX_PERIOD_FRAMES * 4);
++	if (ret < 0)
++		return ret;
++	return snd_pcm_hw_constraint_integer(s->runtime, SNDRV_PCM_HW_PARAM_PERIODS);
++}
++
++static int speaker_sync_stop(struct snd_soc_component *component, struct snd_pcm_substream *s)
++{
++	struct j773g_audio *a = speaker_data(component);
++
++	cancel_delayed_work_sync(&a->monitor);
++	return snd_dmaengine_pcm_sync_stop(s);
++}
++
++static int speaker_hw_free(struct snd_soc_component *component, struct snd_pcm_substream *s)
++{
++	struct j773g_audio *a = speaker_data(component);
++
++	mutex_lock(&a->lock);
++	a->running = false;
++	audio_amp_set_dvc(AUDIO_AMP_MUTE);
++	mutex_unlock(&a->lock);
++	cancel_delayed_work_sync(&a->monitor);
++	return 0;
++}
++
++static int speaker_prepare(struct snd_soc_component *component, struct snd_pcm_substream *s)
++{
++	struct j773g_audio *a = speaker_data(component);
++
++	speaker_hw_free(component, s);
++	if (a->faulted)
++		return -EIO;
++	mutex_lock(&a->lock);
++	a->stream = s;
++	memset(s->runtime->dma_area, 0, s->runtime->dma_bytes);
++	memset(a->slot_peak, 0, sizeof(a->slot_peak));
++	a->preload_sumsq = 0;
++	mutex_unlock(&a->lock);
++	return 0;
++}
++
++static int speaker_trigger(struct snd_soc_component *component,
++			   struct snd_pcm_substream *s, int cmd)
++{
++	struct j773g_audio *a = speaker_data(component);
++	u64 now = ktime_get_ns();
++	int ret = 0;
++
++	mutex_lock(&a->lock);
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++		if (a->faulted) {
++			ret = -EIO;
++			break;
++		}
++		ret = audio_amp_set_dvc(ceiling_dvc);
++		if (ret) {
++			speaker_fault(a, "i2c-error");
++			break;
++		}
++		a->stream = s;
++		a->muted = false;
++		progress_start(&a->progress, now, speaker_position(s));
++		thermal_advance(&a->thermal, now);
++		/* The preloaded ring starts playing now. */
++		thermal_charge(&a->thermal, a->preload_sumsq);
++		a->preload_sumsq = 0;
++		a->running = true;
++		schedule_delayed_work(&a->monitor, msecs_to_jiffies(MONITOR_MS));
++		break;
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++		/* The DMA is already terminated here, so its position cannot be
++		 * read; at most one tick before STOP goes unaccounted. */
++		a->running = false;
++		cancel_delayed_work(&a->monitor);
++		audio_amp_set_dvc(AUDIO_AMP_MUTE);
++		break;
++	default:
++		ret = -EINVAL;
++	}
++	mutex_unlock(&a->lock);
++	return ret;
++}
++
++static int speaker_copy(struct snd_soc_component *component, struct snd_pcm_substream *s,
++			int channel, unsigned long pos, struct iov_iter *iter,
++			unsigned long bytes)
++{
++	struct j773g_audio *a = speaker_data(component);
++	struct snd_pcm_runtime *rt = s->runtime;
++	s32 *samples;
++	unsigned int i, slot, frames = bytes / sizeof(*samples), first = pos / sizeof(*samples);
++	u64 raw = 0, sumsq = 0, att;
++	u32 raw_peak = 0;
++	int gain, ret = 0;
++
++	if (bytes % sizeof(*samples) || pos % sizeof(*samples) || pos + bytes > rt->dma_bytes)
++		return -EINVAL;
++	if (!frames)
++		return 0;
++	samples = kvmalloc(bytes, GFP_KERNEL);
++	if (!samples)
++		return -ENOMEM;
++	if (copy_from_iter(samples, bytes, iter) != bytes) {
++		kvfree(samples);
++		return -EFAULT;
++	}
++	/* User volume first; the limiter sees and bounds what remains. */
++	gain = READ_ONCE(a->volume);
++	for (i = 0; i < frames; i++) {
++		s64 v = div_s64((s64)sign_extend32(le32_to_cpu(samples[i]), 23) * gain, 100);
++
++		samples[i] = v;
++		raw += v * v;
++		raw_peak = max_t(u32, raw_peak, abs((s32)v));
++	}
++	mutex_lock(&a->lock);
++	if (a->faulted) {
++		ret = -EIO;
++		goto out;
++	}
++	thermal_advance(&a->thermal, ktime_get_ns());
++	/* Settle the interval before this copy changes the ring peaks. */
++	if (a->running)
++		speaker_account(a, a->thermal.last_ns);
++	att = a->thermal.att[thermal_admit(&a->thermal, raw, raw_peak, speaker_peak(a),
++					   a->running ? 0 : a->preload_sumsq)];
++	for (i = 0; i < frames; i++) {
++		s32 v = samples[i];
++		u32 m = ((u64)abs(v) * att) >> 32;
++
++		sumsq += (u64)m * m;
++		samples[i] = cpu_to_le32(v < 0 ? -(s32)m : (s32)m);
++	}
++	/* Every joule is charged before DMA can see it. Preload plays at START. */
++	if (a->running)
++		thermal_charge(&a->thermal, sumsq);
++	else
++		a->preload_sumsq += sumsq;
++	a->sumsq_total += sumsq;
++	memcpy(rt->dma_area + pos, samples, bytes);
++	dma_wmb();
++	for (slot = first / rt->period_size; slot <= (first + frames - 1) / rt->period_size; slot++)
++		a->slot_peak[slot] = speaker_slot_peak(rt, slot);
++out:
++	mutex_unlock(&a->lock);
++	kvfree(samples);
++	return ret;
++}
++
++static int speaker_mmap(struct snd_soc_component *component,
++			struct snd_pcm_substream *s, struct vm_area_struct *vma)
++{
++	return -ENXIO;
++}
++
++static const struct snd_soc_component_driver speaker_component = {
++	.name = "j773g-protection",
++	.module_get_upon_open = 1,
++	.open = speaker_open,
++	.prepare = speaker_prepare,
++	.hw_free = speaker_hw_free,
++	.sync_stop = speaker_sync_stop,
++	.trigger = speaker_trigger,
++	.copy = speaker_copy,
++	.mmap = speaker_mmap,
++};
++
++static int speaker_fe_init(struct snd_soc_pcm_runtime *rtd)
++{
++	int ret = snd_soc_dai_set_tdm_slot(snd_soc_rtd_to_cpu(rtd, 0), 1, 0, 1, 32);
++
++	if (ret)
++		return ret;
++	return snd_soc_dai_set_bclk_ratio(snd_soc_rtd_to_cpu(rtd, 0), 250);
++}
++
++static int speaker_be_init(struct snd_soc_pcm_runtime *rtd)
++{
++	return snd_soc_dai_set_tdm_slot(snd_soc_rtd_to_codec(rtd, 0), 1, 0, 1, 32);
++}
++
++static int speaker_volume_info(struct snd_kcontrol *k, struct snd_ctl_elem_info *u)
++{
++	u->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	u->count = 1;
++	u->value.integer.min = 0;
++	u->value.integer.max = 100;
++	return 0;
++}
++
++static int speaker_volume_get(struct snd_kcontrol *k, struct snd_ctl_elem_value *u)
++{
++	struct j773g_audio *a = snd_soc_card_get_drvdata(snd_kcontrol_chip(k));
++
++	u->value.integer.value[0] = READ_ONCE(a->volume);
++	return 0;
++}
++
++static int speaker_volume_put(struct snd_kcontrol *k, struct snd_ctl_elem_value *u)
++{
++	struct j773g_audio *a = snd_soc_card_get_drvdata(snd_kcontrol_chip(k));
++	long volume = u->value.integer.value[0];
++	bool changed;
++
++	if (volume < 0 || volume > 100)
++		return -EINVAL;
++	changed = READ_ONCE(a->volume) != volume;
++	WRITE_ONCE(a->volume, volume);
++	return changed;
++}
++
++static const struct snd_kcontrol_new speaker_controls[] = {{
++	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++	.name = "Speaker Playback Volume",
++	.info = speaker_volume_info,
++	.get = speaker_volume_get,
++	.put = speaker_volume_put,
++}};
++
++static const struct snd_soc_dapm_widget speaker_widgets[] = {
++	SND_SOC_DAPM_SPK("Speaker", NULL),
++};
++
++static const struct snd_soc_dapm_route speaker_routes[] = {
++	{ "I2S0 TX", NULL, "PCM0 TX" },
++	{ "Speaker", NULL, "OUT" },
++};
++
++static int speaker_fixup_controls(struct snd_soc_card *card)
++{
++	static const char * const locked_controls[] = {
++		"Speaker Volume", "Amp Gain Volume", "ASI1 Sel",
++		"HPF Corner Frequency", "OCE Handling", "ISENSE Switch", "VSENSE Switch",
++	};
++	/* Thermal values from the J773g AID36/AUSP_0329 ATSP preset, decoded with
++	 * upstream speakersafetyd's audump.py. t_hard bounds bursts above the
++	 * preset's 140 C control target; t_stall is the old daemon's assert
++	 * level and only applies if a sample is held during a DMA stall.
++	 * Electrical values are module parameters: they are assumptions
++	 * awaiting measurement. */
++	struct thermal_params params = {
++		.fs_mv = full_scale_mv, .r_mohm = resistance_mohm,
++		.margin_pct = power_margin_pct, .ceiling = ceiling_dvc,
++		.r_coil = 40000, .r_magnet = 60000, .tau_coil_ms = 3400, .tau_magnet_ms = 210000,
++		.t_ambient = 50000, .t_limit = 140000, .t_window = 20000, .t_hysteresis = 5000,
++		.t_hard = 150000, .t_stall = 180000,
++		.delivery_ns = DELIVERY_NS, .stall_frames = STALL_FRAMES,
++	};
++	struct j773g_audio *a = snd_soc_card_get_drvdata(card);
++	struct snd_soc_pcm_runtime *rtd;
++	struct snd_soc_component *codec = NULL;
++	int i, ret;
++
++	for_each_card_rtds(card, rtd)
++		if (rtd->dai_link->no_pcm)
++			codec = snd_soc_rtd_to_codec(rtd, 0)->component;
++	if (!codec)
++		return -ENODEV;
++	ret = audio_amp_bind(codec);
++	if (ret)
++		return ret;
++	ret = snd_soc_component_write(codec, TAS2764_CHNL_0, 0);
++	if (ret)
++		return ret;
++	ret = snd_soc_set_enum_kctl(card, "ASI1 Sel", "Left");
++	if (ret < 0)
++		return ret;
++	ret = snd_soc_set_enum_kctl(card, "HPF Corner Frequency", "2 Hz");
++	if (ret < 0)
++		return ret;
++	for (i = 0; i < ARRAY_SIZE(locked_controls); i++) {
++		struct snd_kcontrol *k = snd_soc_card_get_kcontrol(card, locked_controls[i]);
++
++		if (!k)
++			return -ENOENT;
++		k->vd[0].access &= ~SNDRV_CTL_ELEM_ACCESS_WRITE;
++	}
++	ret = thermal_init(&a->thermal, &params, ktime_get_ns());
++	if (ret) {
++		dev_err(card->dev, "invalid speaker limiter parameters\n");
++		return ret;
++	}
++	dev_info(card->dev, "speaker limiter: ceiling -%u.%u dB, %u mW peak, %u mW continuous, ramp to -%u.%u dB\n",
++		 ceiling_dvc / 2, ceiling_dvc % 2 * 5, a->thermal.p_ceiling_mw, a->thermal.p_max_mw,
++		 a->thermal.att_min / 2, a->thermal.att_min % 2 * 5);
++	return 0;
++}
++
++static ssize_t state_show(struct device *dev, struct device_attribute *attr, char *buf)
++{
++	struct j773g_audio *a = dev_get_drvdata(dev);
++	struct thermal *t = &a->thermal;
++	ssize_t n;
++
++	mutex_lock(&a->lock);
++	thermal_advance(t, ktime_get_ns());
++	n = sysfs_emit(buf, "running=%u muted=%u faulted=%u reason=%s coil_mdeg=%lld magnet_mdeg=%lld attenuation=%u att_min=%u ceiling=%u p_ceiling_mw=%u p_max_mw=%u held_frames=%llu replay_frames=%llu stalls=%llu underruns=%llu sumsq=%llu peak=%u volume=%d hardware_dvc=%d\n",
++		       a->running, a->muted, a->faulted, a->reason, div_s64(t->coil, 1000),
++		       div_s64(t->magnet, 1000), t->attenuation, t->att_min, ceiling_dvc,
++		       t->p_ceiling_mw, t->p_max_mw, a->held_frames, a->replay_frames, a->stalls,
++		       a->underruns, a->sumsq_total, speaker_peak(a), a->volume, audio_amp_read_dvc());
++	mutex_unlock(&a->lock);
++	return n;
++}
++static DEVICE_ATTR_RO(state);
++static struct attribute *speaker_attrs[] = { &dev_attr_state.attr, NULL };
++ATTRIBUTE_GROUPS(speaker);
++
++static void speaker_put_node(void *node)
++{
++	of_node_put(node);
++}
++
++static int speaker_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct j773g_audio *a;
++	struct device_node *mca, *codec;
++	int ret;
++
++	a = devm_kzalloc(dev, sizeof(*a), GFP_KERNEL);
++	if (!a)
++		return -ENOMEM;
++	platform_set_drvdata(pdev, a);
++	mutex_init(&a->lock);
++	INIT_DELAYED_WORK(&a->monitor, speaker_monitor);
++	a->volume = 100;
++	a->reason = "ok";
++	mca = of_parse_phandle(dev->of_node, "apple,mca", 0);
++	if (!mca)
++		return -EINVAL;
++	ret = devm_add_action_or_reset(dev, speaker_put_node, mca);
++	if (ret)
++		return ret;
++	codec = of_parse_phandle(dev->of_node, "apple,codec", 0);
++	if (!codec)
++		return -EINVAL;
++	ret = devm_add_action_or_reset(dev, speaker_put_node, codec);
++	if (ret)
++		return ret;
++
++	a->cpus[0] = (struct snd_soc_dai_link_component){ .of_node = mca, .dai_name = "mca-pcm-0" };
++	a->cpus[1] = (struct snd_soc_dai_link_component){ .of_node = mca, .dai_name = "mca-i2s-0" };
++	a->codecs[0] = (struct snd_soc_dai_link_component){ .name = "snd-soc-dummy", .dai_name = "snd-soc-dummy-dai" };
++	a->codecs[1] = (struct snd_soc_dai_link_component){ .of_node = codec, .dai_name = "tas2764 ASI1" };
++	a->platforms[0].of_node = mca;
++	a->platforms[1].of_node = dev->of_node;
++	a->links[0] = (struct snd_soc_dai_link){
++		.name = "Internal Speaker", .stream_name = "Internal Speaker",
++		.dynamic = 1, .playback_only = 1, .nonatomic = 1,
++		.dpcm_merged_rate = 1, .dpcm_merged_chan = 1, .dpcm_merged_format = 1,
++		.dai_fmt = SPEAKER_FMT, .init = speaker_fe_init,
++		.cpus = &a->cpus[0], .num_cpus = 1,
++		.codecs = &a->codecs[0], .num_codecs = 1,
++		.platforms = a->platforms, .num_platforms = 2,
++	};
++	a->links[1] = (struct snd_soc_dai_link){
++		.name = "Speaker Amplifier", .stream_name = "Speaker Amplifier",
++		.no_pcm = 1, .playback_only = 1,
++		.dai_fmt = SPEAKER_FMT, .init = speaker_be_init,
++		.cpus = &a->cpus[1], .num_cpus = 1,
++		.codecs = &a->codecs[1], .num_codecs = 1,
++	};
++	a->card = (struct snd_soc_card){
++		.name = "T8132Speaker", .driver_name = "T8132Speaker", .owner = THIS_MODULE,
++		.dev = dev, .dai_link = a->links, .num_links = 2,
++		.fixup_controls = speaker_fixup_controls,
++		.component_chaining = true, .fully_routed = true,
++		.controls = speaker_controls, .num_controls = ARRAY_SIZE(speaker_controls),
++		.dapm_widgets = speaker_widgets, .num_dapm_widgets = ARRAY_SIZE(speaker_widgets),
++		.dapm_routes = speaker_routes, .num_dapm_routes = ARRAY_SIZE(speaker_routes),
++	};
++	snd_soc_card_set_drvdata(&a->card, a);
++	ret = devm_snd_soc_register_component(dev, &speaker_component, NULL, 0);
++	if (ret)
++		return ret;
++	return devm_snd_soc_register_card(dev, &a->card);
++}
++
++static const struct of_device_id speaker_match[] = {
++	{ .compatible = "apple,j773g-speaker" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, speaker_match);
++
++static struct platform_driver speaker_driver = {
++	.probe = speaker_probe,
++	.driver = {
++		.name = "j773g-speaker",
++		.of_match_table = speaker_match,
++		.dev_groups = speaker_groups,
++	},
++};
++module_platform_driver(speaker_driver);
++MODULE_LICENSE("GPL");
++MODULE_SOFTDEP("pre: snd-soc-apple-mca");
++MODULE_VERSION("0.8-kernel-thermal");
++MODULE_DESCRIPTION("J773g internal speaker on Apple MCA and TAS2764 with in-kernel thermal limiting");
+diff --git a/sound/soc/apple/t8132/playback.h b/sound/soc/apple/t8132/playback.h
+new file mode 100644
+index 0000000000000..4250bffc1473a
+--- /dev/null
++++ b/sound/soc/apple/t8132/playback.h
+@@ -0,0 +1,7 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++struct snd_soc_component;
++#define AUDIO_AMP_MUTE 200 /* -100 dB, the TAS2764 digital volume floor */
++int audio_amp_bind(struct snd_soc_component *component);
++int audio_amp_check_fault(void);
++int audio_amp_set_dvc(unsigned int dvc);
++int audio_amp_read_dvc(void);
+diff --git a/sound/soc/apple/t8132/progress.h b/sound/soc/apple/t8132/progress.h
+new file mode 100644
+index 0000000000000..c33c355798d71
+--- /dev/null
++++ b/sound/soc/apple/t8132/progress.h
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Playback progress accounting for the protected ring, in frames and
++ * nanoseconds only, so the userspace regression test can drive it.
++ *
++ * Held: wall-clock frames the DMA fetch position has not covered. The
++ * high-water mark follows the deficit down within a small band, so progress
++ * running ahead of the clock is never banked as credit against a later
++ * stall. Replay: the fetch position passing the application pointer; each
++ * fetched frame is charged at most once. A stall is a deficit that grows by
++ * the fault threshold within the history window, which a slow clock cannot.
++ */
++#ifndef T8132_PROGRESS_H
++#define T8132_PROGRESS_H
++#ifdef __KERNEL__
++#include <linux/types.h>
++#include <linux/math64.h>
++#include <linux/minmax.h>
++#include <linux/string.h>
++#endif
++
++#define PROGRESS_RATE 48000
++#define PROGRESS_BAND 256   /* frames of burst granularity and start latency */
++#define PROGRESS_HISTORY 6  /* monitor ticks of deficit history: at least 100 ms even with fast ticks */
++
++struct progress {
++	u64 start_ns, fine_start, replay_mark;
++	s64 deficit, high;
++	s64 history[PROGRESS_HISTORY];
++	unsigned int tick;
++};
++
++struct progress_charge {
++	u64 held, replay;     /* frames to charge at the ring peak */
++	bool underrun, ahead; /* fill below fifo; fill at least fifo + margin */
++};
++
++static inline void progress_start(struct progress *p, u64 now, u64 fine)
++{
++	memset(p, 0, sizeof(*p));
++	p->start_ns = now;
++	p->fine_start = fine;
++	p->high = PROGRESS_BAND;
++}
++
++static inline struct progress_charge progress_account(struct progress *p, u64 now, u64 fine,
++						      u64 appl, unsigned int fifo,
++						      unsigned int margin)
++{
++	struct progress_charge c = { 0 };
++	u64 expected = mul_u64_u64_div_u64(now - p->start_ns, PROGRESS_RATE, 1000000000ULL);
++	u64 mark = max(appl, p->replay_mark);
++
++	p->deficit = (s64)expected - (s64)(fine - p->fine_start);
++	if (p->deficit > p->high)
++		c.held = p->deficit - p->high;
++	p->high = clamp(p->high, p->deficit, p->deficit + PROGRESS_BAND);
++	if (fine + fifo > mark) {
++		c.replay = fine + fifo - mark;
++		p->replay_mark = fine + fifo;
++	}
++	c.underrun = fine + fifo > appl;
++	c.ahead = appl >= fine + fifo + margin;
++	return c;
++}
++
++/* Once per monitor tick, after progress_account(). */
++static inline bool progress_tick(struct progress *p, unsigned int fault_frames)
++{
++	unsigned int slot = p->tick++ % PROGRESS_HISTORY;
++	s64 oldest = p->history[slot];
++
++	p->history[slot] = p->deficit;
++	return p->deficit - oldest >= (s64)fault_frames;
++}
++#endif
+diff --git a/sound/soc/apple/t8132/thermal.h b/sound/soc/apple/t8132/thermal.h
+new file mode 100644
+index 0000000000000..413bf1c7a7d5a
+--- /dev/null
++++ b/sound/soc/apple/t8132/thermal.h
+@@ -0,0 +1,229 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Two-node voice-coil thermal model and limiter in integer arithmetic.
++ *
++ * Heat arrives as sums of squares of normalized S24 samples that are about
++ * to enter the DMA ring, so every joule is charged before it can play and
++ * the model leads the speaker. Charged heat therefore starts cooling up to
++ * one delivery window early; the delivery scale folded into each charge
++ * makes that early cooling conservative for both nodes.
++ *
++ * Temperatures are micro-degrees Celsius. A sum-of-squares unit is 2^-46 of
++ * one full-scale sample. Only math64 helpers are used so that the userspace
++ * regression test can include this header unchanged.
++ */
++#ifndef T8132_THERMAL_H
++#define T8132_THERMAL_H
++#ifdef __KERNEL__
++#include <linux/types.h>
++#include <linux/math64.h>
++#include <linux/minmax.h>
++#include <linux/string.h>
++#include <linux/errno.h>
++#include <linux/limits.h>
++#endif
++
++#define THERMAL_MUTE 200 /* half-dB steps of attenuation; 200 writes silence */
++#define THERMAL_RATE 48000
++#define THERMAL_SUBSTEP_NS (250ULL * 1000 * 1000)
++
++struct thermal_params {
++	/* Electrical worst case at DVC 0 and the hardware ceiling in half-dB. */
++	unsigned int fs_mv, r_mohm, margin_pct, ceiling;
++	/* Two-node model in m°C/W, ms and m°C. */
++	unsigned int r_coil, r_magnet, tau_coil_ms, tau_magnet_ms;
++	/* t_hard bounds heat that will certainly play; t_stall additionally
++	 * bounds a sample held for the stall window before the driver mutes. */
++	unsigned int t_ambient, t_limit, t_window, t_hysteresis, t_hard, t_stall;
++	/* Latest a charged sample can play, and how long a held sample can
++	 * keep playing before the driver has muted the amplifier. */
++	unsigned int delivery_ns, stall_frames;
++};
++
++struct thermal {
++	u64 att[THERMAL_MUTE + 1]; /* amplitude per half-dB step, Q32 */
++	u64 k_coil, k_magnet;	   /* µ°C per sum-of-squares unit, Q60 */
++	u64 tau_coil_ns, tau_magnet_ns;
++	s64 t_ambient, t_limit, t_window, t_hysteresis, t_hard, t_stall;
++	unsigned int att_min; /* steady-state attenuation at t_limit */
++	unsigned int stall_frames;
++	unsigned int p_ceiling_mw, p_max_mw;
++	/* State: coil >= magnet >= t_ambient always holds. */
++	s64 coil, magnet, coil_hyst, magnet_hyst;
++	u64 last_ns;
++	unsigned int attenuation;
++};
++
++static inline u64 thermal_pow(const struct thermal *t, unsigned int a)
++{
++	return mul_u64_u64_shr(t->att[a], t->att[a], 32);
++}
++
++/* e^x for 0 <= x < 1 in Q32, never below the true value: the tail of the
++ * series after x^3/6 is smaller than x^4/12. */
++static inline u64 thermal_exp_q32(u64 x)
++{
++	u64 x2 = mul_u64_u64_shr(x, x, 32);
++	u64 x3 = mul_u64_u64_shr(x2, x, 32);
++	u64 x4 = mul_u64_u64_shr(x3, x, 32);
++
++	return (1ULL << 32) + x + x2 / 2 + x3 / 6 + x4 / 12 + 4;
++}
++
++static inline int thermal_init(struct thermal *t, const struct thermal_params *p, u64 now_ns)
++{
++	const u64 step = 4054710590ULL; /* ceil(10^(-1/40) * 2^32) */
++	u64 p_full, p_ceiling, scale, rise;
++	unsigned int a;
++
++	memset(t, 0, sizeof(*t));
++	if (!p->fs_mv || !p->r_mohm || p->margin_pct < 100 || p->ceiling > THERMAL_MUTE ||
++	    !p->r_coil || !p->r_magnet || !p->tau_coil_ms || p->tau_coil_ms >= p->tau_magnet_ms ||
++	    (u64)p->tau_coil_ms * 1000000 < THERMAL_SUBSTEP_NS || !p->t_window ||
++	    p->t_limit <= p->t_ambient + p->t_window || p->t_hard < p->t_limit ||
++	    p->t_stall < p->t_hard ||
++	    (u64)p->delivery_ns * 2 >= (u64)p->tau_coil_ms * 1000000 || !p->stall_frames)
++		return -EINVAL;
++
++	t->att[0] = 1ULL << 32;
++	for (a = 1; a < THERMAL_MUTE; a++)
++		t->att[a] = mul_u64_u64_shr(t->att[a - 1], step, 32) + 1;
++	t->att[THERMAL_MUTE] = 0;
++
++	/* Milliwatts at full scale and at the ceiling, rounded up. */
++	p_full = div64_u64((u64)p->fs_mv * p->fs_mv * p->margin_pct, (u64)p->r_mohm * 100) + 1;
++	p_ceiling = mul_u64_u64_shr(p_full, thermal_pow(t, p->ceiling), 32) + 1;
++	if (p_ceiling > U32_MAX)
++		return -EINVAL;
++	t->p_ceiling_mw = p_ceiling;
++	t->tau_coil_ns = (u64)p->tau_coil_ms * 1000000;
++	t->tau_magnet_ns = (u64)p->tau_magnet_ms * 1000000;
++
++	/* One full-scale sample raises a node by P_mW * R / (rate * tau_ms)
++	 * milli-degrees; a sum-of-squares unit is 2^-46 of a sample, so the
++	 * Q60 coefficient per unit is that value * 1000 * 2^14. */
++	scale = thermal_exp_q32(div64_u64((u64)p->delivery_ns << 32, t->tau_coil_ns));
++	rise = mul_u64_u64_div_u64(p_ceiling * p->r_coil, 1000ULL << 14,
++				   (u64)THERMAL_RATE * p->tau_coil_ms);
++	t->k_coil = mul_u64_u64_shr(rise, scale, 32) + 1;
++	scale = thermal_exp_q32(div64_u64((u64)p->delivery_ns << 32, t->tau_magnet_ns));
++	rise = mul_u64_u64_div_u64(p_ceiling * p->r_magnet, 1000ULL << 14,
++				   (u64)THERMAL_RATE * p->tau_magnet_ms);
++	t->k_magnet = mul_u64_u64_shr(rise, scale, 32) + 1;
++	if (t->k_coil < t->k_magnet)
++		return -EINVAL;
++
++	t->t_ambient = (s64)p->t_ambient * 1000;
++	t->t_limit = (s64)p->t_limit * 1000;
++	t->t_window = (s64)p->t_window * 1000;
++	t->t_hysteresis = (s64)p->t_hysteresis * 1000;
++	t->t_hard = (s64)p->t_hard * 1000;
++	t->t_stall = (s64)p->t_stall * 1000;
++	t->stall_frames = p->stall_frames;
++
++	/* Continuous power that settles exactly at t_limit, and the smallest
++	 * attenuation that keeps a full-scale square wave below it. */
++	t->p_max_mw = div64_u64((u64)(p->t_limit - p->t_ambient) * 1000, p->r_coil + p->r_magnet);
++	for (a = 0; a < THERMAL_MUTE; a++)
++		if (mul_u64_u64_shr(p_ceiling, thermal_pow(t, a), 32) <= t->p_max_mw)
++			break;
++	t->att_min = a;
++
++	/* Start warm but below the ramp, so a hot reboot cannot add much. */
++	t->coil = t->t_limit - t->t_window - 1000000;
++	t->magnet = t->t_ambient + div64_u64((u64)(t->coil - t->t_ambient) * p->r_magnet,
++					     p->r_coil + p->r_magnet);
++	t->coil_hyst = t->coil;
++	t->magnet_hyst = t->magnet;
++	t->last_ns = now_ns;
++	return 0;
++}
++
++/* Relax both nodes toward their targets for the time since the last call. */
++static inline void thermal_advance(struct thermal *t, u64 now_ns)
++{
++	u64 dt = now_ns > t->last_ns ? now_ns - t->last_ns : 0;
++
++	t->last_ns = now_ns;
++	if (dt > 64 * t->tau_magnet_ns) {
++		t->coil = t->t_ambient;
++		t->magnet = t->t_ambient;
++		return;
++	}
++	while (dt) {
++		u64 step = min(dt, THERMAL_SUBSTEP_NS);
++		u64 hc = div64_u64(step << 32, t->tau_coil_ns);
++		u64 hm = div64_u64(step << 32, t->tau_magnet_ns);
++
++		/* 1 - h + h^2/2 >= e^-h, so relaxing by h - h^2/2 never cools
++		 * faster than the exponential. The coil relaxes toward the old
++		 * magnet temperature, which keeps coil >= magnet. */
++		hc -= mul_u64_u64_shr(hc, hc, 33);
++		hm -= mul_u64_u64_shr(hm, hm, 33);
++		t->coil -= mul_u64_u64_shr(t->coil - t->magnet, hc, 32);
++		t->magnet -= mul_u64_u64_shr(t->magnet - t->t_ambient, hm, 32);
++		dt -= step;
++	}
++}
++
++/* Charge heat that will play at the hardware ceiling, as an impulse. */
++static inline void thermal_charge(struct thermal *t, u64 sumsq)
++{
++	t->coil += mul_u64_u64_shr(sumsq, t->k_coil, 60) + 1;
++	t->magnet += mul_u64_u64_shr(sumsq, t->k_magnet, 60) + 1;
++}
++
++/* Coil rise from sum-of-squares units, µ°C. */
++static inline s64 thermal_rise(const struct thermal *t, u64 sumsq)
++{
++	return mul_u64_u64_shr(sumsq, t->k_coil, 60) + 1;
++}
++
++/* Whether raw written at attenuation a fits: its certain heat plus committed
++ * heat under t_hard, and additionally the larger of its own peak or the
++ * ring's peak held for the stall window under t_stall. */
++static inline bool thermal_fits(const struct thermal *t, u64 raw, u64 held, u64 ring_held,
++				u64 committed, unsigned int a)
++{
++	u64 p = thermal_pow(t, a);
++	u64 certain = mul_u64_u64_shr(raw, p, 32) + committed;
++	u64 conditional = max(mul_u64_u64_shr(held, p, 32), ring_held);
++
++	return t->coil + thermal_rise(t, certain) <= t->t_hard &&
++	       t->coil + thermal_rise(t, certain + conditional) <= t->t_stall;
++}
++
++/* Choose the attenuation for raw about to be written: the upstream ramp for
++ * steady state, and the smallest step that keeps a burst within bounds. */
++static inline unsigned int thermal_admit(struct thermal *t, u64 raw, u32 raw_peak,
++					 u32 ring_peak, u64 committed)
++{
++	u64 held = (u64)raw_peak * raw_peak * t->stall_frames;
++	u64 ring_held = (u64)ring_peak * ring_peak * t->stall_frames;
++	s64 temp;
++	unsigned int a, lo = 0, hi = THERMAL_MUTE;
++
++	t->coil_hyst = clamp(t->coil_hyst, t->coil, t->coil + t->t_hysteresis);
++	t->magnet_hyst = clamp(t->magnet_hyst, t->magnet, t->magnet + t->t_hysteresis);
++	temp = max(t->coil_hyst, t->magnet_hyst);
++	if (temp <= t->t_limit - t->t_window) {
++		a = 0;
++	} else if (temp >= t->t_limit) {
++		a = t->att_min;
++	} else {
++		u64 red = div64_u64((u64)(temp - (t->t_limit - t->t_window)) << 32, t->t_window);
++
++		a = (t->att_min * red + (1ULL << 32) - 1) >> 32;
++	}
++	while (lo < hi) {
++		unsigned int mid = lo + (hi - lo) / 2;
++
++		if (thermal_fits(t, raw, held, ring_held, committed, mid))
++			hi = mid;
++		else
++			lo = mid + 1;
++	}
++	t->attenuation = max(a, lo);
++	return t->attenuation;
++}
++#endif
+-- 
+2.50.1 (Apple Git-155)
+

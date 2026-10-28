@@ -1,0 +1,39 @@
+From 0c693e069b6452dfa5ab1a4f64f4052cd424999f Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Fri, 18 Sep 2026 03:08:33 -0400
+Subject: [PATCH] dt-bindings: iommu: apple,dart: describe the usable DMA
+ aperture
+
+Document the existing apple,dma-range property as a 64-bit base and size. Firmware can reserve or bypass parts of the IOVA space, so devices such as T8132 audio need an explicit usable aperture.
+
+Validation: binding schema validation passed.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Assisted-By: Claude Code (Claude Fable 5.1)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ Documentation/devicetree/bindings/iommu/apple,dart.yaml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/iommu/apple,dart.yaml b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+index 865edc6c49217..fad51cf3c85ba 100644
+--- a/Documentation/devicetree/bindings/iommu/apple,dart.yaml
++++ b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+@@ -46,6 +46,14 @@ properties:
+       Reference to the gate clock phandle if required for this IOMMU.
+       Optional since not all IOMMUs are attached to a clock gate.
+ 
++  apple,dma-range:
++    $ref: /schemas/types.yaml#/definitions/uint64-array
++    minItems: 2
++    maxItems: 2
++    description:
++      Base and size of the usable device address aperture. Firmware may reserve
++      the remaining address space or configure bypass windows there.
++
+   '#iommu-cells':
+     const: 1
+     description:
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,40 @@
+From 3cd0faa9ba07cc520c8e57bc5342d59660313753 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Fri, 18 Sep 2026 19:31:22 -0400
+Subject: [PATCH] Bluetooth: hci_bcm4377: require only beamforming calibration
+ on BCM4388
+
+BCM4388 always uploads the beamforming calibration through
+bcm4388_send_calibration(). Do not reject its device-tree configuration
+when the unused non-beamforming calibration property is absent.
+
+Keep the beamforming blob mandatory and retain the existing calibration
+requirements for other chips. Calibration still comes exclusively from
+the device tree; this does not add a firmware-file fallback.
+
+Validation: the hci_bcm4377 driver object builds for arm64 with LLVM.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ drivers/bluetooth/hci_bcm4377.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/bluetooth/hci_bcm4377.c b/drivers/bluetooth/hci_bcm4377.c
+index 0eb137a99add7..f379b08aa7d2b 100644
+--- a/drivers/bluetooth/hci_bcm4377.c
++++ b/drivers/bluetooth/hci_bcm4377.c
+@@ -2228,6 +2228,10 @@ static int bcm4377_probe_of(struct bcm4377_data *bcm4377)
+ 	bcm4377->taurus_beamforming_cal_blob =
+ 		of_get_property(np, "brcm,taurus-bf-cal-blob",
+ 				&bcm4377->taurus_beamforming_cal_size);
++	if (bcm4377->hw->id == 0x4388) {
++		/* BCM4388 never uses the non-beamforming calibration. */
++		return bcm4377->taurus_beamforming_cal_blob ? 0 : -ENOENT;
++	}
+ 	if (!bcm4377->taurus_beamforming_cal_blob) {
+ 		dev_err(&bcm4377->pdev->dev,
+ 			"no brcm,taurus-bf-cal-blob property\n");
+-- 
+2.50.1 (Apple Git-155)
+

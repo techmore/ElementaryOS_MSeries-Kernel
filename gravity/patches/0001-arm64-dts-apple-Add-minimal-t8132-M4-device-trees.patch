@@ -1,0 +1,186 @@
+From cd5f25a0e4b68ac8bc3a731a312bb1b7f75dfca3 Mon Sep 17 00:00:00 2001
+From: Yureka Lilian <yureka@cyberchaos.dev>
+Date: Sun, 5 Jul 2026 12:28:42 +0200
+Subject: [PATCH] arm64: dts: apple: Add minimal t8132 (M4) device trees
+
+Added device trees for the following devices:
+- apple,j604 - MacBook Pro (14-inch, M4, 2024)
+- apple,j623 - iMac (24-inch, 2x USB-C, M4, 2024)
+- apple,j624 - iMac (24-inch, 4x USB-C, M4, 2024)
+- apple,j713 - MacBook Air (13-inch, M4, 2025)
+- apple,j715 - MacBook Air (15-inch, M4, 2025)
+- apple,j773g - Mac mini (M4, 2024)
+
+The device trees have a minimal set of devices limited to CPU cores,
+interrupt controller, power states, watchdog, serial, pin controller,
+i2c and framebuffer.
+The device trees for the notebooks add a PWM controller for the keyboard
+LED illumination.
+
+Using the macOS 26.6RC iBoot/firmware, the Mac mini reliably boots on a
+single core using the stock kernel.
+Booting with smp requires avoiding the wfi and wfit instructions
+in the idle loop and `delay()` respectively, since those instructions
+cause a loss of architectural state on the secondary cores, and even
+then boot is unreliable(?).
+
+Signed-off-by: Yureka Lilian <yureka@cyberchaos.dev>
+(cherry picked from commit e495b1f991fdeadf334d3b0f3b916954cb229c5b)
+
+Incorporate the L1 cache sizes and J713 model-year correction from v3.
+Retain the existing timer, ANS always-on and locked display-domain setup.
+Link: https://lore.kernel.org/all/20260811-apple-m4-initial-devicetrees-v3-9-6bf32d45ad0b@cyberchaos.dev/
+---
+ arch/arm64/boot/dts/apple/t8132-j713.dts  |  2 +-
+ arch/arm64/boot/dts/apple/t8132-pmgr.dtsi |  6 ++++--
+ arch/arm64/boot/dts/apple/t8132.dtsi      | 20 ++++++++++++++++++++
+ 3 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+index b1f779c37d5fe..e1fc5d47f4876 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -15,7 +15,7 @@
+ 
+ / {
+ 	compatible = "apple,j713", "apple,t8132", "apple,arm-platform";
+-	model = "Apple MacBook Air (13-inch, M4, 2024)";
++	model = "Apple MacBook Air (13-inch, M4, 2025)";
+ 
+ 	led-controller {
+ 		compatible = "pwm-leds";
+diff --git a/arch/arm64/boot/dts/apple/t8132-pmgr.dtsi b/arch/arm64/boot/dts/apple/t8132-pmgr.dtsi
+index 00a09687de241..04d7c8ae9266e 100644
+--- a/arch/arm64/boot/dts/apple/t8132-pmgr.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132-pmgr.dtsi
+@@ -152,7 +152,7 @@
+ 		#reset-cells = <0>;
+ 		label = "dispext0_cpu";
+ 		power-domains = <&ps_dispext0_fe>;
+-		apple,min-state = <4>;
++		status = "disabled"; /* Locked, don't touch it */
+ 	};
+ 
+ 	ps_scodec: power-controller@228 {
+@@ -785,6 +785,7 @@
+ 		#reset-cells = <0>;
+ 		label = "dispext1_cpu";
+ 		power-domains = <&ps_dispext1_fe>;
++		status = "disabled"; /* Locked, don't touch it */
+ 	};
+ 
+ 	ps_ans: power-controller@538 {
+@@ -793,6 +794,7 @@
+ 		#power-domain-cells = <0>;
+ 		#reset-cells = <0>;
+ 		label = "ans";
++		apple,always-on; /* Device reboots after 3 mintues if disabled */
+ 	};
+ 
+ 	ps_apcie_st: power-controller@540 {
+@@ -960,7 +962,7 @@
+ 		#reset-cells = <0>;
+ 		label = "disp_cpu";
+ 		power-domains = <&ps_disp_fe>;
+-		apple,min-state = <4>;
++		status = "disabled"; /* Locked, don't touch it */
+ 	};
+ };
+ 
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+index 715980b5c7de4..ed81a73cead4b 100644
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -64,6 +64,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_e1: cpu@1 {
+@@ -73,6 +75,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_e2: cpu@2 {
+@@ -82,6 +86,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_e3: cpu@3 {
+@@ -91,6 +97,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_e4: cpu@4 {
+@@ -100,6 +108,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_e5: cpu@5 {
+@@ -109,6 +119,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_0>;
++			i-cache-size = <0x20000>;
++			d-cache-size = <0x10000>;
+ 		};
+ 
+ 		cpu_p0: cpu@10100 {
+@@ -118,6 +130,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_1>;
++			i-cache-size = <0x30000>;
++			d-cache-size = <0x20000>;
+ 		};
+ 
+ 		cpu_p1: cpu@10101 {
+@@ -127,6 +141,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_1>;
++			i-cache-size = <0x30000>;
++			d-cache-size = <0x20000>;
+ 		};
+ 
+ 		cpu_p2: cpu@10102 {
+@@ -136,6 +152,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_1>;
++			i-cache-size = <0x30000>;
++			d-cache-size = <0x20000>;
+ 		};
+ 
+ 		cpu_p3: cpu@10103 {
+@@ -145,6 +163,8 @@
+ 			enable-method = "spin-table";
+ 			cpu-release-addr = <0 0>;
+ 			next-level-cache = <&l2_cache_1>;
++			i-cache-size = <0x30000>;
++			d-cache-size = <0x20000>;
+ 		};
+ 
+ 		l2_cache_0: l2-cache-0 {
+-- 
+2.50.1 (Apple Git-155)
+
