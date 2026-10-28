@@ -1,0 +1,94 @@
+From 497a835b7ccf0637041aa886954dba4cacbbd063 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Fri, 18 Sep 2026 03:08:37 -0400
+Subject: [PATCH] arm64: dts: apple: enable the J773g internal speaker
+
+Connect the protected speaker card to MCA TX0 and the SN012776 amplifier on I2C3, including its shutdown GPIO. Enable the audio controllers and their DART.
+
+Provide an audio configuration fragment for built-in speaker, codec and transport drivers, matching the deployed desktop configuration.
+
+Validation: the J773g device tree builds and the fragment matches the active kernel configuration. Native kernel #109 exposed the protected internal speaker alongside HDMI and passed playback checks.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Assisted-By: Claude Code (Claude Fable 5.1)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ arch/arm64/boot/dts/apple/t8132-j773g.dts | 32 +++++++++++++++++++++++
+ arch/arm64/configs/t8132-audio.config     | 18 +++++++++++++
+ 2 files changed, 50 insertions(+)
+ create mode 100644 arch/arm64/configs/t8132-audio.config
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index 20b84f6b6a6f8..e374ca61217cb 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -17,6 +17,13 @@
+ 	compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+ 	model = "Apple Mac mini (M4, 2024)";
+ 
++	/* Protected mono internal speaker. */
++	speaker-audio {
++		compatible = "apple,j773g-speaker";
++		apple,mca = <&mca>;
++		apple,codec = <&speaker_amp>;
++	};
++
+ 	aliases {
+ 		ethernet0 = &ethernet0;
+ 		sio = &sio;
+@@ -266,3 +273,28 @@
+ 
+ #include "hwmon-common.dtsi"
+ #include "hwmon-mini.dtsi"
++
++&i2c3 {
++	status = "okay";
++};
++
++&dart_audio {
++	status = "okay";
++};
++
++&admac {
++	status = "okay";
++};
++
++&mca {
++	status = "okay";
++};
++
++&i2c3 {
++	speaker_amp: amplifier@38 {
++		compatible = "ti,sn012776";
++		reg = <0x38>;
++		#sound-dai-cells = <0>;
++		shutdown-gpios = <&pinctrl_ap 15 GPIO_ACTIVE_HIGH>;
++	};
++};
+diff --git a/arch/arm64/configs/t8132-audio.config b/arch/arm64/configs/t8132-audio.config
+new file mode 100644
+index 0000000000000..46f7f4a21367c
+--- /dev/null
++++ b/arch/arm64/configs/t8132-audio.config
+@@ -0,0 +1,18 @@
++# J773g internal-speaker drivers built into the kernel image.
++# Merge after the board configuration; no speaker modules or daemon are needed.
++CONFIG_SOUND=y
++CONFIG_SND=y
++CONFIG_SND_SOC=y
++CONFIG_SND_PCM=y
++CONFIG_I2C=y
++CONFIG_I2C_APPLE=y
++CONFIG_GPIOLIB=y
++CONFIG_PINCTRL_APPLE_GPIO=y
++CONFIG_SND_SOC_APPLE_T8132_SPEAKER=y
++CONFIG_DMADEVICES=y
++CONFIG_APPLE_ADMAC=y
++CONFIG_APPLE_DART=y
++CONFIG_SND_DMAENGINE_PCM=y
++CONFIG_SND_SOC_APPLE_MCA=y
++CONFIG_SND_SOC_TAS2764=y
++CONFIG_COMMON_CLK_APPLE_NCO=y
+-- 
+2.50.1 (Apple Git-155)
+

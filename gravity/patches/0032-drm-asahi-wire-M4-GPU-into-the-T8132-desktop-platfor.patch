@@ -1,0 +1,162 @@
+From 3a2ad760d7316813f37c0ddc653ef783827f855b Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Mon, 14 Sep 2026 16:39:52 -0400
+Subject: [PATCH] drm/asahi: wire M4 GPU into the T8132 desktop platform
+
+Add GPU resources to the existing desktop board description. Accept an explicit bootloader maximum-power value while retaining compatibility with the upstream power ladder, and describe the actual probe-only default.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ arch/arm64/boot/dts/apple/t8132-gpu.dtsi  | 58 +++++++++++++++++++++++
+ arch/arm64/boot/dts/apple/t8132-j773g.dts |  1 +
+ drivers/gpu/drm/asahi/Kconfig             |  4 +-
+ drivers/gpu/drm/asahi/g16_platform.rs     | 24 +++++++---
+ 4 files changed, 78 insertions(+), 9 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/apple/t8132-gpu.dtsi
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-gpu.dtsi b/arch/arm64/boot/dts/apple/t8132-gpu.dtsi
+new file mode 100644
+index 0000000000000..a7cefeb2cf386
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-gpu.dtsi
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/* T8132 GPU resources. Firmware memory addresses are supplied by m1n1. */
++
++/ {
++	aliases {
++		gpu = &gpu;
++	};
++
++	reserved-memory {
++		uat_ttbs: uat-ttbs {
++			status = "disabled";
++		};
++		uat_pagetables: uat-pagetables {
++			status = "disabled";
++		};
++		uat_l2: uat-l2 {
++			status = "disabled";
++		};
++		uat_handoff: uat-handoff {
++			status = "disabled";
++		};
++		gpu_firmware: gpu-firmware {
++			status = "disabled";
++		};
++	};
++};
++
++&soc {
++	gpu: gpu@302600000 {
++		compatible = "apple,agx-t8132";
++		reg = <0x3 0x02600000 0 0x88000>,
++		      <0x3 0x00000000 0 0x4000000>;
++		reg-names = "asc", "sgx";
++		mboxes = <&agx_mbox>;
++		power-domains = <&ps_gfx>;
++		memory-region = <&uat_ttbs>, <&uat_pagetables>, <&uat_l2>,
++				<&uat_handoff>, <&gpu_firmware>;
++		memory-region-names = "ttbs", "pagetables", "l2",
++				      "handoff", "firmware";
++		/* Enabled only after the loader has reserved the firmware state. */
++		status = "disabled";
++	};
++
++	agx_mbox: mailbox@302608000 {
++		compatible = "apple,t8103-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x3 0x02608000 0 0x4000>;
++		interrupt-parent = <&aic>;
++		/* ADT pairs are not-empty, empty; Linux names are reversed. */
++		interrupts = <AIC_IRQ 993 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 994 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 995 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 996 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty",
++				  "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++		power-domains = <&ps_gfx>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index b6c9f07da8b78..20b84f6b6a6f8 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -11,6 +11,7 @@
+ 
+ #include "t8132.dtsi"
+ #include "t8132-jxxx.dtsi"
++#include "t8132-gpu.dtsi"
+ 
+ / {
+ 	compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+diff --git a/drivers/gpu/drm/asahi/Kconfig b/drivers/gpu/drm/asahi/Kconfig
+index 7d7e23cf07d00..daf29ca286466 100644
+--- a/drivers/gpu/drm/asahi/Kconfig
++++ b/drivers/gpu/drm/asahi/Kconfig
+@@ -12,8 +12,8 @@ config DRM_ASAHI_M4
+ 	help
+ 	  Rust DRM driver for the T8132 (M4) GPU, following the Asahi UAPI
+ 	  and the M4 Python DRM-shim firmware implementation. Intended for
+-	  development under m1n1. The probe_only parameter defaults to true
+-	  until the firmware port is qualified.
++	  development under m1n1. Normal initialization is the default;
++	  probe_only selects identification without firmware startup.
+ 
+ config RUST_DRM_SCHED
+ 	bool
+diff --git a/drivers/gpu/drm/asahi/g16_platform.rs b/drivers/gpu/drm/asahi/g16_platform.rs
+index 0ed186d404710..a61c7bc601687 100644
+--- a/drivers/gpu/drm/asahi/g16_platform.rs
++++ b/drivers/gpu/drm/asahi/g16_platform.rs
+@@ -2,7 +2,7 @@
+ // Copyright The Gravity Linux Contributors
+ 
+ //! Live platform inputs and initialization builders from g16g_platform.py and
+-//! g16g_initdata.py. No archived performance or register-window profile.
++//! g16g_initdata.py. Firmware data is built from explicit bootloader properties.
+ 
+ use kernel::{c_str, device, of, prelude::*};
+ 
+@@ -75,13 +75,23 @@ pub(crate) struct Platform {
+ impl Platform {
+     pub(crate) fn new(dev: &device::Device) -> Result<Self> {
+         let node = dev.of_node().ok_or(ENODEV)?;
+-        let power = ladder(&node, c_str!("apple,m4-power-mw"))?;
++        // Only the maximum is consumed by the firmware builders. A loader
++        // with an observed board maximum need not invent an entire power
++        // ladder. Continue accepting the original loader's modeled ladder.
++        let maximum_power = match node.get_opt_property::<u32>(c_str!("apple,m4-max-power-mw"))? {
++            Some(value) => value,
++            None => {
++                let power = ladder(&node, c_str!("apple,m4-power-mw"))?;
++                if power[0] != 0 || power.windows(2).any(|w| w[0] > w[1]) {
++                    return Err(EINVAL);
++                }
++                power[10]
++            }
++        };
+         let freq_a = ladder(&node, c_str!("apple,m4-freq-a"))?;
+         let freq_b = ladder(&node, c_str!("apple,m4-freq-b"))?;
+-        if power[0] != 0
+-            || power[10] == 0
+-            || power[10] > i32::MAX as u32
+-            || power.windows(2).any(|w| w[0] > w[1])
++        if maximum_power == 0
++            || maximum_power > i32::MAX as u32
+             || freq_a[0] != 0
+             || freq_a.windows(2).any(|w| w[0] >= w[1])
+             || freq_b[0] != 0
+@@ -120,7 +130,7 @@ impl Platform {
+             node,
+             freq_a,
+             freq_b,
+-            maximum_power: power[10],
++            maximum_power,
+             core_mask,
+             period_ms,
+             period_clocks,
+-- 
+2.50.1 (Apple Git-155)
+

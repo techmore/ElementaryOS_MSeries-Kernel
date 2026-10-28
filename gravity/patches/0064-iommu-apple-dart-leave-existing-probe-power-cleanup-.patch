@@ -1,0 +1,27 @@
+From 0c724f06f5bfdf68f1d253bffc6132261e512ecb Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Mon, 21 Sep 2026 15:49:12 -0400
+Subject: [PATCH] iommu: apple-dart: leave existing probe power cleanup
+ unchanged
+
+Keep the M4 SID remapping additions without changing the pre-existing runtime-PM error path.
+---
+ drivers/iommu/apple-dart.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+index ff0185c898685..0e0cad0aea70d 100644
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -1541,7 +1541,7 @@ err_sysfs_remove:
+ err_free_irq:
+ 	free_irq(dart->irq, dart);
+ err_clk_disable:
+-	pm_runtime_put_noidle(dev);
++	pm_runtime_put(dev);
+ 	clk_bulk_disable_unprepare(dart->num_clks, dart->clks);
+ 
+ 	return ret;
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,421 @@
+From c41b69fe9a3a6cdd9efe7697efa69a40eba17c83 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Mon, 14 Sep 2026 16:39:31 -0400
+Subject: [PATCH] drm/asahi: adapt M4 to the desktop kernel
+
+Use the Linux 7.1 Io and ARef interfaces and release revocable MMIO guards before allocations, sleeps, and firmware calls. Reacquire guards around register access.
+
+Integrate the early crash-buffer handshake with the existing boot-AP ownership path, retaining its wait before the optional early return. Keep the saved helper placement and documentation, and omit the unused IoSysMap read extension.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ drivers/gpu/drm/asahi/asahi_m4.rs    |  9 ++--
+ drivers/gpu/drm/asahi/g16.rs         | 68 ++++++++++++++++++----------
+ drivers/gpu/drm/asahi/g16_drm.rs     |  2 +-
+ drivers/gpu/drm/asahi/g16_runtime.rs |  8 +++-
+ drivers/soc/apple/rtkit.c            | 28 +++++-------
+ include/linux/soc/apple/rtkit.h      |  3 +-
+ rust/kernel/drm/file.rs              |  5 +-
+ rust/kernel/iosys_map.rs             | 13 ------
+ 8 files changed, 73 insertions(+), 63 deletions(-)
+
+diff --git a/drivers/gpu/drm/asahi/asahi_m4.rs b/drivers/gpu/drm/asahi/asahi_m4.rs
+index 18739fce8bf89..04b281d54e313 100644
+--- a/drivers/gpu/drm/asahi/asahi_m4.rs
++++ b/drivers/gpu/drm/asahi/asahi_m4.rs
+@@ -23,6 +23,7 @@ mod pgtable;
+ #[path = "m4_util.rs"]
+ mod util;
+ 
++use kernel::io::Io;
+ use kernel::{c_str, device::Core, devres::Devres, io::mem::IoMem, of, platform, prelude::*};
+ 
+ const SGX_SIZE: usize = 0x4000000;
+@@ -66,7 +67,7 @@ impl platform::Driver for M4Gpu {
+         let sgx = KBox::pin_init(request.iomap_sized::<SGX_SIZE>(), GFP_KERNEL)?;
+         {
+             let regs = sgx.try_access().ok_or(ENODEV)?;
+-            let version = regs.read32_relaxed(ID_VERSION);
++            let version = regs.relaxed().read32(ID_VERSION);
+             if version == 0 || version == u32::MAX {
+                 dev_err!(dev, "Invalid GPU ID {:#010x}\n", version);
+                 return Err(ENODEV);
+@@ -75,9 +76,9 @@ impl platform::Driver for M4Gpu {
+                 dev,
+                 "Apple M4 GPU recognized: ID={:#010x} counts={:#010x}/{:#010x} clusters={:#010x}\n",
+                 version,
+-                regs.read32_relaxed(ID_COUNTS_1),
+-                regs.read32_relaxed(ID_COUNTS_2),
+-                regs.read32_relaxed(ID_CLUSTERS),
++                regs.relaxed().read32(ID_COUNTS_1),
++                regs.relaxed().read32(ID_COUNTS_2),
++                regs.relaxed().read32(ID_CLUSTERS),
+             );
+             dev_info!(
+                 dev,
+diff --git a/drivers/gpu/drm/asahi/g16.rs b/drivers/gpu/drm/asahi/g16.rs
+index a9a4aa4d8c8c9..cd32fc99b493f 100644
+--- a/drivers/gpu/drm/asahi/g16.rs
++++ b/drivers/gpu/drm/asahi/g16.rs
+@@ -5,6 +5,7 @@
+ //! G16 firmware bootstrap. Its 43-bit address space and initialization graph
+ //! must not be passed to a G13/G14 firmware manager.
+ 
++use kernel::io::Io;
+ use kernel::{c_str, device::Core, platform, prelude::*};
+ 
+ const PAGE_SIZE: u64 = 0x4000;
+@@ -83,7 +84,7 @@ use kernel::{
+     iosys_map::IoSysMapRef,
+     soc::apple::rtkit,
+     sync::Arc,
+-    types::ARef,
++    sync::aref::ARef,
+     types::ForeignOwnable,
+ };
+ 
+@@ -272,8 +273,9 @@ impl Bootstrap {
+         let handoff = unsafe { io::mem::Mem::try_new(res, io::mem::MemFlag::WB.into())? };
+         let asc_guard = asc.try_access().ok_or(ENODEV)?;
+         let asc_io = &*asc_guard;
+-        let control = asc_io.read32_relaxed(0x44);
+-        let status = asc_io.read32_relaxed(0x48);
++        let control = asc_io.relaxed().read32(0x44);
++        let status = asc_io.relaxed().read32(0x48);
++        drop(asc_guard);
+         dev_info!(
+             dev,
+             "G16: cold ASC control={:#x} status={:#x}\n",
+@@ -286,9 +288,10 @@ impl Bootstrap {
+         let sgx_guard = sgx.try_access().ok_or(ENODEV)?;
+         let sgx_io = &*sgx_guard;
+         for offset in [0x1000104, 0x1000108] {
+-            sgx_io.write32_relaxed(sgx_io.read32_relaxed(offset) | 1, offset);
++            sgx_io.relaxed().write32(sgx_io.relaxed().read32(offset) | 1, offset);
+         }
+-        sgx_io.write32_relaxed(6, 0xd06030);
++        sgx_io.relaxed().write32(6, 0xd06030);
++        drop(sgx_guard);
+         // SAFETY: The region validation guarantees a full aligned page. The
+         // coprocessor is stopped, so these host-owned bootstrap fields are
+         // not concurrently accessed by firmware.
+@@ -322,7 +325,9 @@ impl Bootstrap {
+             GFP_KERNEL,
+         )?;
+         rtkit.as_mut().set_early_crashlog();
+-        asc_io.write32_relaxed(control | 0x10, 0x44);
++        let asc_guard = asc.try_access().ok_or(ENODEV)?;
++        asc_guard.relaxed().write32(control | 0x10, 0x44);
++        drop(asc_guard);
+         crate::mem::sync();
+         rtkit.as_mut().boot()?;
+         for ep in [0x20, 0x21] {
+@@ -695,9 +700,9 @@ impl Bootstrap {
+             firmware.write_live(addr, &0u32.to_le_bytes())?;
+         }
+         let before = (
+-            sgx.read32_relaxed(0xd64040),
+-            sgx.read32_relaxed(0xd64048),
+-            sgx.read32_relaxed(0xd60020),
++            sgx.relaxed().read32(0xd64040),
++            sgx.relaxed().read32(0xd64048),
++            sgx.relaxed().read32(0xd60020),
+         );
+         if before != (0, 0, 0) {
+             return Err(EBUSY);
+@@ -707,8 +712,9 @@ impl Bootstrap {
+             crate::g16_fw::BUNDLE_ADDRESS + 0x16240,
+             &q::channel(BOOT_QUEUE, 2, 1, 1, true, 1),
+         )?;
+-        sgx.write32_relaxed(1, 0xd60020);
++        sgx.relaxed().write32(1, 0xd60020);
+         crate::mem::sync();
++        drop(sgx_guard);
+         let mut committed = false;
+         for _ in 0..3000 {
+             let cursor = firmware.read_u32(crate::g16_fw::CONTROL_DATA + 0x48)?;
+@@ -732,8 +738,10 @@ impl Bootstrap {
+             .as_mut()
+             .send_message(0x21, 0x0083_0000_0000_0001)?;
+         for _ in 0..3000 {
+-            if sgx.read32_relaxed(0xd64040) == 1
+-                && sgx.read32_relaxed(0xd64048) == 1
++            let sgx_guard = self._sgx.try_access().ok_or(ENODEV)?;
++            let sgx = &*sgx_guard;
++            if sgx.relaxed().read32(0xd64040) == 1
++                && sgx.relaxed().read32(0xd64048) == 1
+                 && firmware.read_u32(BOOT_POINTERS + 0x30)? == 2
+             {
+                 // Barriers consume the inner ring without advancing its
+@@ -741,14 +749,17 @@ impl Bootstrap {
+                 dev_info!(dev, "G16: barrier channel retired; two items consumed\n");
+                 return Ok(());
+             }
++            drop(sgx_guard);
+             kernel::time::delay::fsleep(kernel::time::Delta::from_millis(1));
+         }
++        let sgx_guard = self._sgx.try_access().ok_or(ENODEV)?;
++        let sgx = &*sgx_guard;
+         dev_err!(
+             dev,
+             "G16: barrier timeout; channel {}/{}/{} item done/read {}/{}\n",
+-            sgx.read32_relaxed(0xd64040),
+-            sgx.read32_relaxed(0xd64048),
+-            sgx.read32_relaxed(0xd60020),
++            sgx.relaxed().read32(0xd64040),
++            sgx.relaxed().read32(0xd64048),
++            sgx.relaxed().read32(0xd60020),
+             firmware.read_u32(BOOT_POINTERS)?,
+             firmware.read_u32(BOOT_POINTERS + 0x30)?
+         );
+@@ -808,15 +819,16 @@ impl Bootstrap {
+         let sgx_guard = self._sgx.try_access().ok_or(ENODEV)?;
+         let sgx = &*sgx_guard;
+         let before = (
+-            sgx.read32_relaxed(0xd640c0),
+-            sgx.read32_relaxed(0xd640c8),
+-            sgx.read32_relaxed(0xd60060),
++            sgx.relaxed().read32(0xd640c0),
++            sgx.relaxed().read32(0xd640c8),
++            sgx.relaxed().read32(0xd60060),
+         );
+         if before != (1, 1, 1) {
+             dev_err!(dev, "G16: unexpected opening cursors {:?}\n", before);
+             return Err(EIO);
+         }
+-        sgx.write32_relaxed(3, 0xd60060);
++        sgx.relaxed().write32(3, 0xd60060);
++        drop(sgx_guard);
+         for (address, value) in [
+             (0xffff_fc20_0003_4f88, 0xffff_fc21_8100_0000u64),
+             (0xffff_fc20_0003_4f90, 0xffff_fc21_8100_8000u64),
+@@ -831,10 +843,12 @@ impl Bootstrap {
+             .as_mut()
+             .send_message(0x21, 0x0084_0000_0000_0011)?;
+         for _ in 0..3000 {
++            let sgx_guard = self._sgx.try_access().ok_or(ENODEV)?;
++            let sgx = &*sgx_guard;
+             let cursors = (
+-                sgx.read32_relaxed(0xd640c0),
+-                sgx.read32_relaxed(0xd640c8),
+-                sgx.read32_relaxed(0xd60060),
++                sgx.relaxed().read32(0xd640c0),
++                sgx.relaxed().read32(0xd640c8),
++                sgx.relaxed().read32(0xd60060),
+             );
+             if cursors == (3, 3, 3) && firmware.read_u32(0xffff_fc20_0003_f19c)? == 1 {
+                 dev_info!(
+@@ -844,14 +858,17 @@ impl Bootstrap {
+                 );
+                 return Ok(());
+             }
++            drop(sgx_guard);
+             kernel::time::delay::fsleep(kernel::time::Delta::from_millis(1));
+         }
++        let sgx_guard = self._sgx.try_access().ok_or(ENODEV)?;
++        let sgx = &*sgx_guard;
+         dev_err!(
+             dev,
+             "G16: control timeout; cursors {}/{}/{} completion {}\n",
+-            sgx.read32_relaxed(0xd640c0),
+-            sgx.read32_relaxed(0xd640c8),
+-            sgx.read32_relaxed(0xd60060),
++            sgx.relaxed().read32(0xd640c0),
++            sgx.relaxed().read32(0xd640c8),
++            sgx.relaxed().read32(0xd60060),
+             firmware.read_u32(0xffff_fc20_0003_f19c)?
+         );
+         Err(ETIMEDOUT)
+@@ -890,6 +907,7 @@ impl Bootstrap {
+                 return Err(EIO);
+             }
+         }
++        drop(sgx_guard);
+         // Slot zero's high root is empty. Firmware keeps using its separate
+         // bootstrap root from the loader reservation, not this context entry.
+         unsafe {
+diff --git a/drivers/gpu/drm/asahi/g16_drm.rs b/drivers/gpu/drm/asahi/g16_drm.rs
+index 1a26bd870fc2d..1fd6a3482b6d2 100644
+--- a/drivers/gpu/drm/asahi/g16_drm.rs
++++ b/drivers/gpu/drm/asahi/g16_drm.rs
+@@ -17,7 +17,7 @@ use kernel::drm::{
+     ioctl,
+ };
+ use kernel::sync::{Arc, Mutex};
+-use kernel::types::ARef;
++use kernel::sync::aref::ARef;
+ use kernel::uaccess::{UserPtr, UserSlice};
+ use kernel::workqueue::{self, impl_has_work, new_work, Work, WorkItem};
+ use kernel::{bindings, c_str, device::Core, drm, platform, prelude::*, uapi};
+diff --git a/drivers/gpu/drm/asahi/g16_runtime.rs b/drivers/gpu/drm/asahi/g16_runtime.rs
+index 517510e6216c5..519f84b0074e0 100644
+--- a/drivers/gpu/drm/asahi/g16_runtime.rs
++++ b/drivers/gpu/drm/asahi/g16_runtime.rs
+@@ -4,6 +4,7 @@
+ 
+ //! G16 ring publication and independent firmware retirement.
+ 
++use kernel::io::Io;
+ use super::Bootstrap;
+ use crate::{g16_compute as compute, g16_fw, g16_render as render, g16_vm};
+ use core::sync::atomic::{AtomicU64, Ordering};
+@@ -347,6 +348,7 @@ impl Bootstrap {
+                 }
+             }
+         }
++        drop(guard);
+         self.flights.reserve(1, GFP_KERNEL)?;
+         self.publications.reserve(stages.len(), GFP_KERNEL)?;
+         Ok(())
+@@ -377,6 +379,7 @@ impl Bootstrap {
+         if tail >= 256 {
+             return Err(EIO);
+         }
++        drop(guard);
+         let reserved = self
+             .publications
+             .iter()
+@@ -1640,6 +1643,7 @@ impl Bootstrap {
+             let head = sgx.try_read32(0xd640c0)?;
+             let ack = sgx.try_read32(0xd640c8)?;
+             let tail = sgx.try_read32(0xd60060)?;
++            drop(guard);
+             if head >= 256 || ack >= 256 || tail >= 256 {
+                 return Err(EIO);
+             }
+@@ -1708,7 +1712,9 @@ impl Bootstrap {
+             fw.write_live(control + u64::from(tail) * 64, &reply)?;
+             crate::mem::sync();
+             fw.write_live(STATE, &next.to_le_bytes())?;
+-            sgx.try_write32(successor, 0xd60060)?;
++            let guard = self._sgx.try_access().ok_or(ENODEV)?;
++            guard.try_write32(successor, 0xd60060)?;
++            drop(guard);
+             crate::mem::sync();
+             self._rtkit
+                 .as_mut()
+diff --git a/drivers/soc/apple/rtkit.c b/drivers/soc/apple/rtkit.c
+index 984aeac15713d..9bc4e1d7d6ecc 100644
+--- a/drivers/soc/apple/rtkit.c
++++ b/drivers/soc/apple/rtkit.c
+@@ -833,6 +833,13 @@ void apple_rtkit_set_boot_ap_power(struct apple_rtkit *rtk, bool enable)
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_set_boot_ap_power);
+ 
++void apple_rtkit_set_early_crashlog(struct apple_rtkit *rtk)
++{
++	rtk->early_crashlog = true;
++	reinit_completion(&rtk->crashlog_completion);
++}
++EXPORT_SYMBOL_GPL(apple_rtkit_set_early_crashlog);
++
+ int apple_rtkit_adopt_running(struct apple_rtkit *rtk, const u8 *endpoints,
+ 			      size_t n_endpoints)
+ {
+@@ -928,16 +935,6 @@ int apple_rtkit_reuse_crashlog_buffer(struct apple_rtkit *rtk,
+ }
+ EXPORT_SYMBOL_GPL(apple_rtkit_reuse_crashlog_buffer);
+ 
+-void apple_rtkit_set_early_crashlog(struct apple_rtkit *rtk)
+-{
+-	rtk->early_crashlog = true;
+-	reinit_completion(&rtk->crashlog_completion);
+-}
+-EXPORT_SYMBOL_GPL(apple_rtkit_set_early_crashlog);
+-
+-
+-
+-
+ static int apple_rtkit_set_iop_power_state(struct apple_rtkit *rtk,
+ 					   unsigned int state)
+ {
+@@ -987,11 +984,6 @@ int apple_rtkit_boot(struct apple_rtkit *rtk)
+ 			rtk->iop_power_state, ret);
+ 		return ret;
+ 	}
+-	if (!rtk->boot_ap_power) {
+-		dev_dbg(rtk->dev, "RTKit: reusing boot AP power ownership\n");
+-		rtk->ap_power_state = APPLE_RTKIT_PWR_STATE_ON;
+-		return 0;
+-	}
+ 	if (rtk->early_crashlog) {
+ 		ret = apple_rtkit_wait_for_completion(&rtk->crashlog_completion);
+ 		if (ret) {
+@@ -999,7 +991,11 @@ int apple_rtkit_boot(struct apple_rtkit *rtk)
+ 			return ret;
+ 		}
+ 	}
+-
++	if (!rtk->boot_ap_power) {
++		dev_dbg(rtk->dev, "RTKit: reusing boot AP power ownership\n");
++		rtk->ap_power_state = APPLE_RTKIT_PWR_STATE_ON;
++		return 0;
++	}
+ 
+ 	ret = apple_rtkit_set_ap_power_state(rtk, APPLE_RTKIT_PWR_STATE_ON);
+ 	if (ret)
+diff --git a/include/linux/soc/apple/rtkit.h b/include/linux/soc/apple/rtkit.h
+index 4028d89223cbd..1b0b7cd0bc69b 100644
+--- a/include/linux/soc/apple/rtkit.h
++++ b/include/linux/soc/apple/rtkit.h
+@@ -105,7 +105,8 @@ struct apple_rtkit *apple_rtkit_init(struct device *dev, void *cookie,
+  */
+ void apple_rtkit_free(struct apple_rtkit *rtk);
+ 
+-/* G16 requires its preallocated crash-buffer reply during endpoint discovery. */
++/* Configure before starting the coprocessor. G16 requests its preallocated
++ * crash buffer before the endpoint-map ACK and requires an explicit reply. */
+ void apple_rtkit_set_early_crashlog(struct apple_rtkit *rtk);
+ 
+ /*
+diff --git a/rust/kernel/drm/file.rs b/rust/kernel/drm/file.rs
+index 277b60a4bb276..7ac519d6af41d 100644
+--- a/rust/kernel/drm/file.rs
++++ b/rust/kernel/drm/file.rs
+@@ -20,7 +20,8 @@ pub trait DriverFile {
+     /// Open a new file (called when a client opens the DRM device).
+     fn open(device: &drm::Device<Self::Driver>) -> Result<Pin<KBox<Self>>>;
+ 
+-    /// Called after associating driver data with an open DRM file.
++    /// Called once after associating the driver data with the DRM file, before
++    /// making the file available to userspace.
+     fn post_open(&self, _file: &File<Self>) where Self: Sized {}
+ 
+     /// Get raw drm_file pointer
+@@ -47,7 +48,7 @@ impl<T: DriverFile> File<T> {
+         unsafe { &*ptr.cast() }
+     }
+ 
+-    /// Return the DRM core pointer for the lifetime of this open file.
++    /// Return the DRM core pointer, valid for this open file's lifetime.
+     pub fn as_raw(&self) -> *mut bindings::drm_file {
+         self.0.get()
+     }
+diff --git a/rust/kernel/iosys_map.rs b/rust/kernel/iosys_map.rs
+index e89cb98c1e4f0..039137c051a2f 100644
+--- a/rust/kernel/iosys_map.rs
++++ b/rust/kernel/iosys_map.rs
+@@ -186,19 +186,6 @@ impl<'a, T: AsBytes + FromBytes> IoSysMapRef<'a, T> {
+         Ok(())
+     }
+ 
+-    /// Copies a checked range from this mapping into `dst`.
+-    /// The offset and count are in units of `T`.
+-    pub fn read(&self, dst: &mut [T], offset: usize) -> Result {
+-        let range = self.compute_range(offset, dst.len())?;
+-        // SAFETY: Both regions are valid for the checked byte count. The
+-        // C helper selects ordinary memory or MMIO access for this mapping.
+-        unsafe {
+-            bindings::iosys_map_memcpy_from(dst.as_mut_ptr().cast(), self.as_raw(),
+-                range.start, range.len());
+-        }
+-        Ok(())
+-    }
+-
+     /// Memset the region starting from `offset`.
+     ///
+     /// `offset` and `len` are in units of `T`, not the number of bytes.
+-- 
+2.50.1 (Apple Git-155)
+

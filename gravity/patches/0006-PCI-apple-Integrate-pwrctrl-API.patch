@@ -1,0 +1,74 @@
+From de08843902c40706ae6ef57e910aef7e80fadc0d Mon Sep 17 00:00:00 2001
+From: Yureka Lilian <yureka@cyberchaos.dev>
+Date: Mon, 6 Jul 2026 21:57:05 +0200
+Subject: [PATCH] PCI: apple: Integrate pwrctrl API
+
+Integrate the PCI pwrctrl framework into the Apple PCIe host driver to
+provide standardized power management for PCI devices.
+
+Notably, this allows enabling powering on the WiFi, SD card reader on
+various Macs by means of the pwrctrl framework before probing the ports.
+
+Signed-off-by: Yureka Lilian <yureka@cyberchaos.dev>
+(cherry picked from commit dbb8db14baaa61e946dfb35950e85da5c4514fd4)
+---
+ drivers/pci/controller/Kconfig      |  1 +
+ drivers/pci/controller/pcie-apple.c | 23 +++++++++++++++++++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/drivers/pci/controller/Kconfig b/drivers/pci/controller/Kconfig
+index 420db1255346f..42af0a08be6aa 100644
+--- a/drivers/pci/controller/Kconfig
++++ b/drivers/pci/controller/Kconfig
+@@ -47,6 +47,7 @@ config PCIE_APPLE
+ 	depends on PCI_MSI
+ 	depends on PAGE_SIZE_16KB || COMPILE_TEST
+ 	select PCI_HOST_COMMON
++	select PCI_PWRCTRL_GENERIC
+ 	select IRQ_MSI_LIB
+ 	help
+ 	  Say Y here if you want to enable PCIe controller support on Apple
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+index d962724750840..ffe81b1ff4bd1 100644
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -30,6 +30,7 @@
+ #include <linux/msi.h>
+ #include <linux/of_irq.h>
+ #include <linux/pci-ecam.h>
++#include <linux/pci-pwrctrl.h>
+ 
+ #include "pci-host-common.h"
+ 
+@@ -903,6 +904,28 @@ static int apple_pcie_init(struct pci_config_window *cfg)
+ 	if (WARN_ON(!pcie))
+ 		return -ENOENT;
+ 
++	// Ensure all ports can be powered on before attempting initialization
++	for_each_available_child_of_node_scoped(dev->of_node, of_port) {
++		ret = pci_pwrctrl_create_device(of_port, pcie->dev);
++		if (ret) {
++			dev_err(pcie->dev, "Failed to create pwrctrl device: %pe\n", ERR_PTR(ret));
++			return ret;
++		}
++
++		ret = pci_pwrctrl_power_on_device(of_port);
++		if (ret) {
++			if (ret != -EPROBE_DEFER) {
++				dev_err(pcie->dev,
++					"Failed to power on device: %pe\n",
++					ERR_PTR(ret));
++				for_each_available_child_of_node_scoped(dev->of_node, of_port) {
++					pci_pwrctrl_destroy_device(of_port);
++				}
++			}
++			return ret;
++		}
++	}
++
+ 	for_each_available_child_of_node_scoped(dev->of_node, of_port) {
+ 		ret = apple_pcie_setup_port(pcie, of_port);
+ 		if (ret) {
+-- 
+2.50.1 (Apple Git-155)
+

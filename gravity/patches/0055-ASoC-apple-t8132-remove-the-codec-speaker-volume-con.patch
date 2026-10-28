@@ -1,0 +1,64 @@
+From d45c71e4b0404e9eced41f5bdfe9a289c9835364 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Sat, 19 Sep 2026 03:14:48 -0400
+Subject: [PATCH] ASoC: apple: t8132: remove the codec speaker volume control
+
+Remove the TAS2764 Speaker Volume control during board control fixup,
+before the sound card is registered. ALSA simple mixers can combine this
+read-only hardware control with the software Speaker Playback Volume
+control, producing conflicting ranges and access permissions.
+
+Keep the software playback control and direct amplifier protection
+interface intact. Other boards using the codec retain its controls.
+
+Validation: focused arm64 LLVM compilation passed; checkpatch and
+whitespace checks passed. Hardware validation is pending.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ sound/soc/apple/t8132/pcm.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/apple/t8132/pcm.c b/sound/soc/apple/t8132/pcm.c
+index ea71f68d7d5da..fc0766c7be446 100644
+--- a/sound/soc/apple/t8132/pcm.c
++++ b/sound/soc/apple/t8132/pcm.c
+@@ -405,7 +405,7 @@ static const struct snd_soc_dapm_route speaker_routes[] = {
+ static int speaker_fixup_controls(struct snd_soc_card *card)
+ {
+ 	static const char * const locked_controls[] = {
+-		"Speaker Volume", "Amp Gain Volume", "ASI1 Sel",
++		"Amp Gain Volume", "ASI1 Sel",
+ 		"HPF Corner Frequency", "OCE Handling", "ISENSE Switch", "VSENSE Switch",
+ 	};
+ 	/* Thermal values from the J773g AID36/AUSP_0329 ATSP preset, decoded with
+@@ -425,6 +425,7 @@ static int speaker_fixup_controls(struct snd_soc_card *card)
+ 	struct j773g_audio *a = snd_soc_card_get_drvdata(card);
+ 	struct snd_soc_pcm_runtime *rtd;
+ 	struct snd_soc_component *codec = NULL;
++	struct snd_kcontrol *kcontrol;
+ 	int i, ret;
+ 
+ 	for_each_card_rtds(card, rtd)
+@@ -442,6 +443,17 @@ static int speaker_fixup_controls(struct snd_soc_card *card)
+ 	if (ret < 0)
+ 		return ret;
+ 	ret = snd_soc_set_enum_kctl(card, "HPF Corner Frequency", "2 Hz");
++	if (ret < 0)
++		return ret;
++	/*
++	 * Protection accesses amplifier attenuation directly. Hide its codec
++	 * control so ALSA mixers do not merge it with our software playback
++	 * volume control. Other users of the codec retain their controls.
++	 */
++	kcontrol = snd_soc_card_get_kcontrol(card, "Speaker Volume");
++	if (!kcontrol)
++		return -ENOENT;
++	ret = snd_ctl_remove(card->snd_card, kcontrol);
+ 	if (ret < 0)
+ 		return ret;
+ 	for (i = 0; i < ARRAY_SIZE(locked_controls); i++) {
+-- 
+2.50.1 (Apple Git-155)
+

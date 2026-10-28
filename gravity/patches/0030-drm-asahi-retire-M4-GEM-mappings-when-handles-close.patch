@@ -1,0 +1,120 @@
+From 63e8a1d7268ca75c32b9bde543d3b4f6e59d6a75 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Mon, 14 Sep 2026 16:39:38 -0400
+Subject: [PATCH] drm/asahi: retire M4 GEM mappings when handles close
+
+Drain work using a closing GEM object before unmapping it so Mesa can reuse its virtual addresses. Mark the device failed if teardown cannot establish completion. Disable generic C PRIME-import and dumb-create callbacks because they do not initialize the Rust object payload; retain the saved scatter-gather ownership accessor layout.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ drivers/gpu/drm/asahi/g16_drm.rs | 38 +++++++++++++++++++++++++++++---
+ rust/kernel/drm/gem/shmem.rs     | 18 +++++++--------
+ 2 files changed, 44 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/gpu/drm/asahi/g16_drm.rs b/drivers/gpu/drm/asahi/g16_drm.rs
+index 1fd6a3482b6d2..1c5a0280410e2 100644
+--- a/drivers/gpu/drm/asahi/g16_drm.rs
++++ b/drivers/gpu/drm/asahi/g16_drm.rs
+@@ -199,6 +199,7 @@ impl DriverObject for Buffer {
+             vm: args.1,
+         })
+     }
++
+     fn export(obj: &Object, flags: u32) -> Result<drm::gem::DmaBuf<Object>> {
+         if obj.vm != 0 {
+             return Err(EINVAL);
+@@ -206,8 +207,38 @@ impl DriverObject for Buffer {
+         obj.prime_export(flags)
+     }
+ 
+-    // Mappings pin GEM storage until VM destruction, including after closing
+-    // a userspace handle. This matches the prototype's context-owned memory.
++    fn close(obj: &Object, file: &DrmFile) {
++        // Mesa may reuse this virtual address after GEM_CLOSE. Hold the file
++        // state against new submissions, and retire only VMs using this BO.
++        // Workers never acquire file state while completing their fences.
++        let inner = file.inner();
++        if inner.device.failed.load(Ordering::Acquire) {
++            return;
++        }
++        let result: Result = (|| {
++            let mut state = inner.state.lock();
++            for vm in &mut state.vms {
++                if !vm.mappings.iter().any(|m| core::ptr::eq(m.sg.object(), obj)) {
++                    continue;
++                }
++                drain(&mut vm.pending)?;
++                let runtime = inner.device.runtime.lock();
++                while let Some(range) = vm.mappings.iter()
++                    .find(|m| core::ptr::eq(m.sg.object(), obj))
++                    .map(|m| m.range.clone())
++                {
++                    vm.unmap(range, &runtime)?;
++                }
++            }
++            Ok(())
++        })();
++        if let Err(error) = result {
++            // close cannot report failure. Preserve backing for late DMA and
++            // reject further submissions if completion was not established.
++            inner.device.failed.store(true, Ordering::Release);
++            pr_err!("G16: failed to unbind closed GEM object: {:?}\n", error);
++        }
++    }
+ }
+ 
+ #[pin_data(PinnedDrop)]
+@@ -916,7 +947,8 @@ impl Vm {
+ static FENCE_KEY: Pin<&kernel::sync::LockClassKey> = kernel::static_lock_class!();
+ 
+ /// Wait only for actual worker completion, including on scheduler timeout.
+-/// Callers hold admission, preventing new publications while mappings change.
++/// Callers hold admission or the affected file state, preventing new uses
++/// of the mappings protected by these fences.
+ fn drain(pending: &mut KVec<dma_fence::Fence>) -> Result {
+     for fence in pending.iter() {
+         // SAFETY: Each entry owns its fence reference throughout the wait.
+diff --git a/rust/kernel/drm/gem/shmem.rs b/rust/kernel/drm/gem/shmem.rs
+index eacee52d93f38..29a02a77c5d7b 100644
+--- a/rust/kernel/drm/gem/shmem.rs
++++ b/rust/kernel/drm/gem/shmem.rs
+@@ -336,8 +336,10 @@ impl<T: DriverObject> driver::AllocImpl for Object<T> {
+         prime_handle_to_fd: None,
+         prime_fd_to_handle: None,
+         gem_prime_import: None,
+-        gem_prime_import_sg_table: Some(bindings::drm_gem_shmem_prime_import_sg_table),
+-        dumb_create: Some(bindings::drm_gem_shmem_dumb_create),
++        // The generic C allocators do not initialize the Rust object payload.
++        // Support native GEM allocation and export only.
++        gem_prime_import_sg_table: None,
++        dumb_create: None,
+         dumb_map_offset: None,
+     };
+ }
+@@ -448,13 +450,6 @@ pub struct SGTable<T: DriverObject> {
+     _owner: ARef<Object<T>>,
+ }
+ 
+-impl<T: DriverObject> SGTable<T> {
+-    /// Returns the GEM object kept alive by this pinned scatter-gather table.
+-    pub fn object(&self) -> &Object<T> {
+-        &self._owner
+-    }
+-}
+-
+ // SAFETY: This object is thread-safe via our type invariants.
+ unsafe impl<T: DriverObject> Send for SGTable<T> {}
+ // SAFETY: This object is thread-safe via our type invariants.
+@@ -468,3 +463,8 @@ impl<T: DriverObject> Deref for SGTable<T> {
+         unsafe { self.sgt.as_ref() }
+     }
+ }
++
++impl<T: DriverObject> SGTable<T> {
++    /// Return the GEM object that owns and pins this scatter-gather table.
++    pub fn object(&self) -> &Object<T> { &self._owner }
++}
+-- 
+2.50.1 (Apple Git-155)
+

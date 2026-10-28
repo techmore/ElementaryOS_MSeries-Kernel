@@ -1,0 +1,41 @@
+From 1c374608abd47b59d47faae30a4e4bb447fffab0 Mon Sep 17 00:00:00 2001
+From: Niklas Sheth <hi@niklassheth.com>
+Date: Fri, 18 Sep 2026 19:06:15 -0400
+Subject: [PATCH] arm64: dts: apple: use the display FE domain for J773g
+ framebuffer
+
+The firmware-owned display CPU power domain is disabled, so referencing it
+can defer simpledrm until after appledrm removes conflicting framebuffers.
+The late simpledrm device then survives alongside the native display and
+appears as a second output to the compositor.
+
+Use the managed display FE domain while retaining the DisplayPort PHY
+dependency. This lets simpledrm register early enough for appledrm to remove
+it during the normal framebuffer handoff.
+
+Validation: the J773g DTB builds successfully. A fresh Fedora boot on the
+M4 mini registers simpledrm at 0.1 seconds and hands over to appledrm at
+4.2 seconds, with no late simpledrm output or runtime unbind required.
+
+Assisted-By: OpenAI Codex (GPT-6 Astra)
+Signed-off-by: Niklas Sheth <hi@niklassheth.com>
+---
+ arch/arm64/boot/dts/apple/t8132-j773g.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index e374ca61217cb..1ea7b1cec3e9c 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -46,7 +46,7 @@
+  * Keep the power-domains used for the HDMI port on.
+  */
+ &framebuffer0 {
+-	power-domains = <&ps_dispext0_cpu>, <&ps_dptx_phy>;
++	power-domains = <&ps_dispext0_fe>, <&ps_dptx_phy>;
+ };
+ 
+ &sio_dart {
+-- 
+2.50.1 (Apple Git-155)
+
