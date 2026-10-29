@@ -1,6 +1,6 @@
 # Gravity M4 series (Mac mini J773g)
 
-65 commits (0001-0065) from `GravityLinux/linux` branch `gravity-m4` (commit `4fc326f6`, 2026-10-09): the M4 / T8132 work that
+65 Gravity commits (0001-0065) plus our local 0066 and 0067 from `GravityLinux/linux` branch `gravity-m4` (commit `4fc326f6`, 2026-10-09): the M4 / T8132 work that
 Gravity Linux's image boots on the M4 Mac mini. They are exported oldest-first in `patches/`; `series.json` lists each
 with its SHA-256 and upstream commit, like `aurora/enhancements/series.json`.
 
@@ -10,6 +10,12 @@ with its SHA-256 and upstream commit, like `aurora/enhancements/series.json`.
 driver from failing the GPU when a firmware notification is late. It runs on our M4
 Mac mini as an out-of-tree module. See `GPU-HANG-2026-10-28.md`, and `m4-module/` for
 the build and install scripts.
+
+`0067` is also ours. It adds the missing `reboot` child to the T8132 SMC node so the
+`macsmc-reboot` driver binds. Without it, restart takes a fallback path that landed in
+macOS recovery after a GPU hang. Booted on the M4 Mac mini as a patched dtb on 2026-10-28;
+the driver now reports "Handling reboot and poweroff requests via SMC". Whether a real
+reboot now comes back up is not yet confirmed. The PMU nvmem cells are still missing.
 
 ## Not boot-tested here
 

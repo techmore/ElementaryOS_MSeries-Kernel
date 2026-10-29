@@ -474,6 +474,15 @@
       "local": true,
       "note": "techmore fix: poll completion stamps when a firmware notification wait times out instead of failing the GPU. Mirrors replacement/210-gpu g16_drm_pump.rs. Built as an out-of-tree module and running on the M4 Mac mini since 2026-10-28; see GPU-HANG-2026-10-28.md.",
       "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0067-arm64-dts-apple-t8132-add-the-SMC-reboot-node.patch",
+      "sha256": "27575bc2e6f6dfcbbda8a97ed110065d4d7296602567bae325bcc628d008009b",
+      "upstream": null,
+      "head": null,
+      "local": true,
+      "note": "techmore fix: add the missing smc reboot child node so macsmc-reboot binds (no more 'Failed to locate of_node'). Installed as a patched dtb on the M4 Mac mini 2026-10-28; reboot-path result still to be confirmed. PMU nvmem cells remain missing.",
+      "applies_cleanly_to_aurora_m4": null
     }
   ]
 }
