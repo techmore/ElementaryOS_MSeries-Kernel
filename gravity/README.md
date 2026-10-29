@@ -11,6 +11,10 @@ driver from failing the GPU when a firmware notification is late. It runs on our
 Mac mini as an out-of-tree module. See `GPU-HANG-2026-10-28.md`, and `m4-module/` for
 the build and install scripts.
 
+Checked 2026-10-29 (`upstream_check` in `series.json`): `gravity-m4` is unchanged at `4fc326f6`, so this series
+is current. 0066 is not absorbed. Gravity's unreleased `replacement/210-gpu` (`3990d074`, Linux 7.3) has the same
+fix in `g16_drm_pump.rs`; drop 0066 once a packaged Gravity kernel ships it.
+
 ## Not boot-tested here
 
 Nothing in this directory has been built or booted by this project. Gravity's own installer image is the known route.
