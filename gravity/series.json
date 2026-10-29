@@ -465,6 +465,15 @@
       "upstream": "https://github.com/GravityLinux/linux/commit/1a0bfae9821e08c59c9044b0a347ab12e545a4f4",
       "head": "1a0bfae9821e08c59c9044b0a347ab12e545a4f4",
       "applies_cleanly_to_aurora_m4": false
+    },
+    {
+      "file": "0066-drm-asahi-poll-M4-completion-when-a-firmware-notific.patch",
+      "sha256": "41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2",
+      "upstream": null,
+      "head": null,
+      "local": true,
+      "note": "techmore fix: poll completion stamps when a firmware notification wait times out instead of failing the GPU. Mirrors replacement/210-gpu g16_drm_pump.rs. Built as an out-of-tree module and running on the M4 Mac mini since 2026-10-28; see GPU-HANG-2026-10-28.md.",
+      "applies_cleanly_to_aurora_m4": false
     }
   ]
 }
