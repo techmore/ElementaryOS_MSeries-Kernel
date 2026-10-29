@@ -473,7 +473,17 @@
       "head": null,
       "local": true,
       "note": "techmore fix: poll completion stamps when a firmware notification wait times out instead of failing the GPU. Mirrors replacement/210-gpu g16_drm_pump.rs. Built as an out-of-tree module and running on the M4 Mac mini since 2026-10-28; see GPU-HANG-2026-10-28.md.",
-      "applies_cleanly_to_aurora_m4": false
+      "applies_cleanly_to_aurora_m4": false,
+      "absorbed_upstream": false,
+      "upstream_equivalent": {
+        "repo": "https://github.com/GravityLinux/linux",
+        "branch": "replacement/210-gpu",
+        "commit": "3990d074ef4cbfefa85529c86a5491446033fbbf",
+        "file": "drivers/gpu/drm/asahi/g16_drm_pump.rs",
+        "checked": "2026-10-29",
+        "in_a_released_gravity_kernel": false,
+        "note": "Same notification-timeout rescue ('G16: notification wait timed out; polling retired ...'). Drop 0066 once a packaged Gravity kernel ships it. Aurora's own T8132 GPU backend is a separate driver and does not absorb it."
+      }
     },
     {
       "file": "0067-arm64-dts-apple-t8132-add-the-SMC-reboot-node.patch",
@@ -484,5 +494,12 @@
       "note": "techmore fix: add the missing smc reboot child node so macsmc-reboot binds (no more 'Failed to locate of_node'). Installed as a patched dtb on the M4 Mac mini 2026-10-28; reboot-path result still to be confirmed. PMU nvmem cells remain missing.",
       "applies_cleanly_to_aurora_m4": null
     }
-  ]
+  ],
+  "upstream_check": {
+    "date": "2026-10-29",
+    "gravity-m4": "4fc326f6c25ccceb7515e2635c22e01fde5d3bac (unchanged; this series is current)",
+    "replacement/210-gpu": "3990d074ef4cbfefa85529c86a5491446033fbbf (2026-10-29, Linux 7.3, unreleased)",
+    "aurora_m4_overlap_base": "aurora-silicon/linux m4/j713-t8132-integ-20261023 325ed68cf0011730852cbb113a06fab86a4a8e31 (unchanged)",
+    "receipt": "../aurora/unified72/upstream-resync-2026-10-29.json"
+  }
 }

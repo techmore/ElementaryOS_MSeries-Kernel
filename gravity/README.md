@@ -17,6 +17,10 @@ macOS recovery after a GPU hang. Booted on the M4 Mac mini as a patched dtb on 2
 the driver now reports "Handling reboot and poweroff requests via SMC". Whether a real
 reboot now comes back up is not yet confirmed. The PMU nvmem cells are still missing.
 
+Checked 2026-10-29 (`upstream_check` in `series.json`): `gravity-m4` is unchanged at `4fc326f6`, so this series
+is current. 0066 is not absorbed. Gravity's unreleased `replacement/210-gpu` (`3990d074`, Linux 7.3) has the same
+fix in `g16_drm_pump.rs`; drop 0066 once a packaged Gravity kernel ships it.
+
 ## Not boot-tested here
 
 Nothing in this directory has been built or booted by this project. Gravity's own installer image is the known route.
