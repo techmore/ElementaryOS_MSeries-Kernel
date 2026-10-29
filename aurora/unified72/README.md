@@ -1,5 +1,21 @@
 # Unified Aurora 7.2.10 build candidate
 
+## Upstream resync — October 29, 2026 (read-only)
+
+Receipt: [upstream-resync-2026-10-29.json](upstream-resync-2026-10-29.json); branch snapshot:
+[2026-10-29.json](../branch-audits/2026-10-29.json). Both are copies of the hub's (techmore/ElementaryOS_MSeries
+`mseries/aurora/`), which also adds Joshua Warren's `linux-aurora`, `linux-omarchy-m6` and `m1n1` forks to its
+`local-ai/branch-watch.json`.
+
+- **This copy is behind the hub.** The hub pins wip4 revision 6 (`series.json` plus patches 0002-0005, PR #619);
+  this repo still has revision 4 (wip3). Mirroring those files here starts the native kernel build, so it waits for
+  the owner. The laptop runs wip4 revision 5 (0001 + 0002; no #186).
+- **#158 merged on 2026-10-23**; `bd526b3c` is now an ancestor of omacom `integration/aurora` (`2f725546`, 7.2.11).
+  #157 and #186 are open and unchanged. aurora-silicon's `integration/aurora` moved to Linux 7.3.
+- **Absorbed upstream:** the `UDMABUF`/`DMABUF_HEAPS`/`DMABUF_HEAPS_SYSTEM` overlay and enhancements
+  `0001-udmabuf.patch`, via the shared `asahi.config` (`1b4997bb`, 2026-10-20). None of the wip4 patches is absorbed.
+- At the new head 0002-0005 apply; 0001 needs a context rebase (one new `#include` in `dcp-internal.h`).
+
 ## wip3 candidate — October 21, 2026 (build-only, not booted)
 
 **Revision 4 pins `7.2.11-elementary-aurora72-wip3`:** unmerged upstream
