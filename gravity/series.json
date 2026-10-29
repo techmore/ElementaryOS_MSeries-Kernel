@@ -484,6 +484,15 @@
         "in_a_released_gravity_kernel": false,
         "note": "Same notification-timeout rescue ('G16: notification wait timed out; polling retired ...'). Drop 0066 once a packaged Gravity kernel ships it. Aurora's own T8132 GPU backend is a separate driver and does not absorb it."
       }
+    },
+    {
+      "file": "0067-arm64-dts-apple-t8132-add-the-SMC-reboot-node.patch",
+      "sha256": "27575bc2e6f6dfcbbda8a97ed110065d4d7296602567bae325bcc628d008009b",
+      "upstream": null,
+      "head": null,
+      "local": true,
+      "note": "techmore fix: add the missing smc reboot child node so macsmc-reboot binds (no more 'Failed to locate of_node'). Installed as a patched dtb on the M4 Mac mini 2026-10-28; reboot-path result still to be confirmed. PMU nvmem cells remain missing.",
+      "applies_cleanly_to_aurora_m4": null
     }
   ],
   "upstream_check": {
