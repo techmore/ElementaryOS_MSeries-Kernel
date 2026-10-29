@@ -1,0 +1,101 @@
+From 40d468ebf57d0c35161f5b9a24c4746b3554966f Mon Sep 17 00:00:00 2001
+From: Techmore <sdolbec1@gmail.com>
+Date: Wed, 28 Oct 2026 22:28:20 -0400
+Subject: [PATCH] drm/asahi: poll M4 completion when a firmware notification
+ times out
+
+The M4 submission worker treated a notification wait that hit its
+timeout as a fatal GPU failure. `wake_result?` at the top of the loop
+returned the wait's ETIMEDOUT before `retire()` polled the completion
+stamps, so one late or lost firmware notification poisoned the runtime
+and set `device.failed`. Every later submit and VM_BIND then failed with
+EIO until reboot, even if the work had already finished. retire()'s own
+10 s no-progress watchdog, which names the stuck Work, never ran.
+
+Seen three times on 2026-10-28 on a Mac mini M4 (Gravity 7.1.13-509)
+during normal desktop use: "submission pipeline failed: ETIMEDOUT, 128
+jobs, 42 issued" with no "async Work ... timeout" line and no firmware
+fault event.
+
+Treat ETIMEDOUT from the wait as "poll now": fall through to retire(),
+which still fails the GPU on a real 10 s stall. Cap the wait at 250 ms
+while work is in flight, so a lost notification costs milliseconds.
+Log the first 64 rescues.
+
+This mirrors the safety poll in GravityLinux/linux replacement/210-gpu
+(g16_drm_pump.rs), backported to the 7.1 driver.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/asahi/g16_drm.rs     | 21 ++++++++++++++++++++-
+ drivers/gpu/drm/asahi/g16_runtime.rs | 12 ++++++++++--
+ 2 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/asahi/g16_drm.rs b/drivers/gpu/drm/asahi/g16_drm.rs
+index 22a864dcbb1b..4ba76065e4ff 100644
+--- a/drivers/gpu/drm/asahi/g16_drm.rs
++++ b/drivers/gpu/drm/asahi/g16_drm.rs
+@@ -1043,7 +1043,16 @@ impl WorkItem for Execution {
+             let mut engine = this.device.engine.lock();
+             let mut runtime = this.device.runtime.lock();
+             let result = (|| -> Result<bool> {
+-                wake_result?;
++                // No notification within the wait window is not a hang by
++                // itself: a firmware completion notification can be late or
++                // lost. Poll the completion stamps below; retire() keeps its
++                // own 10 s no-progress watchdog and reports a real hang.
++                // (Backport of the safety poll in replacement/210-gpu.)
++                let timed_out = match wake_result {
++                    Err(e) if e == ETIMEDOUT => true,
++                    Err(e) => return Err(e),
++                    Ok(()) => false,
++                };
+                 generation?;
+                 if this.device.failed.load(Ordering::Acquire) {
+                     return Err(EIO);
+@@ -1064,6 +1073,16 @@ impl WorkItem for Execution {
+                         job.error = Some(error);
+                     }
+                     progress = true;
++                    if timed_out {
++                        static REPORTED: core::sync::atomic::AtomicU32 =
++                            core::sync::atomic::AtomicU32::new(0);
++                        if REPORTED.fetch_add(1, Ordering::Relaxed) < 64 {
++                            pr_warn!(
++                                "G16: notification wait timed out; polling retired Work {:#x}\n",
++                                id
++                            );
++                        }
++                    }
+                 }
+                 let mut admitted = 0;
+                 loop {
+diff --git a/drivers/gpu/drm/asahi/g16_runtime.rs b/drivers/gpu/drm/asahi/g16_runtime.rs
+index 9d818e2a40e6..460856793265 100644
+--- a/drivers/gpu/drm/asahi/g16_runtime.rs
++++ b/drivers/gpu/drm/asahi/g16_runtime.rs
+@@ -784,11 +784,19 @@ impl Bootstrap {
+     /// Notifications do not extend the watchdog. Only retirement progress
+     /// resets it, so trace traffic cannot keep a stuck command alive.
+     pub(crate) fn watchdog_remaining_ms(&self) -> u32 {
+-        self.flights
++        let watchdog = self
++            .flights
+             .iter()
+             .map(|flight| (10000 - flight.started.elapsed().as_millis()).clamp(1, 10000) as u32)
+             .min()
+-            .unwrap_or(10000)
++            .unwrap_or(10000);
++        // With work outstanding, recheck completion at least this often, so a
++        // late or lost notification costs milliseconds instead of a hang.
++        if self.flights.is_empty() {
++            watchdog
++        } else {
++            watchdog.min(250)
++        }
+     }
+ }
+ 
+-- 
+2.53.0
+

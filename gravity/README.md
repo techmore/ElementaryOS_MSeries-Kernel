@@ -1,8 +1,15 @@
 # Gravity M4 series (Mac mini J773g)
 
-65 commits from `GravityLinux/linux` branch `gravity-m4` (commit `4fc326f6`, 2026-10-09): the M4 / T8132 work that
+65 commits (0001-0065) from `GravityLinux/linux` branch `gravity-m4` (commit `4fc326f6`, 2026-10-09): the M4 / T8132 work that
 Gravity Linux's image boots on the M4 Mac mini. They are exported oldest-first in `patches/`; `series.json` lists each
 with its SHA-256 and upstream commit, like `aurora/enhancements/series.json`.
+
+## Our patches
+
+`0066` is ours, not Gravity's (`"local": true` in `series.json`). It stops the M4 GPU
+driver from failing the GPU when a firmware notification is late. It runs on our M4
+Mac mini as an out-of-tree module. See `GPU-HANG-2026-10-28.md`, and `m4-module/` for
+the build and install scripts.
 
 ## Not boot-tested here
 
