@@ -114,3 +114,12 @@ release string. The three existing live-hook tests passed against the actual
 pinned hook and baseline receipt; an additional R8 synthetic check confirmed
 the release substitution and rejected an invalid release string. No real image
 was assembled, and the hook was not changed on the running host.
+
+At the same PR head, `assemble-research-iso.py` derives the release from the
+kernel build receipt and checks for exactly one matching module tree and matching
+Image hashes; it does not hard-code the R7 release. In contrast,
+`stage-stack.py`, `build-initramfs.py`, `build-efi.py` and `test-live-kernel.py`
+hard-code the historical release and/or historical build receipts. They have
+not been updated for R8 and must not be used as R8 qualification evidence.
+The proposed live-image hook update does not by itself qualify those separate
+research UKI and staging paths or the physical boot chain.
