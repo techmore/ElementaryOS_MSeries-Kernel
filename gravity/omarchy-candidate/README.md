@@ -53,3 +53,24 @@ display and Ethernet modules against the build receipt and leaves an
 package, change the boot chain or establish provenance. The preflight and
 staging have only been exercised with synthetic inputs and a mocked module
 installer; they still need a real R8 build and Omarchy package review.
+
+## Boot selection hazard
+
+The Omarchy boot package's overlay helper at `061be4d6` derives the device-tree
+directory from `/lib/modules/*-ARCH` using version sort and the first result.
+For example, version-sorting `7.2.11-11-1-ARCH` and the proposed
+`7.1.13-omarchy-m4-r8-ARCH` selects the 7.2 directory. Thus merely naming the
+R8 release with `-ARCH` does not guarantee its DTB will accompany its kernel
+when another newer version is installed. This is a source-level example, not a
+test on an Omarchy installation.
+
+The Asahi scripts hook at `755b1d19` invokes `update-m1n1` after installing
+or upgrading files under `usr/lib/modules/*/dtbs/*`. A real package transaction
+may therefore rebuild shared boot data; an isolated package name alone is not
+a boot fallback. Before any package installation, trace the actual installed
+hook and bootloader version, design and test explicit matched DTB selection and
+rollback, and verify the Gravity firmware/loader contract. Do not apply a
+shared boot configuration on the current Gravity host.
+
+Sources: https://github.com/omacom/omarchy-mac-pkgs/blob/061be4d6acb810ab8b1bd74699e3e8e4e97b4bfa/omarchy-mac-boot/lib/dtb-overlays.sh
+and https://github.com/AsahiLinux/asahi-scripts/blob/755b1d19e61d58b010f32349b7aba8f2c580fc29/libalpm/hooks/95-m1n1-install.hook
