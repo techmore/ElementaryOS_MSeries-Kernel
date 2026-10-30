@@ -55,3 +55,19 @@ first controller are USB-PD devices; the second controller has no device-tree
 children or enumerated SPMI child devices, and `/sys/class/nvmem` is empty. This
 provides no PMIC address or safe register offsets; it does not prove the hardware
 has no PMIC. No raw bus accesses were attempted.
+
+## Vulkan enumeration follow-up
+
+After network/device access became available, `vulkaninfo --summary` identified
+Apple M4 (G16G B1) using Mesa Honeykrisp 26.3.0-devel. Immediately after that
+19:35:54 EDT enumeration, this boot logged four `UATPageTable::unmap_pages`
+"already unmapped" messages at IOVA `0x2ffff90000`. This is the same warning
+signature previously observed before hangs; the temporal association does not
+prove causation. The earlier statement that no such signature was present was
+accurate only before this enumeration. No subsequent GPU workload was run.
+
+The saved driver logs an error and clears the entry when an unmap finds a
+non-leaf page. Several teardown and rollback paths can invoke this routine;
+the log alone does not identify which one or establish a safe fix. Further
+GPU tests should wait for a controlled investigation given the owner's report
+of instability.
