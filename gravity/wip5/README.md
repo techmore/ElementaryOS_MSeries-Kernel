@@ -8,6 +8,13 @@ with five additional patches. The upstream integration branch has since moved
 to `2dd4aab661e42eccf3eef0f4dd765bcc72e5832a`; this draft is pinned to the
 project's WIP candidate, not silently rebased to the newer upstream head.
 
+The intended end state is a stable Gravity/Omarchy dual-boot option for the M4
+Mac mini, with the existing Gravity and macOS/Recovery paths preserved. It
+requires matched per-system kernels, modules, DTBs, firmware and bootloader
+handoffs, with tested rollback and recovery. The owner must approve an upstream
+proposal after testing. Adoption by either upstream project remains a
+maintainer decision, not an established outcome.
+
 ## First draft: J773g SMC
 
 `0001-j773g-smc-forward-port.patch` adapts the mailbox, SMC and GPIO nodes from

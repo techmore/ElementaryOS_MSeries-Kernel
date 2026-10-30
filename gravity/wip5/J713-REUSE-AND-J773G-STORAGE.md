@@ -34,6 +34,19 @@ The next implementation step is to compare the actual J773g firmware's ANS
 resources and handoff with the WIP driver and select a verified mapping or a
 carefully scoped driver adaptation before enabling the internal disk.
 
+The Air's basic-series T8132 driver also sets `NVME_QUIRK_BROKEN_FUA`, with a
+source comment reporting that J713 needed explicit flushes for writes to
+survive reset. The WIP5 T8132 entry lacks that setting (although its T8140
+entry has it). Draft `0002-t8132-nvme-explicit-flush.patch` carries the same
+conservative quirk into the T8132 entry; it does not add or enable the mini's
+NVMe nodes. It passes `git apply --check` against the full pinned WIP5 source.
+The modified driver object compiled in the separate `3bdf11d3` checkout, whose
+unmodified `apple.c` Git blob is identical to WIP5's
+`d3ef47fa840e49ee49f8a94afb66d5ae6303a1db`; this is not a complete WIP5
+build. The J713 evidence motivates the change but does not prove J773g storage
+durability. Qualify flush, reset and recovery on an appropriate test setup
+before relying on the mini's internal disk.
+
 ## Sound on the current Gravity host
 
 The running Gravity boot lists ALSA cards `T8132Speaker` and `DisplayPort`;
