@@ -38,3 +38,23 @@ the historical R5/R6/R7 contracts. Do not change the live desktop or boot setup.
 Direct Git fetch of the candidate branch failed due to DNS, and the connected
 GitHub app returned 403 for branch creation. These results are local evidence;
 they have not been synchronized to the candidate PR.
+
+## Prepared R8 proposal
+
+`R8-PR444-proposal.patch` is a draft against the exact PR head above, with paths
+relative to the elementary repository. It adds 0066 as compatibility patch
+0011, creates separate R8 patch and resulting-file records without changing
+R3–R7, and updates the build and package checker version selection to R8. It
+does not change the image profile's selected package or claim that R8 exists as
+a built artifact. Apply only after checking the target branch head and resolving
+any changes since that pin.
+
+In a partial snapshot of the PR's relevant files, Python compilation passed,
+the patch-manifest checksums and reconstructed GPU result hashes matched, and
+the earlier version and result records remained identical. The generated patch
+also reverse-applied cleanly to that modified snapshot. The embedded patch
+contains its original mail-format whitespace. These checks do not replace a
+full checkout replay, full R8 build, package inspection, integration with the
+selected image, or physical testing. R7 and R8 share the candidate's existing
+kernel release string; do not install both as independent bootable variants
+without addressing the resulting module-path collision.

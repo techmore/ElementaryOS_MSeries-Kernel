@@ -1,0 +1,259 @@
+diff --git a/mseries/m4-mini/check-kernel-package.py b/mseries/m4-mini/check-kernel-package.py
+index d44f6ab..5985262 100644
+--- a/mseries/m4-mini/check-kernel-package.py
++++ b/mseries/m4-mini/check-kernel-package.py
+@@ -44,12 +44,14 @@ def main():
+                 'Version: 7.1.13+elementary.m4.gravity1-2', 'Version: 7.1.13+elementary.m4.gravity1-3',
+                 'Version: 7.1.13+elementary.m4.gravity1-4', 'Version: 7.1.13+elementary.m4.gravity1-5',
+                 'Version: 7.1.13+elementary.m4.gravity1-6',
+-                'Version: 7.1.13+elementary.m4.gravity1-7']):
++                'Version: 7.1.13+elementary.m4.gravity1-7',
++                'Version: 7.1.13+elementary.m4.gravity1-8']):
+         raise ValueError('unexpected package identity')
+     version = rows[1].removeprefix('Version: ')
+     is_live_media_candidate = version in {'7.1.13+elementary.m4.gravity1-6',
+-                                         '7.1.13+elementary.m4.gravity1-7'}
+-    is_r7 = version == '7.1.13+elementary.m4.gravity1-7'
++                                         '7.1.13+elementary.m4.gravity1-7',
++                                         '7.1.13+elementary.m4.gravity1-8'}
++    is_r7 = version in {'7.1.13+elementary.m4.gravity1-7', '7.1.13+elementary.m4.gravity1-8'}
+     if is_live_media_candidate:
+         checks = build.get('m4_idle_checks', {})
+         if (checks.get('apple_cpu_wfi_linked') is not True
+diff --git a/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch b/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch
+new file mode 100644
+index 0000000..031c7a7
+--- /dev/null
++++ b/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch
+@@ -0,0 +1,101 @@
++From 40d468ebf57d0c35161f5b9a24c4746b3554966f Mon Sep 17 00:00:00 2001
++From: Techmore <sdolbec1@gmail.com>
++Date: Wed, 28 Oct 2026 22:28:20 -0400
++Subject: [PATCH] drm/asahi: poll M4 completion when a firmware notification
++ times out
++
++The M4 submission worker treated a notification wait that hit its
++timeout as a fatal GPU failure. `wake_result?` at the top of the loop
++returned the wait's ETIMEDOUT before `retire()` polled the completion
++stamps, so one late or lost firmware notification poisoned the runtime
++and set `device.failed`. Every later submit and VM_BIND then failed with
++EIO until reboot, even if the work had already finished. retire()'s own
++10 s no-progress watchdog, which names the stuck Work, never ran.
++
++Seen three times on 2026-10-28 on a Mac mini M4 (Gravity 7.1.13-509)
++during normal desktop use: "submission pipeline failed: ETIMEDOUT, 128
++jobs, 42 issued" with no "async Work ... timeout" line and no firmware
++fault event.
++
++Treat ETIMEDOUT from the wait as "poll now": fall through to retire(),
++which still fails the GPU on a real 10 s stall. Cap the wait at 250 ms
++while work is in flight, so a lost notification costs milliseconds.
++Log the first 64 rescues.
++
++This mirrors the safety poll in GravityLinux/linux replacement/210-gpu
++(g16_drm_pump.rs), backported to the 7.1 driver.
++
++Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
++---
++ drivers/gpu/drm/asahi/g16_drm.rs     | 21 ++++++++++++++++++++-
++ drivers/gpu/drm/asahi/g16_runtime.rs | 12 ++++++++++--
++ 2 files changed, 30 insertions(+), 3 deletions(-)
++
++diff --git a/drivers/gpu/drm/asahi/g16_drm.rs b/drivers/gpu/drm/asahi/g16_drm.rs
++index 22a864dcbb1b..4ba76065e4ff 100644
++--- a/drivers/gpu/drm/asahi/g16_drm.rs
+++++ b/drivers/gpu/drm/asahi/g16_drm.rs
++@@ -1043,7 +1043,16 @@ impl WorkItem for Execution {
++             let mut engine = this.device.engine.lock();
++             let mut runtime = this.device.runtime.lock();
++             let result = (|| -> Result<bool> {
++-                wake_result?;
+++                // No notification within the wait window is not a hang by
+++                // itself: a firmware completion notification can be late or
+++                // lost. Poll the completion stamps below; retire() keeps its
+++                // own 10 s no-progress watchdog and reports a real hang.
+++                // (Backport of the safety poll in replacement/210-gpu.)
+++                let timed_out = match wake_result {
+++                    Err(e) if e == ETIMEDOUT => true,
+++                    Err(e) => return Err(e),
+++                    Ok(()) => false,
+++                };
++                 generation?;
++                 if this.device.failed.load(Ordering::Acquire) {
++                     return Err(EIO);
++@@ -1064,6 +1073,16 @@ impl WorkItem for Execution {
++                         job.error = Some(error);
++                     }
++                     progress = true;
+++                    if timed_out {
+++                        static REPORTED: core::sync::atomic::AtomicU32 =
+++                            core::sync::atomic::AtomicU32::new(0);
+++                        if REPORTED.fetch_add(1, Ordering::Relaxed) < 64 {
+++                            pr_warn!(
+++                                "G16: notification wait timed out; polling retired Work {:#x}\n",
+++                                id
+++                            );
+++                        }
+++                    }
++                 }
++                 let mut admitted = 0;
++                 loop {
++diff --git a/drivers/gpu/drm/asahi/g16_runtime.rs b/drivers/gpu/drm/asahi/g16_runtime.rs
++index 9d818e2a40e6..460856793265 100644
++--- a/drivers/gpu/drm/asahi/g16_runtime.rs
+++++ b/drivers/gpu/drm/asahi/g16_runtime.rs
++@@ -784,11 +784,19 @@ impl Bootstrap {
++     /// Notifications do not extend the watchdog. Only retirement progress
++     /// resets it, so trace traffic cannot keep a stuck command alive.
++     pub(crate) fn watchdog_remaining_ms(&self) -> u32 {
++-        self.flights
+++        let watchdog = self
+++            .flights
++             .iter()
++             .map(|flight| (10000 - flight.started.elapsed().as_millis()).clamp(1, 10000) as u32)
++             .min()
++-            .unwrap_or(10000)
+++            .unwrap_or(10000);
+++        // With work outstanding, recheck completion at least this often, so a
+++        // late or lost notification costs milliseconds instead of a hang.
+++        if self.flights.is_empty() {
+++            watchdog
+++        } else {
+++            watchdog.min(250)
+++        }
++     }
++ }
++ 
++-- 
++2.53.0
++
+diff --git a/mseries/m4-mini/gravity/compatibility/README.md b/mseries/m4-mini/gravity/compatibility/README.md
+index a5430e5..1bc15ad 100644
+--- a/mseries/m4-mini/gravity/compatibility/README.md
++++ b/mseries/m4-mini/gravity/compatibility/README.md
+@@ -6,7 +6,7 @@ passed independent package checks, but its M4 WFI selector runs at
+ `early_initcall`, after the boot CPU can already idle. R6 is therefore historical
+ and superseded.
+ 
+-The current source recipe targets R7. It keeps the R6 WFI/WFxT, built-in
++The current source recipe targets R8, building on R7 and adding the M4 notification timeout rescue patch 0011. R8 has not been built or hardware-qualified. It keeps the R6 WFI/WFxT, built-in
+ ISO9660/SCSI CD-ROM, Apple watchdog and scheduler fixes, then adds Aurora's
+ boot-CPU-before-first-idle WFI initialization and two BCM4388 Bluetooth fixes.
+ The R7 kernel build and package inspection are pending. The M4 mini is not
+@@ -24,6 +24,7 @@ available for native tests.
+ | 0008 | Select register-preserving WFI from `smp_prepare_boot_cpu()` before first idle; Aurora 34649b455f4a |
+ | 0009 | Preserve BCM4388 common calibration-property setup; Aurora f7c762f2ef6b5d6a04394e433e1aa56dbb50ec4a |
+ | 0010 | Defer BCM4388 Bluetooth until its Wi-Fi function binds; Aurora 053566b82614496ae4b99017680f113376b3ba24 |
++| 0011 | Poll M4 completion on a notification timeout; local Gravity 0066, based on Gravity replacement/210-gpu. |
+ 
+ The T8132 split-channel ADMAC change from Aurora is already present in the
+ pinned Gravity driver and enabled by the J773g DT, so it is not duplicated here.
+@@ -32,7 +33,7 @@ outside this plain-M4 candidate. The DART output-range hardening remains a
+ reviewed follow-up; the candidate has not been tested with malformed or
+ boundary-crossing mappings.
+ 
+-`package-versions.json` binds R3, R4, R5, R6 and R7 to distinct immutable patch
++`package-versions.json` binds R3, R4, R5, R6, R7 and R8 to distinct immutable patch
+ sets; `resulting-files-by-version.json` preserves the matching source hashes.
+ R7 source checks require the Apple selector call inside `smp_prepare_boot_cpu()`
+ before the boot CPU idle path, verify the linked selector symbol, and check that
+diff --git a/mseries/m4-mini/gravity/compatibility/manifest.json b/mseries/m4-mini/gravity/compatibility/manifest.json
+index 7666877..7e80469 100644
+--- a/mseries/m4-mini/gravity/compatibility/manifest.json
++++ b/mseries/m4-mini/gravity/compatibility/manifest.json
+@@ -8,5 +8,6 @@
+   "0007-apple-m4-register-preserving-wfi.patch": "86af703ffcdc237eab43049202e0b15c610596a7b63f29dcbe92246a7d1ba3b8",
+   "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
+   "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
+-  "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c"
++  "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c",
++  "0011-m4-notification-timeout-rescue.patch": "41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2"
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/package-versions.json b/mseries/m4-mini/gravity/compatibility/package-versions.json
+index 2892dfd..3391ed2 100644
+--- a/mseries/m4-mini/gravity/compatibility/package-versions.json
++++ b/mseries/m4-mini/gravity/compatibility/package-versions.json
+@@ -34,5 +34,18 @@
+     "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
+     "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
+     "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c"
++  },
++  "7.1.13+elementary.m4.gravity1-8": {
++    "0001-drm-scheduler-initialize-storage.patch": "dcf4ec926d19f8718ca50d7238f65e39a67f169924ba6d3b0429b128a17699d4",
++    "0002-m4-terminal-timeout-retention.patch": "151e9366751ebca92dd23c58362741ea90b650ab46e79ac150ce4616223aef1b",
++    "0003-scheduler-allocation-owner.patch": "00f5b32d531c967e406e0a5295fb25931d49fcc530eae51ab862e015c7debf42",
++    "0004-drm-module-and-work-lifetime.patch": "f002743ce94285fc961d88bed1df77fe7557fb0dcf179994b6dbbb86460a5a71",
++    "0005-scheduler-disjoint-timeout-state.patch": "bd33ff4539fc8ae935aee58dffd344e1a83b0e72f64621e2ddbe2df92f80c940",
++    "0006-scheduler-final-cancellation.patch": "04521a88611194d64e5b4f1e4b0d7d6e70da25577b2d021d353e897d0bc3ae55",
++    "0007-apple-m4-register-preserving-wfi.patch": "86af703ffcdc237eab43049202e0b15c610596a7b63f29dcbe92246a7d1ba3b8",
++    "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
++    "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
++    "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c",
++    "0011-m4-notification-timeout-rescue.patch": "41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2"
+   }
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json b/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
+index 612c503..aeace2b 100644
+--- a/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
++++ b/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
+@@ -58,5 +58,26 @@
+     "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
+     "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
+     "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8"
++  },
++  "7.1.13+elementary.m4.gravity1-8": {
++    "drivers/gpu/drm/scheduler/sched_main.c": "472a8898f6f74ce024dd397d89617484be0404b59a915418556ce019bffd88b8",
++    "rust/kernel/drm/sched.rs": "61fda9d31fe62722348a47bcc78df97539fa29db953ccd758fd6086ef9284941",
++    "include/drm/gpu_scheduler.h": "f6cb92b835484468c719286c249844eddbefc581d415c1a8210af6c8e95713e1",
++    "drivers/gpu/drm/asahi/g16_drm.rs": "b488b1520e3eae3b6e1161eec4e9dd64f4b233bd2a54c73044602a362c290554",
++    "drivers/gpu/drm/scheduler/sched_entity.c": "24720d2607b02d68f59068033cfa476afe66b8c28e66b5468d11bd8ad2d34ec3",
++    "rust/kernel/drm/driver.rs": "70e8531882929833ba0af490f3dcd709917ea2e8c443f061cc1d8274d60cf4d8",
++    "rust/kernel/drm/device.rs": "716824518bbb481905145fe917a852d492549721755d0eac76551ec4f7411a36",
++    "rust/kernel/drm/gem/mod.rs": "ed6bdf0619625e171c053a12754b6dfdeb3b63bec40c92899f0c1fb905a27dc5",
++    "drivers/gpu/drm/asahi/queue/mod.rs": "6ecf440b04c0c51fb050e7dbbdc3cdf4407bfaf347075d880fa9d594a432d35d",
++    "drivers/gpu/drm/asahi/driver.rs": "45ce2157a6b59e879e5b3bbb1bcc6dec6b6458b67b5161a8a4a9e7a8293660b1",
++    "arch/arm64/include/asm/apple-idle.h": "32090688bde41a0c23feffc93fd754ea2025eb73f8a9adeab5ec0cdcad38eca5",
++    "arch/arm64/include/asm/cputype.h": "3df0e51016f43a12d4432b1fc716318096cb034488d866fcfb4da750cfc874ce",
++    "arch/arm64/kernel/Makefile": "83c84acd640d302cb5ab5a499b1583d0ef5cdcbbc66b7234cd82226107e1741a",
++    "arch/arm64/kernel/idle-apple.S": "ae36d25beff91eecf643e7cbe5f9ce1112818461042213a1a8acd2ea618f019b",
++    "arch/arm64/kernel/idle.c": "c3667aaedcf476b2c87eb4c497cdab9cc37680abcab5e2788716981db17268d1",
++    "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
++    "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
++    "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8",
++    "drivers/gpu/drm/asahi/g16_runtime.rs": "1f5c6760de0d72ea898eb66b3e2f7484b1d9c9ec838f99f7318b6894a2503f47"
+   }
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/resulting-files.json b/mseries/m4-mini/gravity/compatibility/resulting-files.json
+index da10de9..37b7d92 100644
+--- a/mseries/m4-mini/gravity/compatibility/resulting-files.json
++++ b/mseries/m4-mini/gravity/compatibility/resulting-files.json
+@@ -2,7 +2,7 @@
+   "drivers/gpu/drm/scheduler/sched_main.c": "472a8898f6f74ce024dd397d89617484be0404b59a915418556ce019bffd88b8",
+   "rust/kernel/drm/sched.rs": "61fda9d31fe62722348a47bcc78df97539fa29db953ccd758fd6086ef9284941",
+   "include/drm/gpu_scheduler.h": "f6cb92b835484468c719286c249844eddbefc581d415c1a8210af6c8e95713e1",
+-  "drivers/gpu/drm/asahi/g16_drm.rs": "ea399e483c9b7372725b6888a68a58e77092101e6f8c85324a0e1cf28f353ecf",
++  "drivers/gpu/drm/asahi/g16_drm.rs": "b488b1520e3eae3b6e1161eec4e9dd64f4b233bd2a54c73044602a362c290554",
+   "drivers/gpu/drm/scheduler/sched_entity.c": "24720d2607b02d68f59068033cfa476afe66b8c28e66b5468d11bd8ad2d34ec3",
+   "rust/kernel/drm/driver.rs": "70e8531882929833ba0af490f3dcd709917ea2e8c443f061cc1d8274d60cf4d8",
+   "rust/kernel/drm/device.rs": "716824518bbb481905145fe917a852d492549721755d0eac76551ec4f7411a36",
+@@ -16,5 +16,6 @@
+   "arch/arm64/kernel/idle.c": "c3667aaedcf476b2c87eb4c497cdab9cc37680abcab5e2788716981db17268d1",
+   "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
+   "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
+-  "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8"
++  "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8",
++  "drivers/gpu/drm/asahi/g16_runtime.rs": "1f5c6760de0d72ea898eb66b3e2f7484b1d9c9ec838f99f7318b6894a2503f47"
+ }
+diff --git a/mseries/m4-mini/package-kernel.py b/mseries/m4-mini/package-kernel.py
+index fad2101..1c2db8d 100644
+--- a/mseries/m4-mini/package-kernel.py
++++ b/mseries/m4-mini/package-kernel.py
+@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location('m4_kernel', HERE / 'build-kernel.
+ kernel = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(kernel)
+ NAME = 'linux-image-elementary-m4-gravity1'
+-VERSION = '7.1.13+elementary.m4.gravity1-7'
++VERSION = '7.1.13+elementary.m4.gravity1-8'
+ 
+ 
+ def check(build, archive):
