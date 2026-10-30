@@ -1,3 +1,59 @@
+diff --git a/mseries/m4-mini/assemble-boot-chain.py b/mseries/m4-mini/assemble-boot-chain.py
+index 138212d..58c0293 100644
+--- a/mseries/m4-mini/assemble-boot-chain.py
++++ b/mseries/m4-mini/assemble-boot-chain.py
+@@ -21,12 +21,33 @@ def sha(data):
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
++def candidate_kernel_receipt(candidate, baseline):
++    """Accept only the isolated Omarchy R8 recipe, not an arbitrary DTB receipt."""
++    expected = json.loads((HERE / 'gravity/compatibility/package-versions.json').read_text())
++    version = '7.1.13+elementary.m4.gravity1-8'
++    packaging = json.loads((HERE / 'gravity/patches/manifest.json').read_text())
++    contracts = candidate.get('source_contracts', {})
++    idle = candidate.get('m4_idle_checks', {})
++    if (candidate.get('commit') != baseline['commit']
++            or candidate.get('source_archive_sha256') != baseline['source_archive_sha256']
++            or candidate.get('target') != 'omarchy'
++            or candidate.get('kernel_release') != '7.1.13-omarchy-m4-r8-ARCH'
++            or candidate.get('packaging_patches') != packaging
++            or candidate.get('compatibility_patches') != expected[version]
++            or contracts.get('boot_cpu_wfi_selection_before_first_idle') is not True
++            or contracts.get('bcm4388_waits_for_wifi_function') is not True
++            or idle.get('apple_wfi_quirk_init_linked') is not True):
++        raise ValueError('Omarchy R8 source and build receipt required')
++    return candidate
++
++
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--bootloader', type=Path, required=True, help='corrected verified stage output directory')
+     parser.add_argument('--u-boot', type=Path, required=True)
+     parser.add_argument('--dtb', type=Path, required=True)
+     parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--kernel-receipt', type=Path, help='Omarchy R8 build receipt')
+     parser.add_argument('--bootloader-receipt', type=Path, help='trusted fresh build receipt; requires paired U-Boot receipt')
+     parser.add_argument('--uboot-receipt', type=Path, help='trusted fresh build receipt; requires paired stage receipt')
+     args = parser.parse_args()
+@@ -35,6 +56,8 @@ def main():
+     loader = json.loads((HERE / 'receipts/2026-10-21-gravity-bootloader-nodisplay.json').read_text())
+     uboot = json.loads((HERE / 'receipts/2026-10-21-gravity-uboot-wrapper.json').read_text())
+     kernel = json.loads((HERE / 'receipts/2026-10-21-gravity-kernel-build.json').read_text())
++    if args.kernel_receipt:
++        kernel = candidate_kernel_receipt(json.loads(args.kernel_receipt.read_text()), kernel)
+     if bool(args.bootloader_receipt) != bool(args.uboot_receipt):
+         raise ValueError('paired trusted fresh boot receipts required')
+     fresh = bool(args.bootloader_receipt)
+@@ -103,6 +126,8 @@ def main():
+         'source_commits': {'bootloader': loader['commit'], 'uboot': uboot['commit'], 'kernel': kernel['commit']},
+         'stage1': 'separate artifact; not concatenated or authorized',
+         'source_dtb': 'loader fixups still required; not an observed firmware/memory map',
++        'kernel_release': kernel.get('kernel_release'),
++        'kernel_receipt_scope': 'receipt consistency only; source/build provenance requires independent verification',
+         'factory_promotion': False, 'installer_admission': False,
+         'esp_written': False, 'hardware_validated': False,
+     }
 diff --git a/mseries/m4-mini/build-kernel.py b/mseries/m4-mini/build-kernel.py
 index 5a893d1..992d9b2 100644
 --- a/mseries/m4-mini/build-kernel.py
@@ -497,6 +553,42 @@ index aadaad7..6e15675 100644
      policy = json.loads((args.output / 'policy-build/receipt.json').read_text())
      packages = args.output / 'packages'
      packages.mkdir()
+diff --git a/mseries/m4-mini/test_r8_boot_receipt.py b/mseries/m4-mini/test_r8_boot_receipt.py
+new file mode 100644
+index 0000000..290cd7e
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_boot_receipt.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++"""Ensure staged boot DTBs are tied to the complete R8 source recipe."""
++import copy
++import importlib.util
++import json
++from pathlib import Path
++import unittest
++
++HERE=Path(__file__).resolve().parent
++spec=importlib.util.spec_from_file_location('boot', HERE/'assemble-boot-chain.py')
++boot=importlib.util.module_from_spec(spec)
++spec.loader.exec_module(boot)
++
++class BootReceiptTests(unittest.TestCase):
++    def setUp(self):
++        self.baseline=json.loads((HERE/'receipts/2026-10-21-gravity-kernel-build.json').read_text())
++        versions=json.loads((HERE/'gravity/compatibility/package-versions.json').read_text())
++        self.receipt={'commit':self.baseline['commit'], 'source_archive_sha256':self.baseline['source_archive_sha256'],
++             'target':'omarchy', 'kernel_release':'7.1.13-omarchy-m4-r8-ARCH',
++             'packaging_patches':json.loads((HERE/'gravity/patches/manifest.json').read_text()),
++             'compatibility_patches':versions['7.1.13+elementary.m4.gravity1-8'],
++             'source_contracts':{'boot_cpu_wfi_selection_before_first_idle':True,'bcm4388_waits_for_wifi_function':True},
++             'm4_idle_checks':{'apple_wfi_quirk_init_linked':True}}
++    def test_match(self): self.assertIs(boot.candidate_kernel_receipt(self.receipt,self.baseline),self.receipt)
++    def test_reject_wrong_target_release_patch_and_contract(self):
++        for field,value in [('target','elementary'),('kernel_release','other-ARCH'),('compatibility_patches',{}),('source_contracts',{})]:
++            with self.subTest(field=field):
++                candidate=copy.deepcopy(self.receipt);candidate[field]=value
++                with self.assertRaises(ValueError): boot.candidate_kernel_receipt(candidate,self.baseline)
++if __name__=='__main__':unittest.main()
 diff --git a/mseries/m4-mini/test_r8_identity.py b/mseries/m4-mini/test_r8_identity.py
 new file mode 100644
 index 0000000..8ae6b7d

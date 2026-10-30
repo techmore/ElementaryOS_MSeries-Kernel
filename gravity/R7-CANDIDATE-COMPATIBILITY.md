@@ -123,3 +123,14 @@ hard-code the historical release and/or historical build receipts. They have
 not been updated for R8 and must not be used as R8 qualification evidence.
 The proposed live-image hook update does not by itself qualify those separate
 research UKI and staging paths or the physical boot chain.
+
+The R8 proposal also extends the existing `assemble-boot-chain.py` with an
+optional Omarchy R8 kernel receipt. It checks the source pin, archive hash,
+target and release, exact packaging and R8 patch manifests and selected build
+contracts before using the receipt's J773g DTB hash. The original loader,
+U-Boot, DTB identity and bundle readback checks remain. Two synthetic tests
+cover the accepted receipt and rejection of mismatched target, release, patches
+or contracts. No real R8 receipt or boot bundle has been produced; a receipt
+alone does not prove provenance. This standalone staging path does not resolve
+Omarchy's shared `update-m1n1` DTB selection or establish firmware, boot or
+recovery compatibility.
