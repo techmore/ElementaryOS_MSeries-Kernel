@@ -41,3 +41,17 @@ observation of timeout recovery under a reproduced condition, and attended
 reboot/poweroff checks with recovery available. Investigate the mini's PMU
 cells from independently verified J773g firmware data before using offsets from
 another board. None of these observations qualifies an Omarchy kernel.
+
+## Additional source and bus checks
+
+Applying repository patch 0066 to copies of the two saved stock driver files
+succeeds, and both resulting files (`g16_drm.rs` and `g16_runtime.rs`) match
+`~/m4-build/asahi_m4-fix/` byte for byte. This connects the saved patch to the
+saved build source; it does not independently prove the running module's bytes.
+The repository's offline `bash validate.sh` passes.
+
+The live system exposes two SPMI controllers. Three device-tree children on the
+first controller are USB-PD devices; the second controller has no device-tree
+children or enumerated SPMI child devices, and `/sys/class/nvmem` is empty. This
+provides no PMIC address or safe register offsets; it does not prove the hardware
+has no PMIC. No raw bus accesses were attempted.
