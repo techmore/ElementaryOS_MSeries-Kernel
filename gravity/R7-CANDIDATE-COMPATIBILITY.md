@@ -79,3 +79,15 @@ BCM4388 ordering checks. The four identity tests passed again.
 This is a complete replay of the touched-file patch set, not a full kernel
 source checkout or compile. The full Image, modules, DTBs and actual Debian
 package still require building and inspection, followed by hardware testing.
+
+## Image integration gap
+
+The candidate PR's `package-policy.py` declares a dependency on the older
+`linux-image-elementary-m4-gravity1` package. Its `build-research-image.py`
+also enforces that exact package identity, and `prepare-hosted-image-inputs.py`
+accepts only the older package filename prefix. The R8 proposal's distinct
+package name therefore cannot yet be substituted into that image pipeline.
+Do not add it to the image or mark it selected until those contracts and the
+version-pinned profile are updated together, with a new policy package version
+where needed and tests of both historical and explicitly selected R8 paths.
+Existing R5 image selection remains unchanged.
