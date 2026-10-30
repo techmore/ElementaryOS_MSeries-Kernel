@@ -1,0 +1,43 @@
+# Gravity M4 host observation — 2026-10-30
+
+Read-only inspection on the running Apple Mac mini J773g, compatible
+`apple,j773g`, `apple,t8132`. Kernel `7.1.13-509.gravity.fc44.aarch64+16k`,
+boot ID `e472ab2a-cff8-4cbd-baf1-c110fc8c1cbd`, uptime approximately 44 hours
+at observation. Early journal wall-clock entries show October 17 before time
+synchronization; use boot ID and uptime, not those timestamps, for identity.
+
+- `macsmc_reboot` is loaded and bound to the platform device. The live device
+  tree contains the `apple,smc-reboot` child. This boot's log reports handling
+  reboot and poweroff through SMC, and reports missing `shutdown_flag`,
+  `boot_stage`, `boot_error_count` and `panic_count` NVMEM cells.
+- The prior boot also reported SMC handler registration. Its journal ends at
+  `systemd-shutdown` after reaching `poweroff.target`; the journal stopped
+  before the kernel poweroff call. This does not prove which handler executed,
+  that power was removed, or that restart through SMC succeeded. The current
+  boot proves a later boot occurred, not that it was an automatic reboot.
+- `asahi_m4` is loaded and bound to the GPU. The installed on-disk module
+  `/lib/modules/7.1.13-509.gravity.fc44.aarch64+16k/updates/asahi_m4.ko`
+  has SHA-256 `28bfa14fde8a2e0056c930b7a834778acd2a53408f4e76dffd79e71cb57df951`,
+  identical to the saved patched build in `~/m4-build/asahi_m4-fix/`; its
+  binary contains the 0066 timeout-rescue log string. The boot log shows an
+  unsigned out-of-tree module loading; an on-disk hash alone does not establish
+  the exact bytes loaded at boot.
+- Current-boot kernel journal inspection found no notification-rescue message,
+  submission-pipeline failure, retirement watchdog timeout, double-unmap
+  signature, or closed-GEM unbind failure. This is passive observation, not a
+  controlled stress test or proof that timeout rescue was exercised.
+- HDMI connector reports connected and advertises 3840x2160 modes. The agent's
+  sandbox has no `/dev/dri` or desktop display environment: `glxinfo -B` cannot
+  open a display and Vulkan cannot enumerate the DRM device. Those attempts do
+  not test hardware rendering. No reboot, shutdown, kernel or boot changes were
+  performed.
+
+Commands: `uname -a`, `uptime`, `/proc/sys/kernel/random/boot_id`, live device
+tree, `lsmod`, `modinfo asahi_m4`, `sha256sum`, `strings`, `journalctl -b` and
+`journalctl -b -1`, and `/sys/class/drm`. Full logs are not copied here.
+
+Still open: a deliberate hardware rendering workload with access to the GPU,
+observation of timeout recovery under a reproduced condition, and attended
+reboot/poweroff checks with recovery available. Investigate the mini's PMU
+cells from independently verified J773g firmware data before using offsets from
+another board. None of these observations qualifies an Omarchy kernel.
