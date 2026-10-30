@@ -406,26 +406,46 @@ index 5a368fa..141a8aa 100644
      (args.output / 'receipt.json').write_text(json.dumps({
          'package': package.name, 'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
 diff --git a/mseries/m4-mini/prepare-hosted-image-inputs.py b/mseries/m4-mini/prepare-hosted-image-inputs.py
-index a3cb8dc..cc71a96 100644
+index a3cb8dc..df934a0 100644
 --- a/mseries/m4-mini/prepare-hosted-image-inputs.py
 +++ b/mseries/m4-mini/prepare-hosted-image-inputs.py
-@@ -13,8 +13,9 @@ import subprocess
- import sys
- 
+@@ -15,13 +15,14 @@ import sys
  HERE = Path(__file__).resolve().parent
--PREFIXES = {'kernel': 'linux-image-elementary-m4-gravity1_',
--            'mesa': 'elementary-m4-gravity-mesa1_'}
-+PREFIXES = {'kernel': ('linux-image-elementary-m4-gravity1_',
-+                       'linux-image-elementary-m4-gravity1-r8_'),
-+            'mesa': ('elementary-m4-gravity-mesa1_',)}
+ PREFIXES = {'kernel': 'linux-image-elementary-m4-gravity1_',
+             'mesa': 'elementary-m4-gravity-mesa1_'}
++R8_KERNEL_PREFIX = 'linux-image-elementary-m4-gravity1-r8_'
  
  
  def package(directory, kind):
+     receipt = json.loads((directory / 'receipt.json').read_text())
+     name = receipt['package']
+     if (not isinstance(name, str) or Path(name).name != name or
+-            not name.startswith(PREFIXES[kind]) or not name.endswith('_arm64.deb') or
++            not name.startswith((PREFIXES[kind], R8_KERNEL_PREFIX) if kind == 'kernel' else (PREFIXES[kind],)) or not name.endswith('_arm64.deb') or
+             '\\' in name):
+         raise ValueError('expected component package basename required: ' + kind)
+     if {p.name for p in directory.glob('*.deb')} != {name}:
 diff --git a/mseries/m4-mini/prepare-image-inputs.py b/mseries/m4-mini/prepare-image-inputs.py
-index aadaad7..130e189 100644
+index aadaad7..6e15675 100644
 --- a/mseries/m4-mini/prepare-image-inputs.py
 +++ b/mseries/m4-mini/prepare-image-inputs.py
-@@ -73,8 +73,12 @@ def main():
+@@ -31,6 +31,15 @@ def digest(path):
+ 
+ def live_hook_patch(original, baseline, build):
+     changed = original
++    old_release = baseline['kernel_release']
++    new_release = build['kernel_release']
++    for value in (old_release, new_release):
++        if not value or not all(c.isalnum() or c in '.+-_' for c in value):
++            raise ValueError('invalid kernel release')
++    old_line = 'release=' + old_release + '\n'
++    if changed.count(old_line) != 1:
++        raise ValueError('live hook no longer matches reviewed release')
++    changed = changed.replace(old_line, 'release=' + new_release + '\n', 1)
+     for old, new in [(baseline['artifacts']['arch/arm64/boot/Image'], build['artifacts']['arch/arm64/boot/Image']),
+                      (baseline['config_sha256'], build['config_sha256'])]:
+         if changed.count(old) != 1:
+@@ -73,8 +82,12 @@ def main():
          if name == 'mesa':
              command += ['--smoke', str(args.smoke.resolve())]
          subprocess.run(command, check=True)
@@ -505,10 +525,10 @@ index 0000000..8ae6b7d
 +    unittest.main()
 diff --git a/mseries/m4-mini/test_r8_image_selection.py b/mseries/m4-mini/test_r8_image_selection.py
 new file mode 100644
-index 0000000..abd1d3a
+index 0000000..e00d1a4
 --- /dev/null
 +++ b/mseries/m4-mini/test_r8_image_selection.py
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,83 @@
 +#!/usr/bin/env python3
 +"""R8 image admission and policy remain explicit and version matched."""
 +import hashlib
@@ -564,6 +584,17 @@ index 0000000..abd1d3a
 +                self.assertEqual(hosted.package(d, 'kernel'), d / name)
 +                (d / name).write_bytes(b'bad')
 +                with self.assertRaises(ValueError): hosted.package(d, 'kernel')
++
++    def test_live_hook_tracks_new_release_and_rejects_bad_release(self):
++        baseline = {'kernel_release': '7.1.13-elementary-m4-gravity1',
++                    'artifacts': {'arch/arm64/boot/Image': 'a'*64}, 'config_sha256': 'b'*64}
++        candidate = {'kernel_release': '7.1.13-elementary-m4-gravity1-r8',
++                     'artifacts': {'arch/arm64/boot/Image': 'c'*64}, 'config_sha256': 'd'*64}
++        hook = 'release=' + baseline['kernel_release'] + '\n' + 'a'*64 + '\n' + 'b'*64 + '\n'
++        diff = image.inputs_module.live_hook_patch(hook, baseline, candidate)
++        self.assertIn('+release=' + candidate['kernel_release'], diff)
++        candidate['kernel_release'] = 'bad\ncommand'
++        with self.assertRaises(ValueError): image.inputs_module.live_hook_patch(hook, baseline, candidate)
 +
 +    def test_policy_revisions_generate_matching_dependency(self):
 +        for r8 in (False, True):

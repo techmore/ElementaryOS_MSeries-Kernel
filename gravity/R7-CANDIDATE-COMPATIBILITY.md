@@ -91,10 +91,26 @@ The updated R8 proposal now adds an opt-in R8 policy package revision
 `20261021-3` with the R8 kernel dependency, selects it from the validated kernel
 receipt, admits the R8 hosted package name, and requires an explicit matching
 kernel and policy pin in the image profile. It rejects mixed kernel pins and
-legacy/R8 policy mismatches. Existing R5 image selection remains unchanged.
+legacy/R8 policy mismatches. The pinned PR head's actual image profile selects
+kernel R7, Mesa 6 and policy `20261021-2`; those pins remain unchanged by the
+proposal. This corrects an earlier description based on the older PR summary
+that said the profile selected R5 and Mesa 4. A profile pin does not establish
+that its artifacts have been built or validated.
 Five synthetic tests pass for legacy and R8 profiles, mismatch rejection,
 hosted receipt checksum rejection, and generated policy dependency/version.
 Policy package creation was mocked because `dpkg-deb` is unavailable here;
 no real policy or image package was built. Additional image and boot-chain
 integration must still be checked against a full candidate checkout before
 selecting R8.
+
+The existing hosted-name and image-profile test suites were also run against
+the pinned PR snapshot: four tests in each passed. The hosted prefix constant
+retains its original string interface; R8's extra accepted prefix is separate.
+
+The live image staging hook also hard-codes the older kernel release. The R8
+proposal updates its generated candidate-only patch to replace that release
+alongside the kernel and config hashes, validating the old line and the new
+release string. The three existing live-hook tests passed against the actual
+pinned hook and baseline receipt; an additional R8 synthetic check confirmed
+the release substitution and rejected an invalid release string. No real image
+was assembled, and the hook was not changed on the running host.
