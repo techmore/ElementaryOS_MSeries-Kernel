@@ -41,3 +41,15 @@ be implemented and tested.
 This preflight does not establish provenance, completeness of all modules,
 package safety, a working boot chain or hardware qualification. Five synthetic
 tests exercise matching and rejected inputs; no Omarchy candidate has passed it.
+
+## Isolated staging
+
+After a real build passes the preflight, `stage-build.py --source SOURCE
+--build BUILD --receipt RECEIPT --output NEW_DIRECTORY` runs kernel
+`modules_install` into the new directory and stages the matching Image, J773g
+DTB, configuration and `linux-omarchy-m4` pkgbase. It checks the installed GPU,
+display and Ethernet modules against the build receipt and leaves an
+`INCOMPLETE` marker if staging fails. It does not produce or install an Arch
+package, change the boot chain or establish provenance. The preflight and
+staging have only been exercised with synthetic inputs and a mocked module
+installer; they still need a real R8 build and Omarchy package review.
