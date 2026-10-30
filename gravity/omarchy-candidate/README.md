@@ -30,8 +30,14 @@ checks a separately built candidate's source pin, `-ARCH` release, 16 KiB
 configuration, artifact hashes, J773g device-tree compatibles and GPU,
 display and Ethernet module vermagic. It needs `fdtget` and `modinfo`. The
 receipt must include hashes for the Image, J773g DTB, `asahi_m4.ko`,
-`appledrm.ko` and `atlantic.ko`; the existing elementary R8 proposal's receipt
-does not yet record `appledrm.ko`, and its release does not end in `-ARCH`.
+`appledrm.ko` and `atlantic.ko`, plus the exact R8 timeout patch hash. The R8
+proposal now has an explicit `build-kernel.py --target omarchy` option with
+release `7.1.13-omarchy-m4-r8-ARCH` and a display module hash in its receipt.
+The default target remains elementary; its release does not end in `-ARCH`.
+The Omarchy target still uses the candidate's existing config overlays, which
+must be reviewed for the Arch environment. Neither target has been built from
+the proposal. An Omarchy package, boot integration and matching Mesa remain to
+be implemented and tested.
 This preflight does not establish provenance, completeness of all modules,
-package safety, a working boot chain or hardware qualification. Four synthetic
+package safety, a working boot chain or hardware qualification. Five synthetic
 tests exercise matching and rejected inputs; no Omarchy candidate has passed it.

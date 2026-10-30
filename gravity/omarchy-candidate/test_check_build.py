@@ -25,7 +25,8 @@ class BuildCheckTests(unittest.TestCase):
                                      'CONFIG_RUST=y', 'CONFIG_DRM_ASAHI_M4=m',
                                      'CONFIG_DRM_APPLE=m']) + '\n')
         self.receipt = {'commit': module.PIN, 'kernel_release': self.release,
-                        'config_sha256': module.digest(config), 'artifacts': {}}
+                        'config_sha256': module.digest(config), 'artifacts': {},
+                        'compatibility_patches': {module.TIMEOUT_PATCH: module.TIMEOUT_SHA}}
         for name, relative in module.ARTIFACTS.items():
             p = self.root / relative
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,11 @@ class BuildCheckTests(unittest.TestCase):
     def test_reject_changed_gpu(self):
         (self.root / module.ARTIFACTS['gpu']).write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'artifact hash mismatch: gpu'):
+            module.check(self.root, self.receipt)
+
+    def test_reject_missing_timeout_fix(self):
+        self.receipt['compatibility_patches'] = {}
+        with self.assertRaisesRegex(ValueError, 'timeout-rescue'):
             module.check(self.root, self.receipt)
 
     def test_reject_wrong_board_or_module(self):

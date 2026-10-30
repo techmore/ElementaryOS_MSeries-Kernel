@@ -8,6 +8,8 @@ import re
 import subprocess
 
 PIN = '4fc326f6c25ccceb7515e2635c22e01fde5d3bac'
+TIMEOUT_PATCH = '0011-m4-notification-timeout-rescue.patch'
+TIMEOUT_SHA = '41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2'
 ARTIFACTS = {
     'image': 'arch/arm64/boot/Image',
     'dtb': 'arch/arm64/boot/dts/apple/t8132-j773g.dtb',
@@ -25,6 +27,8 @@ def digest(path):
 def check(build, receipt):
     if receipt.get('commit') != PIN:
         raise ValueError('Gravity source pin mismatch')
+    if receipt.get('compatibility_patches', {}).get(TIMEOUT_PATCH) != TIMEOUT_SHA:
+        raise ValueError('R8 timeout-rescue patch receipt required')
     release = (build / 'include/config/kernel.release').read_text().strip()
     if not re.fullmatch(r'[A-Za-z0-9.+_-]+-ARCH', release):
         raise ValueError('Omarchy candidate release must end in -ARCH')

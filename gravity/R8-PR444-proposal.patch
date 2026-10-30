@@ -1,34 +1,71 @@
 diff --git a/mseries/m4-mini/build-kernel.py b/mseries/m4-mini/build-kernel.py
-index 5a893d1..e4b7197 100644
+index 5a893d1..992d9b2 100644
 --- a/mseries/m4-mini/build-kernel.py
 +++ b/mseries/m4-mini/build-kernel.py
-@@ -14,7 +14,7 @@ import tarfile
+@@ -14,7 +14,8 @@ import tarfile
  HERE = Path(__file__).resolve().parent
  ARCHIVE_SHA256 = '045c64540fa4210394c899cad6320c5bf9090a66919938d986aeaad0033946e8'
  COMMIT = '4fc326f6c25ccceb7515e2635c22e01fde5d3bac'
 -RELEASE = '7.1.13-elementary-m4-gravity1'
 +RELEASE = '7.1.13-elementary-m4-gravity1-r8'
++OMARCHY_RELEASE = '7.1.13-omarchy-m4-r8-ARCH'
  
  
  def digest(path):
-@@ -97,7 +97,7 @@ def config_gate(path):
+@@ -88,7 +89,7 @@ def source_patch_gate(source, compatibility_version=None):
+     return contracts
+ 
+ 
+-def config_gate(path):
++def config_gate(path, release=RELEASE):
+     values = dict(line.split('=', 1) for line in path.read_text().splitlines()
+                   if line.startswith('CONFIG_') and '=' in line)
+     for key, value in {'CONFIG_ARCH_APPLE': 'y', 'CONFIG_ARM64_16K_PAGES': 'y',
+@@ -97,7 +98,7 @@ def config_gate(path):
                         'CONFIG_DRM_ASAHI_M4': 'm',
                         'CONFIG_RUST': 'y', 'CONFIG_DRM_APPLE': 'm',
                         'CONFIG_AQTION': 'm', 'CONFIG_TIGON3': 'm',
 -                       'CONFIG_LOCALVERSION': '"-elementary-m4-gravity1"'}.items():
-+                       'CONFIG_LOCALVERSION': '"-elementary-m4-gravity1-r8"'}.items():
++                       'CONFIG_LOCALVERSION': '"' + release.removeprefix('7.1.13') + '"'}.items():
          if values.get(key) != value:
              raise ValueError(f'resolved configuration must have {key}={value}')
  
-@@ -175,7 +175,7 @@ def main():
+@@ -139,7 +140,9 @@ def main():
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--rust-library', type=Path, required=True)
+     parser.add_argument('--jobs', type=int, default=2)
++    parser.add_argument('--target', choices=['elementary', 'omarchy'], default='elementary')
+     args = parser.parse_args()
++    release = OMARCHY_RELEASE if args.target == 'omarchy' else RELEASE
+     if args.jobs < 1 or args.output.exists():
+         raise ValueError('positive jobs and a new output directory required')
+     if digest(args.archive) != ARCHIVE_SHA256:
+@@ -175,18 +178,22 @@ def main():
           str(HERE / 'gravity/gravity-aarch64.config'),
           str(HERE / 'gravity/elementary-target.config')])
      run([str(source / 'scripts/config'), '--file', str(build / '.config'),
 -         '--set-str', 'LOCALVERSION', '-elementary-m4-gravity1', '--disable', 'LOCALVERSION_AUTO'])
-+         '--set-str', 'LOCALVERSION', '-elementary-m4-gravity1-r8', '--disable', 'LOCALVERSION_AUTO'])
++         '--set-str', 'LOCALVERSION', release.removeprefix('7.1.13'), '--disable', 'LOCALVERSION_AUTO'])
      run(base + ['olddefconfig'])
-     config_gate(build / '.config')
+-    config_gate(build / '.config')
++    config_gate(build / '.config', release)
      run(base + [f'-j{args.jobs}', 'Image', 'modules', 'dtbs'])
++    actual_release = (build / 'include/config/kernel.release').read_text().strip()
++    if actual_release != release:
++        raise ValueError('built kernel release mismatch: ' + actual_release)
+     idle_checks = check_apple_idle_image(build, root / 'apple-idle-disassembly.txt')
+     artifacts = ['arch/arm64/boot/Image', 'drivers/gpu/drm/asahi/asahi_m4.ko',
+                  'arch/arm64/boot/dts/apple/t8132-j773g.dtb',
++                 'drivers/gpu/drm/apple/appledrm.ko',
+                  'drivers/net/ethernet/aquantia/atlantic/atlantic.ko',
+                  'drivers/net/ethernet/broadcom/tg3.ko']
+     hashes = {path: digest(build / path) for path in artifacts}
+     receipt = {'repository': 'GravityLinux/linux', 'commit': COMMIT,
+-               'source_archive_sha256': ARCHIVE_SHA256, 'kernel_release': RELEASE,
++               'source_archive_sha256': ARCHIVE_SHA256, 'kernel_release': release, 'target': args.target,
+                'config_sha256': digest(build / '.config'), 'artifacts': hashes,
+                'packaging_patches': patches, 'compatibility_patches': compatibility,
+                'm4_idle_checks': idle_checks, 'source_contracts': source_contracts,
 diff --git a/mseries/m4-mini/build-research-image.py b/mseries/m4-mini/build-research-image.py
 index a7fed02..dc06aba 100644
 --- a/mseries/m4-mini/build-research-image.py
@@ -612,3 +649,41 @@ index 0000000..e00d1a4
 +                with patch.object(policy, 'HERE', root), patch.object(sys, 'argv', argv), patch.object(policy.subprocess, 'run', side_effect=build): policy.main()
 +
 +if __name__ == '__main__': unittest.main()
+diff --git a/mseries/m4-mini/test_r8_target.py b/mseries/m4-mini/test_r8_target.py
+new file mode 100644
+index 0000000..29d7dd7
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_target.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++"""The Omarchy build must have its own kernel identity and config."""
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++HERE=Path(__file__).resolve().parent
++spec=importlib.util.spec_from_file_location('kernel', HERE/'build-kernel.py')
++kernel=importlib.util.module_from_spec(spec)
++spec.loader.exec_module(kernel)
++
++class TargetTests(unittest.TestCase):
++    def write_config(self, path, release):
++        path.write_text('\n'.join(['CONFIG_ARCH_APPLE=y', 'CONFIG_ARM64_16K_PAGES=y',
++            'CONFIG_BLK_DEV_SR=y', 'CONFIG_ISO9660_FS=y', 'CONFIG_APPLE_WATCHDOG=y',
++            'CONFIG_DRM_ASAHI_M4=m', 'CONFIG_RUST=y', 'CONFIG_DRM_APPLE=m',
++            'CONFIG_AQTION=m', 'CONFIG_TIGON3=m',
++            'CONFIG_LOCALVERSION="'+release.removeprefix('7.1.13')+'"'])+'\n')
++
++    def test_targets_are_separate_and_omarchy_release_is_discoverable(self):
++        self.assertNotEqual(kernel.RELEASE, kernel.OMARCHY_RELEASE)
++        self.assertTrue(kernel.OMARCHY_RELEASE.endswith('-ARCH'))
++        with tempfile.TemporaryDirectory() as temp:
++            config=Path(temp)/'.config'
++            for release in (kernel.RELEASE, kernel.OMARCHY_RELEASE):
++                self.write_config(config, release)
++                kernel.config_gate(config, release)
++                other=kernel.OMARCHY_RELEASE if release==kernel.RELEASE else kernel.RELEASE
++                with self.assertRaises(ValueError): kernel.config_gate(config, other)
++
++if __name__=='__main__': unittest.main()
