@@ -89,3 +89,22 @@ After the report, passive checks showed all ten CPU cores online, approximately
 graphics stability. The sandbox could not inspect host desktop processes or
 connect to the system bus. No desktop restart, reboot, or GPU workload was
 performed.
+
+## Additional journal review
+
+Current boot's kernel journal reports the EFI FAT volume `/dev/nvme0n1p4`
+was not cleanly unmounted and requests a filesystem check. This indicates an
+unclean filesystem flag, not proof of damaged files. `/boot/efi` is visible
+read-only in the agent's mount namespace; that does not establish the host's
+own mount mode. No repair or mount change was made. Check the filesystem
+offline with an appropriate recovery path before relying on boot-volume writes.
+
+The current boot also records a USB-C PHY pipe-handler lock failure on October
+29, Wi-Fi configuration errors at boot, and four `ksshaskpass` aborts on
+October 30 at 13:42–13:49 when it could not connect to a display. These
+userspace aborts are not evidence of a kernel panic or of the present desktop
+failure. A search for NVMe I/O/reset and filesystem corruption signatures found
+none beyond the FAT unclean flag; a search for kernel panic/Oops/BUG signatures
+found none in this boot. These are journal searches, not comprehensive hardware
+health tests. The earlier October 28 boot records GPU submission ETIMEDOUT and
+GEM unbind EIO following repeated unmap warnings.
