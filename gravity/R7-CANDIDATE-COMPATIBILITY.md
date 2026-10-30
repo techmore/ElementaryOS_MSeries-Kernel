@@ -52,9 +52,14 @@ any changes since that pin.
 In a partial snapshot of the PR's relevant files, Python compilation passed,
 the patch-manifest checksums and reconstructed GPU result hashes matched, and
 the earlier version and result records remained identical. The generated patch
-also reverse-applied cleanly to that modified snapshot. The embedded patch
-contains its original mail-format whitespace. These checks do not replace a
+also reverse-applied cleanly to that modified snapshot. R8 uses the separate
+package name `linux-image-elementary-m4-gravity1-r8` and kernel release
+`7.1.13-elementary-m4-gravity1-r8`, avoiding the original proposal's collision
+with prior module paths. The package checker retains the historical name and
+release for R2–R7 and verifies R8's name, release and build receipt agree.
+Four isolated identity tests passed: R7 and R8 identities reach package
+extraction, while an R8 package using the old name or release is rejected.
+These tests use mocked package extraction, not actual package inspection.
+The embedded patch contains its original mail-format whitespace. These checks do not replace a
 full checkout replay, full R8 build, package inspection, integration with the
-selected image, or physical testing. R7 and R8 share the candidate's existing
-kernel release string; do not install both as independent bootable variants
-without addressing the resulting module-path collision.
+selected image, or physical testing.
