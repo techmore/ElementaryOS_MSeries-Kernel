@@ -22,3 +22,16 @@ byte-identical to the pin. A full worktree preparation and build remain untested
 the source fetch was still in progress. The Gravity base has not been made
 compatible with the Omarchy recipe or boot chain; the [qualification plan](../OMARCHY-J773G-QUALIFICATION.md)
 remains open, as does integration with Aurora and all hardware acceptance.
+
+## Build artifact preflight
+
+`python3 gravity/omarchy-candidate/check-build.py --build BUILD_DIR --receipt RECEIPT`
+checks a separately built candidate's source pin, `-ARCH` release, 16 KiB
+configuration, artifact hashes, J773g device-tree compatibles and GPU,
+display and Ethernet module vermagic. It needs `fdtget` and `modinfo`. The
+receipt must include hashes for the Image, J773g DTB, `asahi_m4.ko`,
+`appledrm.ko` and `atlantic.ko`; the existing elementary R8 proposal's receipt
+does not yet record `appledrm.ko`, and its release does not end in `-ARCH`.
+This preflight does not establish provenance, completeness of all modules,
+package safety, a working boot chain or hardware qualification. Four synthetic
+tests exercise matching and rejected inputs; no Omarchy candidate has passed it.
