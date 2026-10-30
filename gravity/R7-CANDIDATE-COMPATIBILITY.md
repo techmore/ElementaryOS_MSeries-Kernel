@@ -87,7 +87,14 @@ The candidate PR's `package-policy.py` declares a dependency on the older
 also enforces that exact package identity, and `prepare-hosted-image-inputs.py`
 accepts only the older package filename prefix. The R8 proposal's distinct
 package name therefore cannot yet be substituted into that image pipeline.
-Do not add it to the image or mark it selected until those contracts and the
-version-pinned profile are updated together, with a new policy package version
-where needed and tests of both historical and explicitly selected R8 paths.
-Existing R5 image selection remains unchanged.
+The updated R8 proposal now adds an opt-in R8 policy package revision
+`20261021-3` with the R8 kernel dependency, selects it from the validated kernel
+receipt, admits the R8 hosted package name, and requires an explicit matching
+kernel and policy pin in the image profile. It rejects mixed kernel pins and
+legacy/R8 policy mismatches. Existing R5 image selection remains unchanged.
+Five synthetic tests pass for legacy and R8 profiles, mismatch rejection,
+hosted receipt checksum rejection, and generated policy dependency/version.
+Policy package creation was mocked because `dpkg-deb` is unavailable here;
+no real policy or image package was built. Additional image and boot-chain
+integration must still be checked against a full candidate checkout before
+selecting R8.

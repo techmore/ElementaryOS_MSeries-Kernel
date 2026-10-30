@@ -29,6 +29,40 @@ index 5a893d1..e4b7197 100644
      run(base + ['olddefconfig'])
      config_gate(build / '.config')
      run(base + [f'-j{args.jobs}', 'Image', 'modules', 'dtbs'])
+diff --git a/mseries/m4-mini/build-research-image.py b/mseries/m4-mini/build-research-image.py
+index a7fed02..dc06aba 100644
+--- a/mseries/m4-mini/build-research-image.py
++++ b/mseries/m4-mini/build-research-image.py
+@@ -43,14 +43,27 @@ def profile_package_versions(profile, controls):
+     result = {}
+     if set(controls) != set(PACKAGE_NAMES):
+         raise ValueError('complete package controls required')
+-    for kind, name in PACKAGE_NAMES.items():
++    for kind, default_name in PACKAGE_NAMES.items():
+         control = controls[kind]
+-        if control.get('Package') != name or control.get('Architecture') != 'arm64':
++        name = control.get('Package')
++        allowed = {default_name}
++        if kind == 'kernel':
++            allowed.add('linux-image-elementary-m4-gravity1-r8')
++        if name not in allowed or control.get('Architecture') != 'arm64':
+             raise ValueError('wrong candidate package identity or architecture: ' + kind)
+         pins = re.findall(r'^\s+' + re.escape(name) + r'=([^\s]+)\s*$', profile, re.MULTILINE)
+         if len(pins) != 1 or pins[0] != control.get('Version'):
+             raise ValueError('candidate version differs from committed image profile: ' + kind)
+         result[kind] = pins[0]
++    is_r8 = controls['kernel']['Package'] == 'linux-image-elementary-m4-gravity1-r8'
++    other = 'linux-image-elementary-m4-gravity1' if is_r8 else 'linux-image-elementary-m4-gravity1-r8'
++    if re.search(r'^\s+' + re.escape(other) + r'=([^\s]+)\s*$', profile, re.MULTILINE):
++        raise ValueError('profile must select exactly one kernel package')
++    if is_r8 and (result['kernel'] != '7.1.13+elementary.m4.gravity1-8'
++                  or result['policy'] != '20261021-3'):
++        raise ValueError('R8 kernel requires its matched versioned policy')
++    if not is_r8 and result['policy'] == '20261021-3':
++        raise ValueError('R8 policy cannot be paired with an older kernel')
+     return result
+ 
+ 
 diff --git a/mseries/m4-mini/check-kernel-package.py b/mseries/m4-mini/check-kernel-package.py
 index d44f6ab..5a1f9b7 100644
 --- a/mseries/m4-mini/check-kernel-package.py
@@ -342,6 +376,70 @@ index fad2101..7414793 100644
  
  
  def check(build, archive):
+diff --git a/mseries/m4-mini/package-policy.py b/mseries/m4-mini/package-policy.py
+index 5a368fa..141a8aa 100644
+--- a/mseries/m4-mini/package-policy.py
++++ b/mseries/m4-mini/package-policy.py
+@@ -17,7 +17,13 @@ VERSION = '20261021-2'
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--kernel-revision', choices=['legacy', 'r8'], default='legacy')
+     args = parser.parse_args()
++    kernel_name = 'linux-image-elementary-m4-gravity1'
++    version = VERSION
++    if args.kernel_revision == 'r8':
++        kernel_name += '-r8'
++        version = '20261021-3'
+     if args.output.exists():
+         raise ValueError('new output directory required')
+     args.output.mkdir(parents=True)
+@@ -45,8 +51,8 @@ def main():
+         (docs / 'README').write_text('Candidate M4 mini image policy only. No local installation or hardware sleep qualification.\nRemoval via package upgrade is required when M4 sleep is supported.\nAdministrator configuration overrides vendor settings.\n')
+         control = payload / 'DEBIAN'
+         control.mkdir()
+-        (control / 'control').write_text(f'Package: {NAME}\nVersion: {VERSION}\nArchitecture: arm64\nMaintainer: ElementaryOS MSeries contributors <builder@localhost>\nDepends: systemd, initramfs-tools, linux-image-elementary-m4-gravity1\nSection: admin\nPriority: optional\nDescription: Temporary power and early-driver policy for M4 mini images\n Disables unsupported system sleep through vendor configuration.\n')
+-        package = args.output / f'{NAME}_{VERSION}_arm64.deb'
++        (control / 'control').write_text(f'Package: {NAME}\nVersion: {version}\nArchitecture: arm64\nMaintainer: ElementaryOS MSeries contributors <builder@localhost>\nDepends: systemd, initramfs-tools, {kernel_name}\nSection: admin\nPriority: optional\nDescription: Temporary power and early-driver policy for M4 mini images\n Disables unsupported system sleep through vendor configuration.\n')
++        package = args.output / f'{NAME}_{version}_arm64.deb'
+         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(payload), str(package)], check=True)
+     (args.output / 'receipt.json').write_text(json.dumps({
+         'package': package.name, 'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
+diff --git a/mseries/m4-mini/prepare-hosted-image-inputs.py b/mseries/m4-mini/prepare-hosted-image-inputs.py
+index a3cb8dc..cc71a96 100644
+--- a/mseries/m4-mini/prepare-hosted-image-inputs.py
++++ b/mseries/m4-mini/prepare-hosted-image-inputs.py
+@@ -13,8 +13,9 @@ import subprocess
+ import sys
+ 
+ HERE = Path(__file__).resolve().parent
+-PREFIXES = {'kernel': 'linux-image-elementary-m4-gravity1_',
+-            'mesa': 'elementary-m4-gravity-mesa1_'}
++PREFIXES = {'kernel': ('linux-image-elementary-m4-gravity1_',
++                       'linux-image-elementary-m4-gravity1-r8_'),
++            'mesa': ('elementary-m4-gravity-mesa1_',)}
+ 
+ 
+ def package(directory, kind):
+diff --git a/mseries/m4-mini/prepare-image-inputs.py b/mseries/m4-mini/prepare-image-inputs.py
+index aadaad7..130e189 100644
+--- a/mseries/m4-mini/prepare-image-inputs.py
++++ b/mseries/m4-mini/prepare-image-inputs.py
+@@ -73,8 +73,12 @@ def main():
+         if name == 'mesa':
+             command += ['--smoke', str(args.smoke.resolve())]
+         subprocess.run(command, check=True)
+-    subprocess.run([sys.executable, str(HERE / 'package-policy.py'),
+-                    '--output', str((args.output / 'policy-build').resolve())], check=True)
++    kernel_check = json.loads((records / 'kernel-check.json').read_text())
++    policy_command = [sys.executable, str(HERE / 'package-policy.py'),
++                      '--output', str((args.output / 'policy-build').resolve())]
++    if kernel_check['package_version'] == '7.1.13+elementary.m4.gravity1-8':
++        policy_command += ['--kernel-revision', 'r8']
++    subprocess.run(policy_command, check=True)
+     policy = json.loads((args.output / 'policy-build/receipt.json').read_text())
+     packages = args.output / 'packages'
+     packages.mkdir()
 diff --git a/mseries/m4-mini/test_r8_identity.py b/mseries/m4-mini/test_r8_identity.py
 new file mode 100644
 index 0000000..8ae6b7d
@@ -405,3 +503,81 @@ index 0000000..8ae6b7d
 +
 +if __name__ == '__main__':
 +    unittest.main()
+diff --git a/mseries/m4-mini/test_r8_image_selection.py b/mseries/m4-mini/test_r8_image_selection.py
+new file mode 100644
+index 0000000..abd1d3a
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_image_selection.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++"""R8 image admission and policy remain explicit and version matched."""
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++HERE = Path(__file__).resolve().parent
++
++def load(name, filename):
++    spec = importlib.util.spec_from_file_location(name, HERE / filename)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++image = load('image', 'build-research-image.py')
++hosted = load('hosted', 'prepare-hosted-image-inputs.py')
++policy = load('policy', 'package-policy.py')
++
++class R8ImageTests(unittest.TestCase):
++    def controls(self, r8=False):
++        return {'kernel': {'Package': 'linux-image-elementary-m4-gravity1' + ('-r8' if r8 else ''),
++                           'Version': '7.1.13+elementary.m4.gravity1-' + ('8' if r8 else '5'), 'Architecture': 'arm64'},
++                'mesa': {'Package': 'elementary-m4-gravity-mesa1', 'Version': '1', 'Architecture': 'arm64'},
++                'policy': {'Package': 'elementary-m4-gravity-policy', 'Version': '20261021-' + ('3' if r8 else '2'), 'Architecture': 'arm64'}}
++
++    def profile(self, controls):
++        return ''.join('    ' + c['Package'] + '=' + c['Version'] + '\n' for c in controls.values())
++
++    def test_old_profile_does_not_accept_r8(self):
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(self.controls()), self.controls(True))
++
++    def test_explicit_r8_and_legacy_pass(self):
++        for r8 in (False, True):
++            controls = self.controls(r8)
++            self.assertEqual(image.profile_package_versions(self.profile(controls), controls)['kernel'], controls['kernel']['Version'])
++
++    def test_reject_mixed_kernel_or_policy(self):
++        controls = self.controls(True)
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(controls) + '    linux-image-elementary-m4-gravity1=7.1.13+elementary.m4.gravity1-5\n', controls)
++        controls['policy']['Version'] = '20261021-2'
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(controls), controls)
++
++    def test_hosted_receipt_allows_both_kernel_names_and_checks_hash(self):
++        for suffix in ('', '-r8'):
++            with tempfile.TemporaryDirectory() as t:
++                d = Path(t); name = 'linux-image-elementary-m4-gravity1' + suffix + '_v_arm64.deb'
++                (d / name).write_bytes(b'x'); (d / 'receipt.json').write_text(json.dumps({'package':name, 'package_sha256':hashlib.sha256(b'x').hexdigest()}))
++                self.assertEqual(hosted.package(d, 'kernel'), d / name)
++                (d / name).write_bytes(b'bad')
++                with self.assertRaises(ValueError): hosted.package(d, 'kernel')
++
++    def test_policy_revisions_generate_matching_dependency(self):
++        for r8 in (False, True):
++            with tempfile.TemporaryDirectory() as t:
++                root=Path(t); source=root / 'gravity/policy';source.mkdir(parents=True)
++                for name in ['90-gravity-no-sleep.conf','90-gravity-no-sleep-logind.conf','90-gravity-block-sleep-service.conf']:
++                    (source/name).write_text('fixture')
++                output=root/'out'; argv=['package-policy.py','--output',str(output)] + (['--kernel-revision','r8'] if r8 else [])
++                def build(cmd, **kwargs):
++                    data=(Path(cmd[-2])/'DEBIAN/control').read_text()
++                    expected='linux-image-elementary-m4-gravity1' + ('-r8' if r8 else '')
++                    self.assertIn('Depends: systemd, initramfs-tools, '+expected+'\n',data)
++                    self.assertIn('Version: 20261021-'+('3' if r8 else '2')+'\n',data)
++                    Path(cmd[-1]).write_bytes(b'fixture')
++                with patch.object(policy, 'HERE', root), patch.object(sys, 'argv', argv), patch.object(policy.subprocess, 'run', side_effect=build): policy.main()
++
++if __name__ == '__main__': unittest.main()
