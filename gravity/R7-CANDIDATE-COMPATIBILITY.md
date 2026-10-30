@@ -63,3 +63,19 @@ These tests use mocked package extraction, not actual package inspection.
 The embedded patch contains its original mail-format whitespace. These checks do not replace a
 full checkout replay, full R8 build, package inspection, integration with the
 selected image, or physical testing.
+
+## Full patch-set source replay
+
+At the same pinned candidate and Gravity revisions, the complete set of
+source files touched by the four packaging patches and eleven proposed R8
+compatibility patches was fetched into an isolated scratch tree. The two new
+Apple idle files were absent from the Gravity base, as expected. All four
+packaging patches and all eleven compatibility patches applied in manifest
+order with `patch --batch --fuzz=0`. Every file in both resulting-file
+manifests matched its SHA-256, including both 0066-modified GPU files. The
+candidate's actual `source_patch_gate()` also passed its boot-CPU idle and
+BCM4388 ordering checks. The four identity tests passed again.
+
+This is a complete replay of the touched-file patch set, not a full kernel
+source checkout or compile. The full Image, modules, DTBs and actual Debian
+package still require building and inspection, followed by hardware testing.
