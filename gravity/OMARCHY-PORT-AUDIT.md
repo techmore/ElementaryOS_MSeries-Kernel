@@ -42,3 +42,21 @@ and DTBs. Check the boot-chain and firmware requirements and retain a known-good
 fallback before any attended hardware trial. Build, DT schema and real boot,
 reboot, shutdown and GPU qualification remain open. The current Gravity module
 and DTB observations do not qualify an Omarchy or Aurora build.
+
+## Exact Omarchy pin apply check
+
+A full clean checkout of `omacom/linux-aurora` at `3bdf11d3acb6ea1511b0611ddd40ac5336b7b215`
+was obtained on 2026-10-30. Each of the 67 patches was checked **independently**
+against that pristine tree with `git apply --check`; results and diagnostics are
+in [omarchy-pin-apply-check-2026-10-30.json](omarchy-pin-apply-check-2026-10-30.json).
+Four checks pass (0008, 0047, 0048, 0052), and 63 fail. This does not replay the
+series, account for dependencies, or establish semantic compatibility; passing
+patches are not candidates for automatic application. In particular, 0066
+fails because its two Gravity GPU source files are absent, and 0067 fails because
+its target SMC context is absent.
+
+The pinned tree does have a `t8132-j773g.dts` listed in the Apple DTB Makefile,
+but the file contains only board identity and a framebuffer power-domain
+adjustment on the common T8132 base. That is not the Gravity mini's peripheral,
+GPU and storage support. A whole-device integration is required before a
+bootable Omarchy candidate can be inferred.
