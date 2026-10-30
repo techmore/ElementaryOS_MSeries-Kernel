@@ -25,6 +25,15 @@ This is a source review, not an Omarchy build or hardware qualification.
 - The exact Omarchy pin's `t8132.dtsi` has no SMC node; 0067 cannot be applied
   there independently of the missing platform support. A source check of a
   single file is not a full M4 support assessment.
+- At that exact pin, the Apple DT Makefile does list `t8132-j773g.dtb`, and
+  the J773g board source exists. Its board-specific content identifies the
+  Mac mini and keeps HDMI framebuffer power domains on; it includes the
+  shared T8132 files. This is a minimal board description, not evidence that
+  the packaged kernel supports the Gravity system's devices or GPU. The
+  pinned Asahi Kconfig describes explicit M3 and G15 options but no M4 option;
+  that observation alone does not establish the driver's full capabilities.
+  Sources: https://github.com/omacom/linux-aurora/blob/3bdf11d3acb6ea1511b0611ddd40ac5336b7b215/arch/arm64/boot/dts/apple/t8132-j773g.dts
+  and https://github.com/omacom/linux-aurora/blob/3bdf11d3acb6ea1511b0611ddd40ac5336b7b215/drivers/gpu/drm/asahi/Kconfig
 
 Next: obtain a full checkout of the exact Omarchy source pin and the intended
 J773g integration base, inventory board support and compare subsystem behavior;

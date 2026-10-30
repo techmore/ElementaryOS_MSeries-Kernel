@@ -71,3 +71,21 @@ non-leaf page. Several teardown and rollback paths can invoke this routine;
 the log alone does not identify which one or establish a safe fix. Further
 GPU tests should wait for a controlled investigation given the owner's report
 of instability.
+
+## Desktop symptom reported after enumeration
+
+The owner reports stuttering, crashes, and a cursor with no desktop. The time
+the blank screen began relative to the Vulkan enumeration is not established.
+At 16:19:52 EDT, before that enumeration, `apple-drm` logged that it rejected a
+plane operation that could crash DCP: a 235x2136 plane at 290x2160 on a
+3840x2160 output did not satisfy its visible-area requirement. The kernel
+message says the compositor should fall back to software compositing and that
+failure to do so could freeze or crash it. This is a lead, not proof of the
+current symptom's cause. The older `GPU-HANG-2026-10-28.md` also records a
+separate cursor-only login caused by display modes arriving late.
+
+After the report, passive checks showed all ten CPU cores online, approximately
+12 GiB memory available and 56 GiB free on `/`; these do not prove CPU or
+graphics stability. The sandbox could not inspect host desktop processes or
+connect to the system bus. No desktop restart, reboot, or GPU workload was
+performed.

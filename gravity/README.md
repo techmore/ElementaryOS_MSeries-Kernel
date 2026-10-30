@@ -21,9 +21,13 @@ Checked 2026-10-29 (`upstream_check` in `series.json`): `gravity-m4` is unchange
 is current. 0066 is not absorbed. Gravity's unreleased `replacement/210-gpu` (`3990d074`, Linux 7.3) has the same
 fix in `g16_drm_pump.rs`; drop 0066 once a packaged Gravity kernel ships it.
 
-## Not boot-tested here
+## Qualification status
 
-Nothing in this directory has been built or booted by this project. Gravity's own installer image is the known route.
+The 0066 module and 0067 device-tree change were installed on the running
+Gravity host, but neither has completed the targeted validation described in
+the host observation. The exported series has not been built or booted as an
+Omarchy kernel. Gravity's own installer image is the known route for Gravity.
+See `OMARCHY-PORT-AUDIT.md` and `OMARCHY-J773G-QUALIFICATION.md`.
 
 ## Overlap with Aurora
 
