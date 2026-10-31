@@ -56,3 +56,14 @@ being discarded. These are source-level failure-handling risks, not proof that
 either path caused the KWin crash. The extracted `agx_batch.c` was byte-matched
 against a fresh extraction of the build-103 debugsource package. A safe fix must
 handle context failure, unsubmitted queries and mixed-engine batches together.
+
+An isolated proposal is saved as `mesa103-failed-render-draft.patch`, SHA-256
+`f2124540640a594e61ab76b7226c86419480c52ecf9abf6384f8d4dad61a9700`.
+It discards the full mixed batch on render preparation failure, marks a context
+fault and avoids publishing timestamp results for discarded work. A host
+harness exercised the modified dispatch and query-cancellation functions with
+stubs, and the patch applies to the extracted Gravity build-103 source. It has
+not been compiled as Mesa, tested on a GPU, or reviewed for real buffer
+lifetimes and state-tracker behavior. It does not fix the separate unchecked
+encoder allocation/mapping path or establish the original VM_BIND cause. Do
+not deploy or upstream it as a validated fix.
