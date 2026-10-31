@@ -61,9 +61,12 @@ before relying on the mini's internal disk.
   It deliberately does not enable J713 PMU or display handoffs on the mini.
 
 The kernel drafts apply to the current WIP5 source with the preceding SMC
-patch; the board DTB compiles in the matching-input checkout. The loader draft
-has not yet been compiled, and U-Boot's matching handoff still requires
-integration. This is a build integration starting point, not an enabled,
+patch; the board DTB compiles in the matching-input checkout. The loader patch
+applies to the pinned source archive; the modified `kboot.o` compiles with
+`NO_DISPLAY=1`. The full loader build progressed through its C and assembly
+objects but stopped at `build/librust.a` because `cargo` was unavailable.
+U-Boot's matching handoff still requires integration. This is a build
+integration starting point, not an enabled,
 bootable or hardware-qualified storage path. Do not install the draft loader.
 
 ## Sound on the current Gravity host
