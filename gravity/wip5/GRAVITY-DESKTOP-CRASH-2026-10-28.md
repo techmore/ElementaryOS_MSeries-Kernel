@@ -102,3 +102,11 @@ draw, compute and temporary-resource failure paths. Its changed AGX objects
 compiled against the exact Gravity 103 source. Pool continuation, other
 mapping callers, full cleanup and reset propagation remain unaudited; no
 fault-injection or GPU execution validated it. It is not deployable.
+
+The follow-up `mesa103-allocation-incomplete-v6.patch` (SHA-256
+`6008bb204c8acb85651cc1600b9bdef2ff3ef3af2bc2afd2e8b518c81528d64e`)
+adds a checked path for encoder continuation buffer creation, mapping and
+pool tracking, preserving the previous encoder link on failure. Its changed
+pool and AGX state files compiled against Gravity 103. Generic pool and mapping
+callers, generated nested calls, full cleanup and runtime behavior remain
+unverified; it is not deployable and was not run on the GPU.
