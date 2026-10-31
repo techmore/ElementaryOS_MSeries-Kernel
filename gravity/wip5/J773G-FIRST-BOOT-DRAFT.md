@@ -42,3 +42,13 @@ included in the rescue bundle. The mini DARTs expose 0x4000-byte windows but
 their actual version is unknown; the newer driver must reject any v2 register
 access beyond that range. Mini power ownership and physical input remain
 unverified.
+
+The bundle also contains a separate serial-plus-framebuffer variant. Its boot
+arguments use `ttySAC0`, the likely Samsung UART console selected by the mini's
+`serial0` alias, plus `tty0`; physical access and UART speed are unverified.
+The rescue init starts a tty1 shell when it detects a serial console. Source
+review indicates the patched m1n1 direct-kernel path fills ANS/SART/mailbox
+resources from the live J773g ADT and does not require U-Boot for that step;
+the actual handoff is untested. If configured stage 1 cannot load its target,
+it falls to the m1n1 proxy, not automatically back to Gravity. This must be
+accounted for in any recovery plan.
