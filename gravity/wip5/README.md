@@ -50,3 +50,6 @@ mini-relevant work and hardware-specific references.
 
 [Omarchy ARM root staging](OMARCHY-ROOT-STAGING.md) records the verified
 generic userspace artifact and remaining mini boot requirements.
+
+The [first-boot rescue draft](J773G-FIRST-BOOT-DRAFT.md) records the
+isolated direct-boot artifacts and remaining blockers.
