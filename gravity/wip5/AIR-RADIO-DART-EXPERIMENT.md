@@ -1,0 +1,9 @@
+# Air radio and shared T8132 integration experiment
+
+This patch applies to the source snapshot after `air-usb-superspeed-experimental.patch` (see `AIR-USB-SUPERSPEED-EXPERIMENT.md`). It includes PR 366 #21 shared T8132 descriptions, #23 J713 basic configuration, #24 J713 QSPI support and #27 J713 Bluetooth and radio DART support, plus the mini DT reconciliation in `AIR-SHARED-DT-EXPERIMENT.md`. Do not also apply the separate shared-DT patches when using this combined patch. It is not a standalone WIP5 patch or a bootable release.
+
+Two radio DART hunks were adapted to WIP5: retained lifetime helpers follow its extended DART structure, and managed radio domains are retained alongside WIP5's existing locked-domain TLB retirement safeguards. The J713 radio policy is board-specific and is not a Mac mini radio enablement. Earlier NVMe and CLPC conflict resolution remains necessary, as does combined kernel compilation and hardware qualification. Forward and reverse patch application checks passed for the two scratch snapshots.
+
+The PR's host scripts `bcm4377-radio-sids.py`, `bcm4377-dma-window.py`, `bcm4377-rti-address.py` and `bcm4377-state-wait.py` passed, including their negative controls. J713 DT compiled with the existing disabled-loader-placeholder duplicate-address warning. These host tests do not prove the integrated kernel compiles or works on hardware.
+
+On the running Gravity J773g, the six rear USB DART nodes each describe a 0x4000-byte MMIO resource. WIP5's T8110 v2 fault handlers read offsets beginning at 0x4000 and per-stream registers beginning at 0x8000; the driver must not use those offsets outside its mapped resource. The Air shared DT describes 0xc000-byte USB DART windows. The mini nodes remain disabled until the actual DART version, register windows, overlap and handler bounds are reconciled; the Gravity DT is evidence of its current configuration, not proof of correct hardware behavior.
