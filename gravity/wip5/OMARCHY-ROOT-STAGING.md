@@ -25,3 +25,8 @@ The same candidate is preserved here as
 the cached original. It reverse-checks against the patched btrfs-progs v7.1
 source with `git apply --unidiff-zero`, and needs broader review before an
 upstream proposal.
+
+A read-only comparison confirms the staged image's Btrfs filesystem UUID is
+different from the currently mounted Gravity root. Cloning the image would
+still duplicate its own UUID; attachment and installation must account for
+that separately.
