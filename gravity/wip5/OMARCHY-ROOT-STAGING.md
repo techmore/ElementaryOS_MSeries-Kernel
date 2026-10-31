@@ -152,9 +152,10 @@ staged `omarchy-root-subvolume`. It prompts for a new local username and invokes
 arguments or a log. It validates the existing sudoers configuration and adds a
 general password-required wheel rule after password setup; existing command-specific
 passwordless rules remain in effect. It refuses an existing user,
-home or policy, and checks that `/dev/tty` can be opened inside the chroot
-before creating an account. If needed it creates a temporary character device
-with major 5, minor 0 and removes only that same node on exit. A failure after
+home or policy, and checks that `/dev/tty` and `/dev/null` can be opened inside
+the chroot before creating an account. If needed it creates temporary character
+devices (5:0 and 1:3 respectively) and removes only the same created nodes on
+exit. A failure after
 `useradd` can leave a partial account for manual inspection. The script has not
 been run against the real staged root or with a real password; user-namespace
 fixtures covered refusal of an incorrect existing tty and failed tty creation.
@@ -170,3 +171,12 @@ inside the test namespace and mock the staged chroot commands. They verified the
 provisioning command order, resulting `0440` wheel rule, and removal of the
 temporary policy on a simulated password failure. These fixtures do not run the
 real staged `useradd`, `passwd`, PAM, `visudo`, or a real password prompt.
+
+`prepare-omarchy-staged-root.sh` chains the isolated root copy, matching
+graphics and Atlantic module staging, and attended user provisioning. It
+preflights the recorded module hashes, refuses an existing target, stops on
+failure, retains a partial staged root for inspection, and does not touch boot
+files. Disposable user-namespace fixtures verify order, failure stops and
+existing-target refusal with mocked helpers; provisioning fixtures check tty
+and null-device refusal and mocked interactive outcomes. The real privileged
+orchestrator, chroot tools, password entry, mount and first boot remain untested.

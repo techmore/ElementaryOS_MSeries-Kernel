@@ -30,7 +30,7 @@ class ProvisionRefusal(unittest.TestCase):
         self.bin = base / 'bin'; self.bin.mkdir()
         for name, text in {
             'btrfs': '#!/bin/sh\nexit 0\n',
-            'stat': '#!/bin/sh\ncase "$2" in %t:%T) printf "5:0\\n";; *) printf "256\\n";; esac\n',
+            'stat': '#!/bin/sh\ncase "$2:$3" in %t:%T:*/tty) printf "5:0\\n";; %t:%T:*/null) printf "1:3\\n";; *) printf "256\\n";; esac\n',
             'chroot': '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_LOG"\ncase "$3" in passwd) exit 1;; group) exit 0;; esac\n[ "$2" = /usr/bin/passwd ] && [ "${FAIL_PASSWD:-0}" = 1 ] && exit 1\nexit 0\n',
             'mknod': '#!/bin/sh\nexit 1\n',
         }.items():
@@ -73,15 +73,17 @@ class ProvisionRefusal(unittest.TestCase):
         self.assertEqual(tty.read_text(), 'keep')
         self.assert_no_account_or_policy()
 
-    def run_bound(self, fail_passwd=False):
+    def run_bound(self, fail_passwd=False, bad_null=False):
         tty = self.root / 'dev/tty'; tty.touch()
+        (self.root / 'dev/null').write_text('keep' if bad_null else '')
         env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'], FIXTURE_LOG=str(self.log), FAIL_PASSWD='1' if fail_passwd else '0')
         master, slave = pty.openpty()
         def controlling_tty():
             os.setsid()
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
         try:
-            cmd = ['unshare', '-Urnm', 'sh', '-c', 'mount --bind /dev/tty "$1/dev/tty" || exit 90; exec bash "$2" "$1"', 'fixture', str(self.root), str(SCRIPT)]
+            bind_null = '' if bad_null else 'mount --bind /dev/null "$1/dev/null" || exit 90; '
+            cmd = ['unshare', '-Urnm', 'sh', '-c', 'mount --bind /dev/tty "$1/dev/tty" || exit 90; ' + bind_null + 'exec bash "$2" "$1"', 'fixture', str(self.root), str(SCRIPT)]
             proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, env=env, preexec_fn=controlling_tty)
             os.close(slave); slave = -1
             os.write(master, b'sample\n')
@@ -109,6 +111,13 @@ class ProvisionRefusal(unittest.TestCase):
         self.assertEqual(policy.read_text(), '%wheel ALL=(ALL:ALL) ALL\n')
         self.assertEqual(policy.stat().st_mode & 0o777, 0o440)
         self.assertTrue((self.root / 'dev/tty').is_file())
+
+    def test_existing_regular_null_is_preserved_and_rejected(self):
+        code, output = self.run_bound(bad_null=True)
+        self.assertNotEqual(code, 0)
+        self.assertIn('not the expected character device', output)
+        self.assertEqual((self.root / 'dev/null').read_text(), 'keep')
+        self.assert_no_account_or_policy()
 
     def test_mocked_password_failure_leaves_no_sudo_policy(self):
         code, output = self.run_bound(fail_passwd=True)
