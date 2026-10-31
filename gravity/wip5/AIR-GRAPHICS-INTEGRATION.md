@@ -152,6 +152,8 @@ mocked cases against the patched control-flow fragments. The revised raw stage
 2 SHA-1 is `1a47b08343d866a871b14f812ba930dfc801cb3f`; a new packed
 DTB/U-Boot candidate is SHA-1 `6f022a61c9d4ad599fe6bf5533f42f58addf5205`
 and SHA-256 `d6dd789d1d2bb272d92010266027f565b58c8e7a8a9fca81406ae3302cacfafe`.
-Both are staged locally. This corrects the identified source path but does not
-prove live ANS initialization, U-Boot adoption, disk integrity or boot safety.
+Both are staged locally and include the separate mini USB2 calibration gate
+`0018`; they do not enable the USB trial DT nodes. This corrects the identified
+source path but does not prove live ANS initialization, U-Boot adoption, disk
+integrity or boot safety.
 The older packed candidate retains the blocker and should not be used.
