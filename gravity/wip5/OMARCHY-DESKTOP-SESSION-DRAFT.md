@@ -10,6 +10,13 @@ target is graphical. A newly provisioned user alone therefore does not show
 how the desktop manager is started. This extraction is an inspection, not a
 metadata-correct root, boot or complete audit of generated systemd units.
 
+A separate read-only extraction of the image's own
+`/usr/lib/systemd/system/graphical.target` confirms it declares both
+`Wants=display-manager.service` and ordering after that service. The optional
+alias below therefore supplies the unit name requested by that target. This
+checks the image's unit files only; it does not show that systemd reaches the
+target or that SDDM, Hyprland, a display or input works on the mini.
+
 `enable-omarchy-sddm-draft.sh` is an **optional, attended root** step on the
 already prepared, isolated `omarchy-root-subvolume`. Its explicit opt-in
 creates the SDDM alias only if the staged manager, configuration, and subvolume
