@@ -24,6 +24,22 @@ reproducible binaries across toolchains. The original build used Fedora clang
 compatible build environment and review `olddefconfig` changes before using
 the config in an out-of-tree kernel build.
 
+For clean checkouts, the verified immutable kernel and hub commits are
+`3ff11e05c076e57787f71dbe630625cc37fd3f36` in
+`https://github.com/techmore/ElementaryOS_MSeries-Kernel.git` and
+`7f24d3b4bf0ca8e3227928c3690eb865f768f91f` in
+`https://github.com/techmore/ElementaryOS_MSeries.git`, respectively. A
+contributor can clone both, check out those commits, download the archive above,
+and run the command with those checkout paths. All 17 patches and the config
+were independently fetched from GitHub using these commit IDs and matched
+their recorded SHA-256 values; the pinned upstream archive URL returned HTTP
+200. The local archive used for replay matched the recorded archive digest;
+the remote archive was not downloaded a second time for this check.
+The same replay was also run from clean `git archive` snapshots of those two
+commits using the verified local upstream archive; a full `diff -qr` again
+matched the cached source used for the original build. It did not consume
+uncommitted files from either checkout.
+
 On 2026-10-30 the script replayed the verified local archive and 17 patches;
 `diff -qr` found no differences against the entire cached source used for the
 completed graphics build. The copied config SHA-256 is
