@@ -79,6 +79,13 @@ file has no regular account entries (UIDs 1000–59999), so even a successful
 kernel and init boot would not by itself provide a provisioned desktop login.
 These observations do not verify systemd's full library dependencies or a
 working display, and do not change the image.
+The image includes a `sysinit.target.wants/systemd-firstboot.service` link and
+an empty `/etc/machine-id`. The service prompts for initial system settings and
+a root password when `ConditionFirstBoot=yes`; the local systemd machine-id
+manual says an empty existing file does not count as first boot. The image has
+a different systemd version, so verify that behavior there before relying on
+automatic prompts. In any case this service is not evidence of regular-user
+provisioning. The staged copy needs an explicit, reviewed access setup.
 
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
 `87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
