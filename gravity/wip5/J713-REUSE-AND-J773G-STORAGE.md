@@ -106,6 +106,11 @@ display code. The patched U-Boot builds with `apple_m1_defconfig`; its draft
 `u-boot-nodtb.bin` is staged at
 `~/.cache/m4-kernel/wip5-source/uboot-j773g-draft/` with SHA-256
 `049ed439eb8a51e12f0c9720c79d38c785c6ac3af0467ff7d79a7290a6525ae5`.
+After applying `0009`, an incremental build relinked the loader as
+`u-boot-nodtb-keyboard-fix.bin` in that directory; SHA-1
+`658d335591953db8524d1bf6f45254185f83d60d`, SHA-256
+`d3c82891abbaabe113fff1feab8f38986dc19817c0cdfd95cf8f878774b816fc`.
+Neither binary has been installed or booted.
 The running WIP5 kernel build started before the opt-in marker; rebuild its
 DTB with the complete patch set before pairing. Boot selection, source
 identity, framebuffer properties and actual J773g firmware resources remain
