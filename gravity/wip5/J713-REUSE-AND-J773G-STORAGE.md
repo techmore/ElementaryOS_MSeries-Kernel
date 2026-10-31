@@ -77,7 +77,9 @@ before relying on the mini's internal disk.
   `python3 gravity/wip5/verify-uboot-mini-keyboard.py <patched-uboot-tree>`
   exercised the production chosen importer with real libfdt: the Air path
   rejects an absent property, the mini accepts absence, and the mini rejects
-  a malformed value. This is not a handoff or boot test.
+  a malformed value. It also exercises the complete J773g importer with a
+  synthetic storage handoff and absent keyboard property. This does not prove
+  the live handoff or boot works.
 
 The currently booted Gravity tree exposes `gravity,efi-system-partition`, not
 `asahi,efi-system-partition`; the importer requires the latter in the m1n1
