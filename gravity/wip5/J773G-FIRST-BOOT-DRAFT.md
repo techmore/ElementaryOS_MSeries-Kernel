@@ -44,8 +44,9 @@ access beyond that range. Mini power ownership and physical input remain
 unverified.
 
 The bundle also contains a separate serial-plus-framebuffer variant. Its boot
-arguments use `ttySAC0`, the likely Samsung UART console selected by the mini's
-`serial0` alias, plus `tty0`; physical access and UART speed are unverified.
+arguments use `ttySAC0`, the Samsung UART console selected by the mini's
+`serial0` alias, plus `tty0`. The running Gravity kernel logs confirm that
+Linux device name; physical access and UART speed remain unverified.
 The rescue init starts a tty1 shell when it detects a serial console. Source
 review indicates the patched m1n1 direct-kernel path fills ANS/SART/mailbox
 resources from the live J773g ADT and does not require U-Boot for that step;
