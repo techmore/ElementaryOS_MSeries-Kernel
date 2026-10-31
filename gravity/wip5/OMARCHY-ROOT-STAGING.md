@@ -133,3 +133,12 @@ Image and DTB hashes. The direct-root host fixture passed a recorded-artifact
 case and rejected unrelated stage 1, stage 2, DTB and Asahi module inputs before
 output creation. Its filesystem identity is simulated; it does not validate a
 real mount, loader execution, hardware recovery, or boot.
+
+The direct-root staging tool now refuses to assemble its bundle when the staged
+root's `/etc/passwd` has no regular local login account (UID 1000–59999 with an
+absolute home and a non-`nologin`/`false` shell). The supplied image lacks such
+an account, so a separately reviewed provisioning step is required first. The
+check reads only the public account database: it does not create a user, read a
+password hash, establish that the account can authenticate, or verify a working
+login session. A host fixture covers the unprovisioned rejection before output
+creation; actual provisioning and hardware boot remain untested.

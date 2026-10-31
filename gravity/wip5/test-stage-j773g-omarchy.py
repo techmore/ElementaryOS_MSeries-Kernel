@@ -19,6 +19,7 @@ class DirectRootValidation(unittest.TestCase):
         self.root = self.base / 'ordinary-directory'
         (self.root / 'etc').mkdir(parents=True)
         (self.root / 'etc/os-release').write_text('ID=omarchy\n')
+        (self.root / 'etc/passwd').write_text('sample:x:1000:1000:Sample:/home/sample:/bin/bash\n')
         modules = self.root / 'usr/lib/modules' / RELEASE
         modules.mkdir(parents=True)
         (modules / 'modules.dep').write_text('')
@@ -99,6 +100,14 @@ class DirectRootValidation(unittest.TestCase):
         result = self.run_recorded_fixture()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('stage1 is not the recorded', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def test_unprovisioned_root_rejected(self):
+        self.prepare_recorded_fixture()
+        (self.root / 'etc/passwd').write_text('root:x:0:0:root:/root:/bin/bash\n')
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('needs a provisioned local login user', result.stderr)
         self.assertFalse((self.base / 'output').exists())
 
     def test_wrong_asahi_rejected(self):

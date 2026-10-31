@@ -73,6 +73,26 @@ asahi = root_dir / 'usr/lib/modules' / release / 'kernel/drivers/gpu/drm/asahi/a
 expected_asahi = 'f027e3050376e1d9da9ce83a4e88b1dc129077394f7a348cc709db203c0638e8'
 if not asahi.is_file() or hashlib.sha256(asahi.read_bytes()).hexdigest() != expected_asahi:
     p.error('staged Asahi module does not match the graphics kernel')
+# The generic image has no regular user; require evidence of local provisioning.
+passwd = root_dir / 'etc/passwd'
+if not passwd.is_file():
+    p.error('staged root is missing /etc/passwd')
+has_login_user = False
+for line in passwd.read_text().splitlines():
+    fields = line.split(':')
+    if len(fields) != 7:
+        continue
+    try:
+        uid = int(fields[2])
+    except ValueError:
+        continue
+    home, shell = fields[5:7]
+    if (fields[0] and 1000 <= uid <= 59999 and home.startswith('/') and
+            shell.startswith('/') and pathlib.PurePosixPath(shell).name not in ('false', 'nologin')):
+        has_login_user = True
+        break
+if not has_login_user:
+    p.error('staged root needs a provisioned local login user')
 a.output.mkdir(parents=True, exist_ok=False)
 for source, name in ((a.image, 'Image'), (a.dtb, 't8132-j773g.dtb')):
     shutil.copyfile(source, a.output / name)
@@ -84,5 +104,5 @@ artifacts = {}
 for name in ('Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin'):
     data = (a.output / name).read_bytes()
     artifacts[name] = {'bytes': len(data), 'sha1': hashlib.sha1(data).hexdigest(), 'sha256': hashlib.sha256(data).hexdigest()}
-(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount mapping and subvolume root checked; contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
+(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount and subvolume checked; login authentication and contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
 print(f'Staged experiment in {a.output}; no boot files changed')
