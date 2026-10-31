@@ -65,3 +65,36 @@ can build only one. Upstream means fixing Aurora's backend, not replacing it.
 3. Build with this repo's CI; boot on the mini with the HDMI fallback and the rescue entry.
 4. Open one PR per gap against `aurora-silicon/linux` `aurora-wip`, after checking Aurora's open PRs for
    the same work.
+
+## Correction (same day): the mini's board description is the main gap
+
+The feature check above looked at the shared SoC file `t8132.dtsi`. The mini's own board file is where Aurora
+is missing almost everything:
+
+| Branch | `t8132-j773g.dts` |
+|---|---|
+| Aurora `aurora-wip` / `integration/aurora` | 25 lines: CPU and serial only (the mainline 7.4 minimal tree) |
+| Gravity / `m4-mini-gravity` | 300 lines: display (DCP and external), HDMI audio, NVMe, USB-C with USB-PD, Wi-Fi, Bluetooth, speaker |
+
+- 28 of the 34 node labels Gravity's mini board uses are not in Aurora's shared T8132 files (audio: admac,
+  mca, sio, dart_audio; display: dcp, dcpext0/1, dispext0/1, dptxphy, dpaudio0; USB-C: atcphy2/3, dwc3_2/3,
+  typec0/1; PCIe Wi-Fi: pcie2_dart, port02, wifi0, bluetooth0). Aurora defines dcp, wifi0, bluetooth0 and
+  typec0/1 only in the J713 (MacBook Air) files.
+- Aurora's G16 GPU node exists only in `t8132-j713-gpu.dtsi`, and m1n1 fills its UAT and firmware ranges
+  at boot. **An Aurora kernel on the mini has no GPU node**, which matches the Omarchy installer bringing up
+  a GUI and then failing on the GPU.
+- All 15 of Aurora's open M4 PRs (checked 2026-10-31) are for J713. None cover J773g.
+- Gap 1 (USB-PD select interrupt) applies to Gravity's `usb-pd@8` node, which Aurora does not have yet; it
+  is folded into the USB-C work below.
+
+### Revised port order (GPU first, as approved)
+
+1. **GPU on J773g in Aurora**: a J773g GPU device-tree include on Aurora's pattern
+   (`t8132-j713-gpu.dtsi`), plus m1n1 J773g GPU handoff. This draft's `wip5/0010-m1n1-j773g-gpu-resource-draft`,
+   `0011-j773g-gpu-dt-draft` and `0012-uboot-j773g-gpu-import-draft` are the starting point. Values come from
+   the J773g ADT (GravityLinux/adt-collection), not from J713.
+2. **Gap 8**: the GPU notification-timeout fix in Aurora's `g16/` loop, if the bug is present there.
+3. **Display and HDMI**: move dcp/disp nodes from the J713-only files into shared T8132 files, then enable
+   them for J773g.
+4. **USB-C** (with Gravity's USB-PD fix), **PCIe Wi-Fi and Bluetooth**, **NVMe** board wiring.
+5. **Audio**: gaps 2 to 5, then HDMI audio (gap 6), then the SMC power keys (gap 7).
