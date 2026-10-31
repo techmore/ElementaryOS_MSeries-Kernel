@@ -180,3 +180,11 @@ files. Disposable user-namespace fixtures verify order, failure stops and
 existing-target refusal with mocked helpers; provisioning fixtures check tty
 and null-device refusal and mocked interactive outcomes. The real privileged
 orchestrator, chroot tools, password entry, mount and first boot remain untested.
+
+The image's own systemd 262 `systemd-machine-id-setup` executable and its
+image libraries were run in an unprivileged user namespace against disposable
+`--root` directories, not against the image or host root. Both an empty existing
+machine-id file and a missing file produced syntactically valid IDs; two fresh
+roots produced different IDs and neither matched the current host ID. This is
+an explicit tool invocation, not proof that the image's first-boot service or
+PID 1 will run the same path automatically during the candidate boot.
