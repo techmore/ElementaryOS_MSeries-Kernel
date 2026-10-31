@@ -96,6 +96,27 @@ class DirectRootValidation(unittest.TestCase):
         self.assertIn('DTB does not match', result.stderr)
         self.assertFalse((self.base / 'output').exists())
 
+    def test_optional_recorded_initramfs(self):
+        self.prepare_recorded_fixture()
+        archive = Path.home() / '.cache/m4-kernel/latest-aurora/j773g-direct-root-bootstrap-draft.cpio.gz'
+        if not archive.is_file():
+            self.skipTest('recorded direct-root bootstrap unavailable')
+        wrong = self.base / 'wrong-initramfs'
+        wrong.write_bytes(b'wrong archive')
+        self.args.extend(['--experimental-initramfs', str(wrong)])
+        bad = self.run_recorded_fixture()
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn('not the recorded direct-root bootstrap', bad.stderr)
+        self.assertFalse((self.base / 'output').exists())
+        self.args[-1] = str(archive)
+        good = self.run_recorded_fixture()
+        self.assertEqual(good.returncode, 0, good.stderr)
+        output = self.base / 'output'
+        self.assertIn(b'draft/initramfs.cpio.gz', (output / 'stage2.bin').read_bytes())
+        manifest = json.loads((output / 'manifest.json').read_text())
+        self.assertIn('initramfs.cpio.gz', manifest['artifacts'])
+        self.assertIn('experimental initramfs: unauthenticated failure shell; switch_root and recovery unverified', manifest['limits'])
+
     def test_wrong_stage1_rejected(self):
         self.prepare_recorded_fixture()
         wrong = self.base / 'wrong-stage1'; wrong.write_bytes(b'unrelated stage1')

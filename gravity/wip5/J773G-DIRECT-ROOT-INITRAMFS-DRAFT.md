@@ -24,7 +24,11 @@ Gzip integrity, archive listing, bash syntax, argument parsing and simulated
 sysfs selection and duplicate rejection were checked on the host. No actual
 block discovery, device mount, module loading, `switch_root`, boot, graphical
 output, keyboard or recovery path has been tested. The archive is not wired
-into any boot bundle.
+into any installed boot bundle. The direct-root staging tool accepts it only
+with explicit `--experimental-initramfs PATH`, checks this exact archive hash,
+copies it into the uninstalled bundle, and records it in the manifest. The
+default path still uses no initramfs. The optional path is available through
+the Python staging tool; the local convenience wrapper does not enable it.
 
 `switch_root` replaces PID 1: failure during that operation does not guarantee
 a fallback shell and can end the boot. Even earlier shell availability depends

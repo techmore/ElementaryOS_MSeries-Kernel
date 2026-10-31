@@ -12,6 +12,7 @@ p = argparse.ArgumentParser(description=__doc__)
 for option in ('image', 'dtb', 'stage1', 'stage2', 'fill-tool', 'output', 'root-directory'):
     p.add_argument('--' + option, type=pathlib.Path, required=True)
 p.add_argument('--allow-unprovisioned', action='store_true', help='permit a diagnostic root without a local desktop user')
+p.add_argument('--experimental-initramfs', type=pathlib.Path, help='include the recorded untested direct-root bootstrap')
 for option in ('esp-partuuid', 'root-partuuid', 'esp-directory', 'root-subvol'):
     p.add_argument('--' + option, required=True)
 a = p.parse_args()
@@ -70,6 +71,12 @@ known_direct_stage2 = {
 }
 if hashlib.sha256(a.stage2.read_bytes()).hexdigest() not in known_direct_stage2:
     p.error('stage2 is not a recorded direct J773g ANS and USB2 build')
+if a.experimental_initramfs:
+    expected_initramfs = '3193e75261efbf3e60bd4fee0ca02ba55db44ba373f90f8cd561e2bd19b98c85'
+    if hashlib.sha256(a.experimental_initramfs.read_bytes()).hexdigest() != expected_initramfs:
+        p.error('initramfs is not the recorded direct-root bootstrap')
+    if any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./-' for c in a.root_subvol):
+        p.error('root subvolume is unsupported by the experimental bootstrap')
 asahi = root_dir / 'usr/lib/modules' / release / 'kernel/drivers/gpu/drm/asahi/asahi.ko'
 expected_asahi = 'f027e3050376e1d9da9ce83a4e88b1dc129077394f7a348cc709db203c0638e8'
 if not asahi.is_file() or hashlib.sha256(asahi.read_bytes()).hexdigest() != expected_asahi:
@@ -105,17 +112,26 @@ if not has_login_user and not a.allow_unprovisioned:
 a.output.mkdir(parents=True, exist_ok=False)
 for source, name in ((a.image, 'Image'), (a.dtb, 't8132-j773g.dtb')):
     shutil.copyfile(source, a.output / name)
-boot = f'boot={esp};{a.esp_directory}/Image;{a.esp_directory}/t8132-j773g.dtb;-\n'
+initramfs_path = '-'
+if a.experimental_initramfs:
+    shutil.copyfile(a.experimental_initramfs, a.output / 'initramfs.cpio.gz')
+    initramfs_path = a.esp_directory + '/initramfs.cpio.gz'
+boot = f'boot={esp};{a.esp_directory}/Image;{a.esp_directory}/t8132-j773g.dtb;{initramfs_path}\n'
 args = f'root=PARTUUID={root} rootfstype=btrfs rootflags=subvol={a.root_subvol} rootwait rw console=tty0 loglevel=7'
 (a.output / 'stage2.bin').write_bytes(a.stage2.read_bytes() + (boot + f'chosen.bootargs={args}\n').encode())
 subprocess.run(['python3', str(a.fill_tool), '--input', str(a.stage1), '--output', str(a.output / 'stage1-configured.bin'), '--esp-partuuid', esp, '--stage2-path', a.esp_directory + '/stage2.bin', '--window-ms', '5000'], check=True)
 artifacts = {}
-for name in ('Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin'):
+names = ['Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin']
+if a.experimental_initramfs:
+    names.append('initramfs.cpio.gz')
+for name in names:
     data = (a.output / name).read_bytes()
     artifacts[name] = {'bytes': len(data), 'sha1': hashlib.sha1(data).hexdigest(), 'sha256': hashlib.sha256(data).hexdigest()}
 limits = ['mount and subvolume checked; login authentication and contents still require verification',
           'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']
 if not has_login_user:
     limits.append('unprovisioned diagnostic root; no local desktop user established')
+if a.experimental_initramfs:
+    limits.append('experimental initramfs: unauthenticated failure shell; switch_root and recovery unverified')
 (a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': limits}, indent=2) + '\n')
 print(f'Staged experiment in {a.output}; no boot files changed')
