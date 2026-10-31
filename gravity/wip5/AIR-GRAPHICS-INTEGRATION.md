@@ -182,3 +182,16 @@ candidate T8132 CLPC policy has immediate GPU demand and no PMP backoff. These
 are DT/source observations, not proof of exclusive DCP ownership or a reason to
 enable the PMC. The overlapping firmware-described resource and mini-specific
 power/ownership handoff need review before testing CLPC or GPU floor changes.
+
+The live Gravity mini GPU node describes five `memory-region` references named
+`ttbs`, `pagetables`, `l2`, `handoff` and `firmware`, pointing to the live
+`uat-ttbs`, `uat-pagetables`, `uat-l2`, `uat-handoff` and `gpu-firmware`
+reservations. The disabled Aurora handoff draft instead expects six named
+reservations, including `uat-shared-l2` and separate `gpu-fw-text` and
+`gpu-fw-data`, plus explicit segment VAs and flags. The staged m1n1 publisher
+constructs that six-region representation from ADT `sgx` ranges and `gfx-asc`
+segment data; it does not simply copy the live Gravity FDT representation.
+The live GPU node lacks the draft's version and segment metadata. Thus these
+representations must not be treated as interchangeable; the actual ADT segment
+properties, reservation lifetime and firmware compatibility still require
+validation. This comparison did not access hardware registers.
