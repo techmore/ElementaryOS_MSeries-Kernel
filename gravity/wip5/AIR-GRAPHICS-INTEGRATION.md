@@ -238,3 +238,14 @@ physical memory. It reports region names and flags, the four Gravity range
 comparisons, ADT phram structural checks and presence of draft handoff metadata.
 Synthetic tests cover matching ranges, overlapping ADT and invalid phandles.
 Its report is diagnostic evidence only and does not qualify firmware or boot.
+
+The live Gravity tree's original SGX `gfx-data` pair also matches its firmware
+data reservation. An optional m1n1 draft,
+`m1n1-j773g-gpu-data-diagnostic-draft.patch` (SHA-256
+`8c2ae874a928361455d38b0e81804c362e83d5d9fb1f593a7d79bdc05983f293`),
+compares that pair with the separate ADT firmware DATA segment and records only
+match, mismatch or unavailable and its size, without adding a physical address.
+It does not reject a handoff based on the comparison. The modified loader object
+compiled and synthetic tests passed, but the actual mini segment data remains
+uncaptured. The current U-Boot importer does not forward these diagnostic
+properties; this is an unbooted diagnostic draft, not GPU admission evidence.
