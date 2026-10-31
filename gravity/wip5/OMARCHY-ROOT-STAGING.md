@@ -72,6 +72,14 @@ and mismatched partition and path cases were rejected. This verifies the mount
 mapping, not that the path is a complete staged subvolume. Storage handoff, init, display,
 input, firmware and recovery remain untested. No real root bundle was made.
 
+Selective read-only extraction confirms `/sbin/init` resolves through
+`/usr/bin/init` to the ARM64 systemd executable, its ELF interpreter is
+present, and the packaged default target is graphical. The image's passwd
+file has no regular account entries (UIDs 1000–59999), so even a successful
+kernel and init boot would not by itself provide a provisioned desktop login.
+These observations do not verify systemd's full library dependencies or a
+working display, and do not change the image.
+
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
 `87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
 and reports extended-attribute failures. Isolated checks preserved an actual
