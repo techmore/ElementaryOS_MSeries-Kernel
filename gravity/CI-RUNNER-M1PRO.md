@@ -42,3 +42,16 @@ Delete the variable to go back to GitHub's runner. If the M1 Pro is off, jobs wa
 - Builds use the runner user's disk (about 15 GB for a kernel build tree plus ccache in `~/.cache/ccache`).
 - The M1 Pro's own boot is untouched; this only compiles.
 - Stop the service with `sudo ./svc.sh stop` in `~/actions-runner`; remove with `./config.sh remove`.
+
+## Current setup (2026-10-31): the M4 mini itself
+
+The owner chose the M4 mini (faster per core) as the runner. Because the mini runs macOS, the runner lives in a
+Lima VM (Apple Virtualization.framework): `kbuild`, Ubuntu 26.04.1 LTS, kernel 7.0.0, 8 of 10 cores, 8 GB RAM,
+60 GB sparse disk, no host folders mounted, started at login (`limactl start-at-login`). Toolchain: clang/LLD
+21.1.8 from Ubuntu, Rust 1.99.0 and bindgen 0.73.2 installed by the workflow. Runner `m4mini-kbuild`, labels
+`self-hosted,Linux,ARM64,m4mini`, systemd service inside the VM. Repo variable
+`KERNEL_RUNNER=["self-hosted","linux","arm64","m4mini"]`. The hosted fallback is now `ubuntu-26.04-arm`.
+
+Manage it from macOS: `limactl list`, `limactl shell kbuild`, `limactl stop kbuild`. When the mini boots into
+Linux for testing the runner is offline and jobs wait; unset `KERNEL_RUNNER` to fall back to GitHub's runner,
+or register the M1 Pro (steps above) as a second runner with the same label.
