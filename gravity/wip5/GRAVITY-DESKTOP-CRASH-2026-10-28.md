@@ -186,3 +186,13 @@ cache, pool, pipe and state objects compile against Gravity 103. Vulkan still
 uses aborting wrappers; generic pools, other allocation/mapping callers and
 query/fence cleanup remain incomplete. There is no fault-injection or GPU
 runtime validation, so this draft must not be deployed.
+
+The Vulkan-focused `mesa103-allocation-incomplete-v16.patch` (SHA-256
+`84eda2af64befdc7055c73268f0f6f2b616be2e18de34231412509cc132ed854`)
+adds checked scratch and shader-cache access for command recording and queue
+submission. The three changed Vulkan objects compiled against exact Gravity
+103 source in an isolated build. Cache failures are currently classified as
+out-of-memory even for some other errors; cache concurrency, in-flight scratch
+lifetime, generic allocation paths and query/fence cleanup remain unvalidated.
+This is not a linked build, an injected-failure or GPU runtime test, and the
+draft must not be deployed.
