@@ -45,6 +45,12 @@ module dependency resolution passed. It has not been paired with an installed
 boot configuration or tested on hardware; module presence does not establish
 that the USB controller, DART or keyboard works.
 
+The extracted archive's own `modprobe` also ran inside an unprivileged user
+namespace and chroot, resolving all five requested driver groups with
+`--show-depends` using only its packaged libraries and module tree. This checks
+the archive's userspace and dependency paths; it does not load modules or test
+device probing.
+
 The matching graphics keyboard trial was assembled separately at
 `~/.cache/m4-kernel/latest-aurora/j773g-graphics-keyboard-rescue-draft/`.
 It pairs the graphics Image with the experimental rear USB2 DTB, the above
