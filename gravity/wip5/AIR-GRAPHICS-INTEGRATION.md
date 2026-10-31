@@ -210,3 +210,14 @@ page tables, handoff and shared L2 matched the respective live FDT reservations
 when decoded as little-endian 64-bit values. This supports those four observed
 mappings but does not supply or validate the draft's separate firmware text and
 data segments or reservation lifetime.
+
+The live Gravity DT does expose one `phram` reservation labeled `adt`, although
+its original ADT bytes were not exposed through the visible sysfs interfaces.
+Its `reg` is 16 KiB aligned, size `0x70000` (below the G16 reader's 2 MiB
+limit), it lacks `reusable` and `no-map`, and it does not overlap the five
+observed live GPU reservations. This matches several structural prerequisites
+of the Aurora G16 ADT reader. Neither live Gravity nor the graphics candidate
+config enables `CONFIG_MTD_PHRAM`; the G16 reader instead maps its reserved
+range directly. No ADT bytes or physical memory were read, and this does not
+verify source contents, retention across loaders, the missing sixth GPU region,
+or mini PMP admission.
