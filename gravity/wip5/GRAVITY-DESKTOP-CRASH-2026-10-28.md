@@ -158,3 +158,13 @@ arguments and USC uploads, indirect groups and draw parameters. The affected
 state object compiles against Gravity 103. Other command uploads, scratch and
 mapping allocations, and cleanup/query/fence behavior remain incomplete; it
 has not been fault-injected or GPU-tested and is not deployable.
+
+`mesa103-allocation-incomplete-v13.patch` (SHA-256
+`93d8fcc5fb0990afb41edcab24cd7882261b36633a66e594005d036ebf4cb9e3`)
+adds transactional scratch replacement and checked render-state, scissor,
+depth, viewport and related upload paths before submission. The changed
+scratch, state and pipe objects compile against Gravity 103. Geometry,
+tessellation, user-index and shader-cache allocations, generic pool tracking,
+global mapping, query/fence cleanup and the Vulkan scratch wrapper remain
+incomplete; no fault-injection or GPU execution validated this draft. It must
+not be deployed.
