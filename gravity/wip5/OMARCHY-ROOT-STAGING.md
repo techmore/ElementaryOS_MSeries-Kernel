@@ -100,3 +100,10 @@ and reports extended-attribute failures. Isolated checks preserved an actual
 setuid file and capability and rejected an injected xattr failure. This does
 not resolve special-node or hardlink preservation, so the privileged copy route
 remains the practical full-root path; both drafts need broader upstream review.
+
+The direct-root staging tool now also rejects an ordinary directory as the
+root: after confirming Btrfs, it requires the root-directory inode to be 256,
+the Btrfs subvolume-root inode. It rejects commas in paths used to construct
+boot arguments, preventing a subvolume name from adding a separate mount
+option. Host tests verify both rejections occur before output creation. This
+is not a contents, provisioning or hardware boot validation.

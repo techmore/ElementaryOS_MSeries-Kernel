@@ -18,7 +18,7 @@ esp = str(uuid.UUID(a.esp_partuuid))
 root = str(uuid.UUID(a.root_partuuid))
 for name in ('esp_directory', 'root_subvol'):
     value = getattr(a, name)
-    if any(not part or part in ('.', '..') for part in value.split('/')) or any(c in value for c in ';\\\n\r \t'):
+    if any(not part or part in ('.', '..') for part in value.split('/')) or any(c in value for c in ';,\\\n\r \t'):
         p.error(name + ' must be a relative path without delimiters or dot components')
 if not a.output.resolve().is_relative_to(pathlib.Path.home().resolve()):
     p.error('output must be a new directory under home')
@@ -31,6 +31,9 @@ mounts = json.loads(subprocess.check_output(
 mount = mounts['filesystems'][0]
 if mount['fstype'] != 'btrfs':
     p.error('staged root must be on a mounted Btrfs filesystem')
+# Btrfs assigns inode 256 to the root directory of each subvolume.
+if root_dir.stat().st_ino != 256:
+    p.error('staged root must be the root directory of a Btrfs subvolume')
 mountpoint = pathlib.Path(mount['target']).resolve(strict=True)
 try:
     relative = root_dir.relative_to(mountpoint)
@@ -57,5 +60,5 @@ artifacts = {}
 for name in ('Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin'):
     data = (a.output / name).read_bytes()
     artifacts[name] = {'bytes': len(data), 'sha1': hashlib.sha1(data).hexdigest(), 'sha256': hashlib.sha256(data).hexdigest()}
-(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount mapping checked; subvolume identity and contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
+(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount mapping and subvolume root checked; contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
 print(f'Staged experiment in {a.output}; no boot files changed')
