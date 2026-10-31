@@ -231,3 +231,10 @@ alone does not identify its role or establish the separate `0x60000` text
 segment and normalized firmware hash. Reusing the live region list verbatim
 would fail the draft contract; the actual loader-generated reservations and
 firmware identity remain to be verified without disturbing the running GPU.
+
+`inspect-j773g-gpu-dt.py` makes this metadata comparison repeatable on a J773g
+live or extracted device tree without printing physical addresses or reading
+physical memory. It reports region names and flags, the four Gravity range
+comparisons, ADT phram structural checks and presence of draft handoff metadata.
+Synthetic tests cover matching ranges, overlapping ADT and invalid phandles.
+Its report is diagnostic evidence only and does not qualify firmware or boot.
