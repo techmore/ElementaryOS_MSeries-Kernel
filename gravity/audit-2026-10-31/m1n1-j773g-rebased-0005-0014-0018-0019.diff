@@ -1,0 +1,303 @@
+diff --git a/src/kboot.c b/src/kboot.c
+index a75b5e9..14011fd 100644
+--- a/src/kboot.c
++++ b/src/kboot.c
+@@ -5438,6 +5438,25 @@ static int dt_set_pmp(void)
+         printf("FDT: pmp not found in devtree\n");
+         return 0;
+     }
++    /* A J773g PMP alias is evidence-gathering only. Never start its owner
++     * until the mini's own power table and TVM ownership are qualified.
++     */
++    bool mini = chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j773g");
++    if (mini) {
++        int len;
++        const char *status = fdt_getprop(dt, pmp_node, "status", &len);
++        if (!status || len != sizeof("disabled") || memcmp(status, "disabled", len))
++            bail("FDT: J773g PMP inspection node must remain disabled\n");
++        const void *marker = fdt_getprop(dt, pmp_node, "apple,j773g-pmp-inspect-only", &len);
++        if (!marker) {
++            if (len == -FDT_ERR_NOTFOUND)
++                return 0;
++            return -1;
++        }
++        if (len)
++            bail("FDT: malformed J773g PMP inspection marker\n");
++    }
++
+     int chosen_anode = adt_path_offset(adt, "/chosen");
+     if (chosen_anode < 0)
+         bail("ADT: /chosen not found \n");
+@@ -5470,7 +5489,8 @@ static int dt_set_pmp(void)
+             bail("FDT: failed to transfer pmp tunable");
+     }
+     pmp_node = fdt_path_offset(dt, "pmp");
+-    fdt_setprop_string(dt, pmp_node, "status", "okay");
++    if (!mini)
++        fdt_setprop_string(dt, pmp_node, "status", "okay");
+     return 0;
+ }
+ 
+@@ -6827,6 +6847,9 @@ int kboot_prepare_dt(void *fdt)
+         bail("FDT: couldn't reserve inherited display translation tables\n");
+ 
+     u64 image_end = (u64)_end;
++    /* Admit J773g only when its kernel explicitly describes the ANS handoff. */
++    bool j773g_ans = chip_id == T8132 &&
++        !fdt_node_check_compatible(dt, 0, "apple,j773g") && fdt_get_alias(dt, "ans");
+     if (display_dart_tables_inherited()) {
+         /* chainload_image carries the previous stage's live heap in this
+          * high-water mark. Tables that stage published into a locked display
+@@ -6844,8 +6867,8 @@ int kboot_prepare_dt(void *fdt)
+         if (inherited >= (u64)_base)
+             image_end = max(image_end, inherited);
+     }
+-    /* Both post-M4 storage paths retain firmware buffers in the m1n1 heap. */
+-    if (chip_id == T8140 ||
++    /* Post-M4 storage paths retain firmware buffers in the m1n1 heap. */
++    if (chip_id == T8140 || j773g_ans ||
+         (chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j713"))) {
+         u64 ram_end, inherited = cur_boot_args.top_of_kernel_data;
+         u64 high_water = heapblock_high_water();
+@@ -6921,13 +6944,14 @@ int kboot_prepare_dt(void *fdt)
+             bail("FDT: couldn't add reservation for M4+ SMP-RO CTRR area\n");
+     }
+ 
+-    if (chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j713")) {
++    if (j773g_ans ||
++        (chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j713"))) {
+         if (dt_reserve_bootloader_handoff())
+             return -1;
+         u64 start = min(ALIGN_UP((u64)adt + cur_boot_args.devtree_size, SZ_16K), (u64)_base);
+         u64 end = cur_boot_args.top_of_kernel_data;
+         if (end > start && fdt_add_mem_rsv(dt, start, end - start))
+-            bail("FDT: couldn't reserve the J713 chainload high-water interval\n");
++            bail("FDT: couldn't reserve the T8132 chainload high-water interval\n");
+     }
+ 
+     /* setup console log buffer early to capture as much log as possible */
+@@ -6994,6 +7018,8 @@ int kboot_prepare_dt(void *fdt)
+     if (chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j713") &&
+         (dt_set_ans_nvme(false) || dt_set_t8132_lifecycle()))
+         return -1;
++    if (j773g_ans && dt_set_ans_nvme(false))
++        return -1;
+ #ifndef RELEASE
+     if (dt_transfer_virtios())
+         return 1;
+diff --git a/src/kboot_atc.c b/src/kboot_atc.c
+index 19cd232..dcea272 100644
+--- a/src/kboot_atc.c
++++ b/src/kboot_atc.c
+@@ -846,6 +846,18 @@ cleanup:
+     printf("FDT: T8132 USB3 calibration incomplete; preserving USB2 fallback\n");
+ }
+ 
++/* On the mini, the two-bank T8132 USB2 profile consumes no USB3
++ * calibration. Do not apply T8122-format lane/fuse lists to these banks.
++ */
++static bool j773g_usb2_only_phy(void *dt, int node)
++{
++    return chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j773g") &&
++           !fdt_node_check_compatible(dt, node, "apple,t8132-atcphy") &&
++           fdt_stringlist_count(dt, node, "reg-names") == 2 &&
++           fdt_stringlist_search(dt, node, "reg-names", "usb2phy") == 0 &&
++           fdt_stringlist_search(dt, node, "reg-names", "pipehandler") == 1;
++}
++
+ static void dt_copy_atc_tunables(void *dt, const char *adt_path, const char *dt_alias, int port)
+ {
+     int ret;
+@@ -866,6 +878,9 @@ static void dt_copy_atc_tunables(void *dt, const char *adt_path, const char *dt_
+         return;
+     }
+ 
++    if (j773g_usb2_only_phy(dt, fdt_node))
++        return;
++
+     int adt_node = adt_path_offset(adt, adt_path);
+     dt_export_j700_atc(dt, adt_node, fdt_node);
+     if (adt_node < 0)
+diff --git a/src/payload.c b/src/payload.c
+index babc367..5c2a71e 100644
+--- a/src/payload.c
++++ b/src/payload.c
+@@ -405,10 +405,16 @@ int payload_run(void)
+     }
+ 
+     if (kernel && fdt) {
++        /* Match the opt-in already used by kboot_prepare_dt and the firmware
++         * target, so a foreign DT cannot request a J773g storage session. */
++        bool j773g_ans = chip_id == T8132 &&
++            !strcmp(expect_compatible, "apple,j773g") &&
++            !fdt_node_check_compatible(fdt, 0, "apple,j773g") &&
++            fdt_get_alias(fdt, "ans");
+         /* The shared post-M4 U-Boot driver adopts ANS instead of starting it.
+          * An inline ESP payload has not gone through boot_storage_load(). */
+-        if (chip_id == T8132 && !fdt_node_check_compatible(fdt, 0, "apple,j713") &&
+-            !nvme_init()) {
++        if ((j773g_ans || (chip_id == T8132 &&
++             !fdt_node_check_compatible(fdt, 0, "apple,j713"))) && !nvme_init()) {
+             printf("Payload: cannot prepare the M4 ANS session\n");
+             goto boot_failed;
+         }
+@@ -464,13 +470,17 @@ int payload_run(void)
+ 
+         if (kboot_boot(kernel))
+             goto boot_failed;
+-        if (boot_spec)
++        if (j773g_ans && !nvme_has_live_post_m4_session()) {
++            printf("Payload: J773g requires a live post-M4 ANS session\n");
++            goto boot_failed;
++        }
++        if (boot_spec || j773g_ans)
+             nvme_keep_running_for_linux = true;
+         return 0;
+ 
+     boot_failed:
+         next_stage.entry = NULL;
+-        if (boot_spec) {
++        if (boot_spec || j773g_ans) {
+             kboot_set_initrd(NULL, 0);
+             nvme_keep_running_for_linux = false;
+             nvme_shutdown();
+diff --git a/tests/python/test_j773g_pmp_inspect.py b/tests/python/test_j773g_pmp_inspect.py
+new file mode 100644
+index 0000000..e54879a
+--- /dev/null
++++ b/tests/python/test_j773g_pmp_inspect.py
+@@ -0,0 +1,72 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Host-only check of J773g PMP metadata inspection admission."""
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def test_j773g_pmp_inspection(tmp_path):
++    repo = Path(__file__).resolve().parents[2]
++    source = (repo / 'src/kboot.c').read_text()
++    start = source.index('static const char *excluded_pmp_props[]')
++    end = source.index('static int dt_set_sep(void)', start)
++    production = source[start:end]
++    harness = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include "libfdt.h"
++typedef uint32_t u32;
++#define T8132 0x8132
++static unsigned chip_id = T8132;
++static void *dt, *adt;
++struct adt_prop { const char *name; const void *value; unsigned size; };
++static const unsigned raw_table[] = {0x1234, 0x5678};
++static struct adt_prop props[] = {{"soc-device",raw_table,sizeof(raw_table)}, {NULL,NULL,0}};
++#define ADT_FOREACH_PROPERTY(a,n,p) for (struct adt_prop *p=props; p->name; p++)
++#define bail(...) return -1
++static int adt_path_offset(void *a, const char *p) { return strstr(p,"chosen") ? 1 : 2; }
++static int adt_word(void *a, int n, const char *p, u32 *v) { *v=0x1234; return sizeof(*v); }
++#define ADT_GETPROP(a,n,p,v) adt_word(a,n,p,v)
++''' + production + r'''
++int main(void) {
++ for (int mode=0;mode<6;mode++) {
++  char buf[16384]; assert(!fdt_create_empty_tree(buf,sizeof(buf)));dt=buf;
++  assert(!fdt_setprop_string(dt,0,"compatible",mode==0?"apple,j713":"apple,j773g"));
++  int n=fdt_add_subnode(dt,0,"pmp");assert(n>=0);
++  assert(!fdt_setprop_string(dt,n,"status",mode==4?"okay":"disabled"));
++  n=fdt_path_offset(dt,"/pmp");
++  if(mode==2||mode==4)assert(!fdt_setprop_empty(dt,n,"apple,j773g-pmp-inspect-only"));
++  if(mode==3)assert(!fdt_setprop_u32(dt,n,"apple,j773g-pmp-inspect-only",1));
++  int aliases=fdt_add_subnode(dt,0,"aliases");assert(aliases>=0);
++  if(mode!=5)assert(!fdt_setprop_string(dt,aliases,"pmp","/pmp"));
++  int result=dt_set_pmp(); n=fdt_path_offset(dt,"/pmp");int len;
++  const char *status=fdt_getprop(dt,n,"status",&len);
++  const void *table=fdt_getprop(dt,n,"apple,tunable-soc-device",NULL);
++  if(mode==0){assert(!result&&status&&!strcmp(status,"okay")&&table);}
++  if(mode==1||mode==5){assert(!result&&status&&!strcmp(status,"disabled")&&!table);}
++  if(mode==2){assert(!result&&status&&!strcmp(status,"disabled")&&table);}
++  if(mode==3){assert(result<0&&status&&!strcmp(status,"disabled")&&!table);}
++  if(mode==4){assert(result<0&&status&&!strcmp(status,"okay")&&!table);}
++ }
++ puts("J773g PMP inspection remains disabled; J713 unchanged; malformed inputs refused");
++ return 0;
++}
++'''
++    file = tmp_path / 'pmp.c'
++    file.write_text(harness)
++    libfdt = repo / 'src/libfdt'
++    names = ['fdt', 'fdt_ro', 'fdt_rw', 'fdt_sw', 'fdt_wip', 'fdt_empty_tree',
++             'fdt_check', 'fdt_strerror', 'fdt_addresses']
++    binary = tmp_path / 'pmp'
++    subprocess.run(['cc', '-D_GNU_SOURCE', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                    '-Wno-unused-parameter', '-I', str(libfdt), str(file),
++                    *[str(libfdt / (n + '.c')) for n in names], '-o', str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    with tempfile.TemporaryDirectory(prefix='j773g-pmp-inspect-') as tmp:
++        test_j773g_pmp_inspection(Path(tmp))
+diff --git a/tests/python/test_j773g_usb2_calibration_skip.py b/tests/python/test_j773g_usb2_calibration_skip.py
+new file mode 100644
+index 0000000..5745be2
+--- /dev/null
++++ b/tests/python/test_j773g_usb2_calibration_skip.py
+@@ -0,0 +1,56 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Host-only check of the mini's two-bank USB2 calibration gate."""
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def test_j773g_usb2_calibration_gate(tmp_path):
++    repo = Path(__file__).resolve().parents[2]
++    source = (repo / 'src/kboot_atc.c').read_text()
++    start = source.index('static bool j773g_usb2_only_phy(')
++    end = source.index('static void dt_copy_atc_tunables(', start)
++    helper = source[start:end]
++    harness = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "libfdt.h"
++#define T8132 0x8132
++static unsigned chip_id = T8132;
++''' + helper + r'''
++int main(void) {
++ for (int mode=0; mode<7; mode++) {
++  char dt[8192]; assert(!fdt_create_empty_tree(dt,sizeof(dt)));
++  assert(!fdt_setprop_string(dt,0,"compatible",mode==1?"apple,j713":"apple,j773g"));
++  int node=fdt_add_subnode(dt,0,"phy"); assert(node>=0);
++  assert(!fdt_setprop_string(dt,node,"compatible",mode==2?"apple,t8122-atcphy":"apple,t8132-atcphy"));
++  node=fdt_path_offset(dt,"/phy");
++  const char valid[]="usb2phy\0pipehandler";
++  const char reversed[]="pipehandler\0usb2phy";
++  const char extra[]="usb2phy\0pipehandler\0core";
++  if(mode!=5) assert(!fdt_setprop(dt,node,"reg-names",mode==3?reversed:mode==4?extra:valid,
++                                  mode==3?sizeof(reversed):mode==4?sizeof(extra):sizeof(valid)));
++  chip_id=mode==6?0x8140:T8132; node=fdt_path_offset(dt,"/phy");
++  assert(j773g_usb2_only_phy(dt,node)==(mode==0));
++ }
++ puts("J773g two-bank USB2 gate and six negative profiles PASS");
++ return 0;
++}
++'''
++    file = tmp_path / 'usb2.c'
++    file.write_text(harness)
++    libfdt = repo / 'src/libfdt'
++    names = ['fdt', 'fdt_ro', 'fdt_rw', 'fdt_sw', 'fdt_wip', 'fdt_empty_tree',
++             'fdt_check', 'fdt_strerror', 'fdt_addresses']
++    binary = tmp_path / 'usb2'
++    subprocess.run(['cc', '-D_GNU_SOURCE', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                    '-I', str(libfdt), str(file), *[str(libfdt / (n + '.c')) for n in names],
++                    '-o', str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    with tempfile.TemporaryDirectory(prefix='j773g-usb2-') as tmp:
++        test_j773g_usb2_calibration_gate(Path(tmp))
