@@ -1,6 +1,6 @@
 --- a/arch/arm/mach-apple/j713_fdt.c
 +++ b/arch/arm/mach-apple/j713_fdt.c
-@@ -914,6 +914,47 @@
+@@ -914,6 +914,62 @@
  	return j713_atc_tunables(dst, src, "atcphy2");
  }
  
@@ -11,7 +11,7 @@
 +	const unsigned char *mac, *mark;
 +	const fdt32_t *sr, *dr;
 +	const char *status;
-+	int chosen, sn, dn, len, slen, dlen;
++	int chosen, sn, dn, shost, dhost, sport, dport, len, slen, dlen;
 +	unsigned int i;
 +	bool any = false;
 +
@@ -26,6 +26,21 @@
 +	sn = fdt_path_offset(src, path);
 +	dn = fdt_path_offset(dst, path);
 +	if (sn < 0 || dn < 0)
++		return -EINVAL;
++	sport = fdt_parent_offset(src, sn);
++	dport = fdt_parent_offset(dst, dn);
++	shost = sport < 0 ? sport : fdt_parent_offset(src, sport);
++	dhost = dport < 0 ? dport : fdt_parent_offset(dst, dport);
++	if (shost < 0 || dhost < 0 ||
++	    fdt_node_check_compatible(src, shost, "apple,t8132-pcie") ||
++	    fdt_node_check_compatible(dst, dhost, "apple,t8132-pcie") ||
++	    fdt_node_check_compatible(src, sport, "pciclass,0604") ||
++	    fdt_node_check_compatible(dst, dport, "pciclass,0604"))
++		return -EINVAL;
++	sr = fdt_getprop(src, sport, "reg", &slen);
++	dr = fdt_getprop(dst, dport, "reg", &dlen);
++	if (!sr || !dr || slen != 20 || dlen != slen || memcmp(sr, dr, slen) ||
++	    fdt32_to_cpu(sr[0]) != 0x1000 || sr[1] || sr[2] || sr[3] || sr[4])
 +		return -EINVAL;
 +	status = fdt_getprop(dst, dn, "status", &len);
 +	if (!status || len != 9 || memcmp(status, "disabled", 9))
@@ -48,7 +63,7 @@
  int apple_j773_import_fdt(void *blob, const void *source)
  {
  	static const char * const aliases[] = { "ans", "ans-mbox", "sart-ans" };
-@@ -995,6 +1036,7 @@
+@@ -995,6 +1051,7 @@
  		if (!ret && (!status || status_len != 5 || memcmp(status, "okay", 5)))
  			ret = -EINVAL;
  	}

@@ -15,6 +15,9 @@ static int endpoint(void *f) {
  int n=fdt_path_offset(f,"/soc"); assert(n>=0);
  n=fdt_path_offset(f,"/soc/pcie@1cb0000000"); assert(n>=0);
  n=fdt_add_subnode(f,n,"pci@2,0"); assert(n>=0);
+ fdt32_t portreg[]={cpu_to_fdt32(0x1000),0,0,0,0};
+ assert(!fdt_setprop(f,n,"reg",portreg,sizeof(portreg)));
+ assert(!fdt_setprop_string(f,n,"compatible","pciclass,0604"));
  n=fdt_add_subnode(f,n,"ethernet@0,0"); assert(n>=0);
  fdt32_t reg[]={cpu_to_fdt32(0x20000),0,0,0,0};
  assert(!fdt_setprop(f,n,"reg",reg,sizeof(reg)));
@@ -39,6 +42,11 @@ int main(int argc,char **argv) {
  assert(!fdt_setprop(s,sn,"local-mac-address",zero,6)); assert(j773_ethernet_mac(d,s)<0);
  assert(!fdt_setprop(s,sn,"local-mac-address",good,5)); assert(j773_ethernet_mac(d,s)<0);
  assert(!fdt_setprop(s,sn,"local-mac-address",good,6));
+ int sp=fdt_path_offset(s,"/soc/pcie@1cb0000000/pci@2,0");
+ fdt32_t wrongport[]={cpu_to_fdt32(0x800),0,0,0,0}, rightport[]={cpu_to_fdt32(0x1000),0,0,0,0};
+ assert(!fdt_setprop(s,sp,"reg",wrongport,sizeof(wrongport))); assert(j773_ethernet_mac(d,s)<0);
+ sp=fdt_path_offset(s,"/soc/pcie@1cb0000000/pci@2,0"); assert(!fdt_setprop(s,sp,"reg",rightport,sizeof(rightport)));
+ sn=fdt_path_offset(s,"/soc/pcie@1cb0000000/pci@2,0/ethernet@0,0");
  fdt32_t wrong[]={cpu_to_fdt32(0x30000),0,0,0,0}; assert(!fdt_setprop(s,sn,"reg",wrong,sizeof(wrong))); assert(j773_ethernet_mac(d,s)<0);
  assert(!fdt_setprop_string(d,dn,"status","okay")); assert(j773_ethernet_mac(d,s)<0);
  puts("MAC opt-in, copy, disabled state and malformed input cases passed"); free(s); free(d);
@@ -57,6 +65,9 @@ t.HARNESS = preamble + r'''
 static int endpoint(void *f) {
  int n=fdt_path_offset(f,"/soc/pcie@1cb0000000"); assert(n>=0);
  n=fdt_add_subnode(f,n,"pci@2,0"); assert(n>=0);
+ fdt32_t portreg[]={cpu_to_fdt32(0x1000),0,0,0,0};
+ assert(!fdt_setprop(f,n,"reg",portreg,sizeof(portreg)));
+ assert(!fdt_setprop_string(f,n,"compatible","pciclass,0604"));
  n=fdt_add_subnode(f,n,"ethernet@0,0"); assert(n>=0);
  fdt32_t reg[]={cpu_to_fdt32(0x20000),0,0,0,0};
  assert(!fdt_setprop(f,n,"reg",reg,sizeof(reg)));
