@@ -124,3 +124,12 @@ reviewed ESP identity and stage2 path. The bundle has not been installed or
 booted, and it predates the separate USB calibration draft. Keep the previous
 boot path available; do not assume the installed Gravity stage1 can load this
 stage2.
+
+Optional inspection-only patches `0014`–`0016` prepare a disabled J773g PMP
+node and transfer its own ADT metadata through m1n1 and U-Boot without issuing
+power commands. The loader objects and host fixtures compiled or passed, and
+the optional DTB compiled; the normal candidate does not include this option.
+`check-j773g-pmp-table.py` compares a captured raw table with the Air bridge's
+identity guards while printing only size and hashes. No real mini PMP table was
+available from the running system. A match would not establish mini TVM/power
+sequencing or firmware compatibility and does not authorize enabling the GPU.

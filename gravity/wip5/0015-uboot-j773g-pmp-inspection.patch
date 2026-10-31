@@ -1,0 +1,202 @@
+diff --git a/arch/arm/mach-apple/j713_fdt.c b/arch/arm/mach-apple/j713_fdt.c
+index 611cf1d..2b9fdf5 100644
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -970,6 +970,43 @@ static int j773_gpu_handoff(void *dst, const void *src)
+-	return ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-flags", 8);
++	return ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-flags", 8);
+ }
+-
++
++/* J773g inspection is inert: copy only bootloader-derived identity and the
++ * raw PMP device table into a disabled node. Never create a PMP owner here.
++ */
++static int j773_pmp_inspection(void *dst, const void *src)
++{
++	const char *const marker = "apple,j773g-pmp-inspect-only";
++	const char *status;
++	const void *table;
++	int s, d, len, table_len, ret;
++
++	d = j713_alias_node(dst, "pmp");
++	if (d < 0 || !fdt_getprop(dst, d, marker, &len))
++		return 0;
++	if (len || fdt_node_check_compatible(dst, d, "apple,t8132-pmp-v2"))
++		return -EINVAL;
++	status = fdt_getprop(dst, d, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	s = j713_alias_node(src, "pmp");
++	if (s < 0 || fdt_node_check_compatible(src, s, "apple,t8132-pmp-v2") ||
++	    !fdt_getprop(src, s, marker, &len) || len)
++		return -EINVAL;
++	status = fdt_getprop(src, s, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	table = fdt_getprop(src, s, "apple,tunable-soc-device", &table_len);
++	if (!table || table_len <= 0 || table_len > 65536)
++		return -EINVAL;
++	ret = j713_copy_prop(dst, d, src, s, "apple,board-id", 4);
++	d = j713_alias_node(dst, "pmp");
++	ret = ret ?: j713_copy_prop(dst, d, src, s, "apple,dram-vendor-id", 4);
++	d = j713_alias_node(dst, "pmp");
++	ret = ret ?: j713_copy_optional(dst, d, src, s, "apple,dram-capacity", 4);
++	d = j713_alias_node(dst, "pmp");
++	return ret ?: j713_copy_prop(dst, d, src, s, "apple,tunable-soc-device", table_len);
++}
++
+ /* Import only the storage handoff for an explicitly opted-in J773g tree.
+  * All edits occur on a scratch FDT; no J713 input or display policy is used.
+  */
+@@ -1055,6 +1092,7 @@ int apple_j773_import_fdt(void *blob, const void *source)
+-			ret = -EINVAL;
++			ret = -EINVAL;
+-	}
++	}
+-	ret = ret ?: j773_gpu_handoff(scratch, source);
++	ret = ret ?: j773_gpu_handoff(scratch, source);
++	ret = ret ?: j773_pmp_inspection(scratch, source);
+-	ret = ret ?: j713_chosen(scratch, source, true);
++	ret = ret ?: j713_chosen(scratch, source, true);
+-	if (!ret)
++	if (!ret)
+-		memcpy(blob, scratch, capacity);
++		memcpy(blob, scratch, capacity);
+diff --git a/test/py/tests/test_apple_j773_pmp_inspect.py b/test/py/tests/test_apple_j773_pmp_inspect.py
+new file mode 100644
+index 0000000..9ea1781
+--- /dev/null
++++ b/test/py/tests/test_apple_j773_pmp_inspect.py
+@@ -0,0 +1,66 @@
++# SPDX-License-Identifier: GPL-2.0-or-later OR MIT
++"""Host-only check of the disabled J773g PMP metadata handoff."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import tempfile
++
++repo = Path(__file__).resolve().parents[3]
++spec = importlib.util.spec_from_file_location('j713_tests', repo / 'test/py/tests/test_apple_j713_fdt.py')
++tests = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(tests)
++tests.HARNESS = tests.HARNESS.split('static void check_references')[0] + r'''
++int main(int argc, char **argv) {
++ assert(argc == 3);
++ for (int mode = 0; mode < 6; mode++) {
++  void *source = load(argv[1], 128 * 1024), *target = load(argv[2], 1024 * 1024);
++  int s = fdt_path_offset(source, "pmp"), d = fdt_path_offset(target, "pmp");
++  assert(s >= 0 && d >= 0);
++  assert(!fdt_setprop_string(source, s, "compatible", "apple,t8132-pmp-v2"));
++  s = fdt_path_offset(source, "pmp");
++  assert(!fdt_setprop_string(source, s, "status", mode == 4 ? "okay" : "disabled"));
++  s = fdt_path_offset(source, "pmp");
++  assert(!fdt_setprop_empty(source, s, "apple,j773g-pmp-inspect-only"));
++  s = fdt_path_offset(source, "pmp");
++  if (mode != 2) assert(!fdt_setprop_u32(source, s, "apple,tunable-soc-device", 0x1234));
++  s = fdt_path_offset(source, "pmp");
++  if (mode == 5) assert(!fdt_setprop(source, s, "apple,board-id", "bad", 3));
++  else assert(!fdt_setprop_u32(source, s, "apple,board-id", 42));
++  s = fdt_path_offset(source, "pmp");
++  assert(!fdt_setprop_u32(source, s, "apple,dram-vendor-id", 3));
++  d = fdt_path_offset(target, "pmp");
++  assert(!fdt_setprop_string(target, d, "compatible", "apple,t8132-pmp-v2"));
++  d = fdt_path_offset(target, "pmp");
++  assert(!fdt_setprop_string(target, d, "status", mode == 3 ? "okay" : "disabled"));
++  d = fdt_path_offset(target, "pmp");
++  if (mode != 1) assert(!fdt_setprop_empty(target, d, "apple,j773g-pmp-inspect-only"));
++  int ret = j773_pmp_inspection(target, source);
++  d = fdt_path_offset(target, "pmp");
++  int len; const char *status = fdt_getprop(target, d, "status", &len);
++  const fdt32_t *table = fdt_getprop(target, d, "apple,tunable-soc-device", &len);
++  if (mode == 0) {
++   assert(!ret && status && !strcmp(status, "disabled"));
++   assert(table && len == 4 && fdt32_to_cpu(*table) == 0x1234);
++  } else if (mode == 1) {
++   assert(!ret && status && !strcmp(status, "disabled") && !table);
++  } else {
++   assert(ret < 0 && !table);
++  }
++  free(source); free(target);
++ }
++ puts("PMP metadata import keeps mini disabled and rejects malformed inputs");
++ return 0;
++}
++'''
++
++
++def test_j773_pmp_inspect(tmp_path):
++    binary = tests.build_importer(tmp_path)
++    source = tests.compile_tree(tmp_path, 'source', tests.fixture_tree(True, graphics=False))
++    target = tests.compile_tree(tmp_path, 'target', tests.fixture_tree(False, graphics=False))
++    subprocess.run([str(binary), str(source), str(target)], check=True)
++
++
++if __name__ == '__main__':
++    with tempfile.TemporaryDirectory(prefix='j773g-pmp-import-') as tmp:
++        test_j773_pmp_inspect(Path(tmp))
+diff --git a/test/py/tests/test_apple_j773_pmp_integration.py b/test/py/tests/test_apple_j773_pmp_integration.py
+new file mode 100644
+index 0000000..8f00636
+--- /dev/null
++++ b/test/py/tests/test_apple_j773_pmp_integration.py
+@@ -0,0 +1,60 @@
++import importlib.util,pathlib,subprocess,tempfile
++repo=pathlib.Path(__file__).resolve().parents[3]; spec=importlib.util.spec_from_file_location('t',repo/'test/py/tests/test_apple_j713_fdt.py');t=importlib.util.module_from_spec(spec);spec.loader.exec_module(t)
++t.HARNESS=t.HARNESS.split('static void check_references')[0]+r'''
++static void init(void *fdt, int src, int fault) {
++ const char *names[] = {"uat-ttbs","uat-pagetables","uat-handoff","uat-shared-l2","gpu-fw-text","gpu-fw-data"};
++ const char name_list[]="ttbs\0pagetables\0handoff\0shared-l2\0fw-text\0fw-data";
++ fdt32_t refs[6], flags[2]={cpu_to_fdt32(1),0};
++ fdt64_t vas[2]; fdt64_st(&vas[0],0xfffffc0000000000ULL); fdt64_st(&vas[1],0xfffffc0000060000ULL);
++ int soc=fdt_path_offset(fdt,"/soc"); assert(soc>=0); int g=fdt_add_subnode(fdt,soc,"gpu"); assert(g>=0);
++ assert(!fdt_setprop_string(fdt,g,"compatible","apple,agx-t8132"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); assert(!fdt_setprop_string(fdt,g,"status",((fault==4&&!src)||(fault==5&&src))?"okay":"disabled"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(src||fault!=1)assert(!fdt_setprop_empty(fdt,g,"apple,j773g-gpu-handoff-draft"));
++ int aliases=fdt_path_offset(fdt,"/aliases"); assert(!fdt_setprop_string(fdt,aliases,"gpu","/soc/gpu"));
++ for(int i=0;i<6;i++){
++  int reserved=fdt_path_offset(fdt,"/reserved-memory");int n=fdt_add_subnode(fdt,reserved,names[i]); assert(n>=0);
++  u64 base=0x800000000ULL+(u64)i*0x200000; u64 size=i==4?0x60000:i==5?0x13c000:0x4000;
++  if(fault==3&&i==1)base=0x800000000ULL;
++  if(fault==8&&!src&&i==1)base+=0x4000;
++  fdt64_t reg[2]; fdt64_st(&reg[0],base);fdt64_st(&reg[1],size);
++  assert(!fdt_setprop(fdt,n,"reg",reg,sizeof(reg)));
++  assert(!fdt_add_mem_rsv(fdt,base,size)); reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_empty(fdt,n,"no-map"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_string(fdt,n,"status","okay"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);u32 phandle=(src?600:700)+i;assert(!fdt_setprop_u32(fdt,n,"phandle",phandle));refs[i]=cpu_to_fdt32(phandle);
++ }
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(fault==7&&src) refs[0]=cpu_to_fdt32(9999);assert(!fdt_setprop(fdt,g,"memory-region",refs,sizeof(refs)));
++ g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"memory-region-names",name_list,sizeof(name_list)));
++ if(src){g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop_u32(fdt,g,"apple,g16-handoff-version",fault==2?2:1));
++  g=fdt_path_offset(fdt,"/soc/gpu");if(fault==6)fdt64_st(&vas[1],0);assert(!fdt_setprop(fdt,g,"apple,firmware-segment-vas",vas,sizeof(vas)));
++  g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"apple,firmware-segment-flags",flags,sizeof(flags)));}
++}
++int main(int argc,char **argv){assert(argc==3);for(int fault=0;fault<=2;fault++){
++ void *s=load(argv[1],128*1024),*d=load(argv[2],1024*1024);init(s,1,fault==1?3:0);init(d,0,0);
++ int pn=fdt_path_offset(s,"pmp");assert(!fdt_setprop_string(s,pn,"compatible","apple,t8132-pmp-v2"));
++ pn=fdt_path_offset(s,"pmp");assert(!fdt_setprop_string(s,pn,"status","disabled"));
++ pn=fdt_path_offset(s,"pmp");assert(!fdt_setprop_empty(s,pn,"apple,j773g-pmp-inspect-only"));
++ if(fault!=2){pn=fdt_path_offset(s,"pmp");assert(!fdt_setprop_u32(s,pn,"apple,tunable-soc-device",0x1234));}
++ pn=fdt_path_offset(d,"pmp");assert(!fdt_setprop_string(d,pn,"compatible","apple,t8132-pmp-v2"));
++ pn=fdt_path_offset(d,"pmp");assert(!fdt_setprop_string(d,pn,"status","disabled"));
++ pn=fdt_path_offset(d,"pmp");assert(!fdt_setprop_empty(d,pn,"apple,j773g-pmp-inspect-only"));
++ const char compat[]="apple,j773g\0apple,t8132";const char names[]="nvme\0nvmmu\0ans";
++ assert(!fdt_setprop(s,0,"compatible",compat,sizeof(compat)));assert(!fdt_setprop(d,0,"compatible",compat,sizeof(compat)));
++ int chosen=fdt_path_offset(d,"/chosen");assert(!fdt_setprop_string(d,chosen,"u-boot,j773g-dtb-source","0123456789012345678901234567890123456789"));
++ const char *aliases[]={"ans","ans-mbox","sart-ans"};const char *types[]={"apple,t8132-nvme-ans2","apple,asc-mailbox-v4","apple,t6000-sart"};
++ for(int i=0;i<3;i++){int n=fdt_path_offset(s,aliases[i]);assert(n>=0);assert(!fdt_setprop_string(s,n,"compatible",types[i]));n=fdt_path_offset(s,aliases[i]);assert(!fdt_setprop_string(s,n,"status","okay"));}
++ int n=fdt_path_offset(s,"ans");assert(!fdt_setprop(s,n,"reg-names",names,sizeof(names)));n=fdt_path_offset(d,"ans");assert(!fdt_setprop(d,n,"reg-names",names,sizeof(names)));
++ n=fdt_path_offset(s,"/reserved-memory/asc-firmware@900000000");if(n>=0)assert(!fdt_del_node(s,n));n=fdt_path_offset(s,"/reserved-memory/flash@900080000");if(n>=0)assert(!fdt_del_node(s,n));
++ while(fdt_num_mem_rsv(d)>0)assert(!fdt_del_mem_rsv(d,0));
++ void *before=malloc(1024*1024);assert(before);memcpy(before,d,1024*1024);
++ int result=apple_j773_import_fdt(d,s);if(!fault){assert(result==1);int g=fdt_path_offset(d,"/soc/gpu"),len;const fdt32_t *v=fdt_getprop(d,g,"apple,g16-handoff-version",&len);assert(v&&len==4&&fdt32_to_cpu(*v)==1);const char *st=fdt_getprop(d,g,"status",0);assert(st&&!strcmp(st,"disabled"));assert(fdt_num_mem_rsv(d)>=6);int pmp=fdt_path_offset(d,"pmp");const fdt32_t *table=fdt_getprop(d,pmp,"apple,tunable-soc-device",&len);assert(table&&len==4&&fdt32_to_cpu(*table)==0x1234);st=fdt_getprop(d,pmp,"status",0);assert(st&&!strcmp(st,"disabled"));}else {assert(result<0);assert(!memcmp(before,d,1024*1024));}
++ free(before);free(s);free(d);}puts("Full mini storage+GPU+PMP import and transactional rejection PASS");return 0;}
++'''
++def test_j773_gpu_handoff(tmp_path):
++ b=t.build_importer(tmp_path)
++ s=t.compile_tree(tmp_path, 'source', t.fixture_tree(True, graphics=False))
++ d=t.compile_tree(tmp_path, 'target', t.fixture_tree(False, graphics=False))
++ subprocess.run([str(b), str(s), str(d)], check=True)
++
++if __name__ == '__main__':
++ with tempfile.TemporaryDirectory(prefix='j773g-gpu-import-') as tmp:
++  test_j773_gpu_handoff(pathlib.Path(tmp))
