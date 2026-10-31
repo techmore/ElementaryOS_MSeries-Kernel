@@ -16,7 +16,7 @@ target="$stage/omarchy-root-subvolume"
 expected=4b66dcfb84cc725e8bc11f27f3ecd452608e4753d13b3abfdab7124dbdb99b4e
 [[ -f $image && ! -e $target ]] || { echo 'Missing image or target already exists.' >&2; exit 1; }
 [[ $(findmnt -n -o FSTYPE -T "$stage") == btrfs ]] || { echo 'Target must reside on Btrfs.' >&2; exit 1; }
-available=$(df -PB1 --output=avail "$stage" | tail -1 | tr -d ' ')
+available=$(df -B1 --output=avail "$stage" | tail -1 | tr -d ' ')
 (( available >= 15 * 1024 * 1024 * 1024 )) || { echo 'At least 15 GiB free is required.' >&2; exit 1; }
 printf '%s  %s\n' "$expected" "$image" | sha256sum -c -
 image_uuid=$(blkid -p -s UUID -o value "$image")
