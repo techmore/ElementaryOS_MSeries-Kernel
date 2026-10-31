@@ -37,3 +37,12 @@ core and short recorded stack do not prove that this particular allocation
 returned NULL or explain why VM_BIND failed. Other applications continued to
 report VM_BIND I/O errors after the crash; kernel-side logs are needed to
 investigate the initiating failure.
+
+The matching debug-source package for the currently installed Gravity Mesa
+build `103` retains the same unchecked `agx_bo_create`/`agx_bo_map` sequence.
+Its encoder allocator is used in batch initialization and in several draw and
+compute paths. A fix must propagate allocation failure through those users and
+the context's reset/error handling; simply returning an empty encoder would
+leave callers with invalid command-buffer state. This source inspection does
+not prove that the current build reproduces the old crash. No patch was applied
+to the live Mesa installation.
