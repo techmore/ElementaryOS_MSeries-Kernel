@@ -196,3 +196,15 @@ out-of-memory even for some other errors; cache concurrency, in-flight scratch
 lifetime, generic allocation paths and query/fence cleanup remain unvalidated.
 This is not a linked build, an injected-failure or GPU runtime test, and the
 draft must not be deployed.
+
+`mesa103-allocation-incomplete-v17.patch` (SHA-256
+`f14aacf2dce91d2fccd74b6b0fb207a6a090c8864b7c6aa77ba6e429ecc66407`)
+adds a cache mutex, locked Vulkan scratch-address snapshots and retention of
+replaced scratch BOs until device destruction. It also distinguishes Apple9
+shader compilation failure from allocation failure in command recording. The
+affected cache and Vulkan objects compiled against exact Gravity 103 source.
+This retention is not proven safe at device teardown or after failed
+submissions: the reviewed queue-finish path has no explicit GPU-idle wait.
+Retained BOs can also increase memory consumption. Concurrency, failure
+injection, query/fence behavior and GPU runtime remain unvalidated; do not
+deploy this draft.
