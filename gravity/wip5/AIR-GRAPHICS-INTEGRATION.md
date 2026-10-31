@@ -221,3 +221,13 @@ config enables `CONFIG_MTD_PHRAM`; the G16 reader instead maps its reserved
 range directly. No ADT bytes or physical memory were read, and this does not
 verify source contents, retention across loaders, the missing sixth GPU region,
 or mini PMP admission.
+
+The live boot log classifies all five Gravity GPU reservations as mapped,
+non-reusable regions; their DT nodes lack `no-map`. The candidate G16 reader
+instead requires six enabled, non-reusable `no-map` regions, exact sizes and
+RAM-disjointness before it reads firmware. The live single firmware reservation
+has size `0x13c000`, matching the draft's required data-segment size, but this
+alone does not identify its role or establish the separate `0x60000` text
+segment and normalized firmware hash. Reusing the live region list verbatim
+would fail the draft contract; the actual loader-generated reservations and
+firmware identity remain to be verified without disturbing the running GPU.
