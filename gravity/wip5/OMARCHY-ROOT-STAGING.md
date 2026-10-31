@@ -16,3 +16,5 @@ root installation. The image uses 4 KiB sectors and the candidate uses 16 KiB
 pages. Source review indicates the inspected inline frame is decoded using a
 4 KiB sector buffer, but actual mount and reads remain untested. Include the
 matching Btrfs module and dependencies in an initramfs when it is modular.
+
+Read-only extraction from Btrfs root ID 256 shows the staged `/etc/fstab` and `/etc/crypttab` have no active entries. Its `/etc/mkinitcpio.conf` uses `HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems fsck)` with an empty explicit `MODULES` array. These are generic image defaults, not a configured mini installation. A future boot target needs an explicit root identity and an initramfs built for the exact candidate kernel; blindly running `autodetect` against the currently booted Gravity kernel may omit modules needed by that candidate. The latest diagnostic config has Apple NVMe, DART, SART and Btrfs built in, but its USB DT nodes remain disabled and firmware or network availability is not established. No root image, boot files or host configuration were changed by this inspection.
