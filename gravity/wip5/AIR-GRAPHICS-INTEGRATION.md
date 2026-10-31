@@ -249,3 +249,12 @@ It does not reject a handoff based on the comparison. The modified loader object
 compiled and synthetic tests passed, but the actual mini segment data remains
 uncaptured. The current U-Boot importer does not forward these diagnostic
 properties; this is an unbooted diagnostic draft, not GPU admission evidence.
+
+The optional `uboot-j773g-gpu-data-diagnostic-draft.patch` (SHA-256
+`b57e8aaf20daf3758318cfe11b45498de15779536427b1d4037d2c990a938a10`)
+adds transfer of the comparison and size to the existing opt-in GPU importer.
+It validates the optional values, clears stale destination values and commits
+the pair together; missing or invalid diagnostic data is omitted without
+rejecting the handoff. The modified object compiled and synthetic libfdt tests
+passed. It remains unbooted, leaves the GPU disabled, and cannot make the
+actual mini DATA or TEXT firmware layout known without a hardware capture.
