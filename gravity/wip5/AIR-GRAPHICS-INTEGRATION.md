@@ -85,3 +85,16 @@ checks against those exact intermediate trees; use `--unidiff-zero` for 0003.
 With `CONFIG_APPLE_DART_J713_DCP=y`, the reconciled retained-display DART
 object also compiled. Both its ownership semantics and J773g applicability
 still require review; this is not a completed native display handoff.
+
+A combined storage + disabled-GPU handoff loader draft was linked locally:
+`stage1-gpu-handoff.bin` (SHA-1 `c0317ef3b28da0c596f7d90712f26b7115099071`,
+SHA-256 `f57d9a1de7f9899db0b8d8307d6896b375067c195769503d63af88ccb6a7b25d`)
+and `stage2-gpu-handoff.bin` (SHA-1 `debeea719232cf7f72e49f7180fbccebaf768590`,
+SHA-256 `85e403410ebd594fcce1fc3abdca7a4678b4c2e4df32540424a1b9f9c9398007`)
+under `~/.cache/m4-kernel/wip5-source/m1n1/j773g-loader-draft/`, and
+`u-boot-nodtb-gpu-import.bin` under the adjacent `uboot-j773g-draft/` (SHA-1
+`f4bb4ca2fe619da7a33dcae44fdb5570146629d8`, SHA-256
+`1b1e144483d6ad9c78b3902fb4a3725b48ec259965e112423b6f8117b166a45d`).
+These are separate, unconfigured binaries, not an installed chain or a tested
+GPU handoff. Stage1 uses `NO_DISPLAY=1 CHAINLOADING=1`; stage2 uses
+`NO_DISPLAY=1`. USB calibration changes remain a separate draft.
