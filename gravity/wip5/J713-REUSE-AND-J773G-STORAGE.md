@@ -68,6 +68,20 @@ before relying on the mini's internal disk.
   without applying J713 keyboard or display policy. Kernel draft
   `0008-j773g-uboot-import-marker.patch` opts into it; the marker records the
   WIP5 base and is not proof of source provenance.
+- `0009-uboot-j773g-optional-keyboard.patch` makes the Air importer's
+  keyboard-layout property optional for the mini only. The pinned m1n1
+  `dt_set_ipd()` explicitly returns without setting it when no built-in
+  keyboard exists; the current mini Linux tree also lacks the property.
+  A present property must still have the required four-byte form. The patched
+  U-Boot importer object compiled with `apple_m1_defconfig`; this is not a
+  handoff or boot test. The Air path still requires the property.
+
+The currently booted Gravity tree exposes `gravity,efi-system-partition`, not
+`asahi,efi-system-partition`; the importer requires the latter in the m1n1
+source tree. The running Linux tree is not the original m1n1 source tree, so
+this is a compatibility question, not proof that the draft handoff fails. The
+actual proposed loader configuration and source FDT must be checked together
+before attempting a boot.
 
 The kernel drafts apply to the current WIP5 source with the preceding SMC
 patch; the board DTB compiles in the matching-input checkout. Both loader
