@@ -57,6 +57,22 @@ if hashlib.sha256(a.dtb.read_bytes()).hexdigest() not in known_dtbs:
 expected = 'd7503a309985d172374c3ef1045fdab7fb1e4b370118d0f48fbe021221107de7'
 if hashlib.sha256(a.image.read_bytes()).hexdigest() != expected:
     p.error('Image does not match the graphics module release')
+# The fill tool must receive the recorded unconfigured stage-1 build.
+expected_stage1 = '0597951acb4f9c6df2a3113e9e17f9814ab6e12b3cf754815224c4836a466b94'
+if hashlib.sha256(a.stage1.read_bytes()).hexdigest() != expected_stage1:
+    p.error('stage1 is not the recorded unconfigured J773g build')
+# These are unconfigured direct ESP_STAGE2 m1n1 builds with J773g ANS and
+# USB2 calibration gates; packed inline-U-Boot candidates are different.
+known_direct_stage2 = {
+    '1b85c2945fd32b7c007506fb847f7fe8581da053f600fcd413a815f581b1cbdd',
+    '9ef4c475badbd2e52a59a2ad5f79c5569237b8b2021bf8f16f9178c392c02b37',
+}
+if hashlib.sha256(a.stage2.read_bytes()).hexdigest() not in known_direct_stage2:
+    p.error('stage2 is not a recorded direct J773g ANS and USB2 build')
+asahi = root_dir / 'usr/lib/modules' / release / 'kernel/drivers/gpu/drm/asahi/asahi.ko'
+expected_asahi = 'f027e3050376e1d9da9ce83a4e88b1dc129077394f7a348cc709db203c0638e8'
+if not asahi.is_file() or hashlib.sha256(asahi.read_bytes()).hexdigest() != expected_asahi:
+    p.error('staged Asahi module does not match the graphics kernel')
 a.output.mkdir(parents=True, exist_ok=False)
 for source, name in ((a.image, 'Image'), (a.dtb, 't8132-j773g.dtb')):
     shutil.copyfile(source, a.output / name)

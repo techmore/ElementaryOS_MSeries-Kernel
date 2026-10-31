@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -38,6 +39,74 @@ class DirectRootValidation(unittest.TestCase):
         result = self.run_stage()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('root directory of a Btrfs subvolume', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def prepare_recorded_fixture(self):
+        cache = Path.home() / '.cache/m4-kernel'
+        graphics = cache / 'latest-aurora/graphics/build'
+        dtb = graphics / 'arch/arm64/boot/dts/apple/t8132-j773g.dtb'
+        image = graphics / 'arch/arm64/boot/Image'
+        stage2 = cache / 'wip5-source/m1n1/j773g-loader-draft/stage2-esp-usb2-trial.bin'
+        stage1 = cache / 'wip5-source/m1n1/j773g-loader-draft/stage1-release-gpu-handoff.bin'
+        asahi = graphics / 'drivers/gpu/drm/asahi/asahi.ko'
+        if not all(p.is_file() for p in (dtb, image, stage1, stage2, asahi)):
+            self.skipTest('recorded local graphics artifacts unavailable')
+        module = self.root / 'usr/lib/modules' / RELEASE / 'kernel/drivers/gpu/drm/asahi/asahi.ko'
+        module.parent.mkdir(parents=True)
+        shutil.copyfile(asahi, module)
+        lsblk = self.bin / 'lsblk'
+        lsblk.write_text('#!/bin/sh\nprintf "%s\n" 22222222-2222-2222-2222-222222222222\n')
+        lsblk.chmod(0o755)
+        site = self.bin / 'sitecustomize.py'
+        site.write_text("import os, pathlib\n_original=pathlib.Path.stat\ndef fake(self,*a,**k):\n r=_original(self,*a,**k)\n if str(self)==os.environ.get('TEST_SUBVOL'):\n  v=list(r);v[1]=256;return os.stat_result(v)\n return r\npathlib.Path.stat=fake\n")
+        fill = self.base / 'fill.py'
+        fill.write_text("import pathlib,sys\np=pathlib.Path(sys.argv[sys.argv.index('--output')+1]);p.write_bytes(b'test-stage1')\n")
+        for option, value in (('--image', image), ('--dtb', dtb), ('--stage1', stage1), ('--stage2', stage2), ('--fill-tool', fill)):
+            self.args[self.args.index(option)+1] = str(value)
+        return module
+
+    def run_recorded_fixture(self):
+        env = dict(os.environ, PATH=str(self.bin)+os.pathsep+os.environ['PATH'], PYTHONPATH=str(self.bin), TEST_SUBVOL=str(self.root), PYTHONDONTWRITEBYTECODE='1')
+        return subprocess.run(self.args, text=True, capture_output=True, env=env)
+
+    def test_recorded_direct_pair_and_wrong_stage2(self):
+        self.prepare_recorded_fixture()
+        wrong = self.base / 'wrong-stage2'; wrong.write_bytes(b'not direct stage2')
+        stage2_index = self.args.index('--stage2') + 1
+        correct = self.args[stage2_index]; self.args[stage2_index] = str(wrong)
+        bad = self.run_recorded_fixture()
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn('not a recorded direct J773g', bad.stderr)
+        self.assertFalse((self.base / 'output').exists())
+        self.args[stage2_index] = correct
+        good = self.run_recorded_fixture()
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertIn(b'root=PARTUUID=', (self.base / 'output/stage2.bin').read_bytes())
+
+    def test_wrong_dtb_rejected(self):
+        self.prepare_recorded_fixture()
+        wrong = self.base / 'wrong-dtb'; wrong.write_bytes(b'unrelated device tree')
+        self.args[self.args.index('--dtb') + 1] = str(wrong)
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('DTB does not match', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def test_wrong_stage1_rejected(self):
+        self.prepare_recorded_fixture()
+        wrong = self.base / 'wrong-stage1'; wrong.write_bytes(b'unrelated stage1')
+        self.args[self.args.index('--stage1') + 1] = str(wrong)
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('stage1 is not the recorded', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def test_wrong_asahi_rejected(self):
+        module = self.prepare_recorded_fixture()
+        module.write_bytes(b'wrong module')
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Asahi module does not match', result.stderr)
         self.assertFalse((self.base / 'output').exists())
 
     def test_rootflags_comma_rejected(self):

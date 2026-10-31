@@ -124,3 +124,12 @@ importer and is not the direct m1n1 admission condition. Hash matching prevents
 accidentally pairing an unrelated DTB, but neither candidate nor its loader,
 storage or keyboard handoff is boot-qualified. New DTBs require explicit
 review and an updated allowlist.
+
+The direct-root tool also verifies the recorded unconfigured release stage-1
+hash and accepts only the two recorded raw `ESP_STAGE2` m1n1 builds with the
+J773g ANS and USB2 gates; it rejects the packed inline-U-Boot candidates. It
+checks the staged `asahi.ko` against the matching graphics build as well as the
+Image and DTB hashes. The direct-root host fixture passed a recorded-artifact
+case and rejected unrelated stage 1, stage 2, DTB and Asahi module inputs before
+output creation. Its filesystem identity is simulated; it does not validate a
+real mount, loader execution, hardware recovery, or boot.
