@@ -43,3 +43,7 @@ order. Compare Aurora's existing implementations instead of stacking Gravity's
 65 patches blindly; keep Mesa, firmware, boot and speaker safety contracts
 matched. The Gravity-based R8 proposal remains historical reference and must
 not replace the WIP base.
+
+The [30-day Aurora branch review](AURORA-BRANCH-REVIEW-2026-10-30.md)
+tracks all 125 heads checked against the newer integration base and identifies
+mini-relevant work and hardware-specific references.
