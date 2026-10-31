@@ -24,3 +24,9 @@ boot chain. Before attempting a boot, establish and preserve the actual current
 ESP/GRUB and recovery configuration, finish the matched kernel artifacts, and
 confirm a viable recovery and input or diagnostic path. The bundle is an
 unverified draft, not an instruction to replace the current boot object.
+
+`build-j773g-rescue.py` records the local ARM64 initramfs recipe. It packages
+host binaries and libraries, so it is a diagnostic artifact specific to the
+build environment and is not a reproducible Omarchy userspace. The staged
+archive passed gzip, newc, shell syntax and packaged-library checks; physical
+console and input remain untested.
