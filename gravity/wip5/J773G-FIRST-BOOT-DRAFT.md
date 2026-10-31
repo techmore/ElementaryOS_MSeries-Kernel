@@ -67,7 +67,9 @@ unverified. This variant is a diagnostic experiment and was not installed.
 A separate source/format review verified both rescue variants' stage 1
 configuration CRCs, stage 2 boot fields, Image headers, DT identities and
 artifact hashes. For the keyboard variant, the observed DWC3, DART and SPMI
-addresses and IRQs agree with the running Gravity DT, and the relevant drivers
-are built in. The newer driver's DART bounds guard should refuse an incompatible
+addresses and IRQs agree with the running Gravity DT, the enabled ATC and SPMI
+power-domain labels and offsets match it, and the relevant drivers are built
+in. This does not establish firmware ownership or safe resets. The newer
+driver's DART bounds guard should refuse an incompatible
 short v2 aperture. That could leave no keyboard; it does not establish power,
 PHY behavior, console access or a safe recovery boot.
