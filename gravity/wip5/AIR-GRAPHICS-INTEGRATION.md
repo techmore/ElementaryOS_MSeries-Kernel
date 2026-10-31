@@ -60,3 +60,19 @@ already-enabled refusal cases. The patch passes `git apply --unidiff-zero
 --check` against that pin; it requires mini DT placeholders and a U-Boot
 GPU-resource importer before the handoff can be used. It has not been tested
 on hardware and is not part of the built loader binary above.
+
+The next handoff drafts are `0011-j773g-gpu-dt-draft.patch` and
+`0012-uboot-j773g-gpu-import-draft.patch`. The first adds disabled mini GPU,
+mailbox and six reservation placeholders; its DTB compiled in isolation. The
+second imports an explicitly opted-in handoff after checking reservation
+coverage, alignment, bounds, overlap and segment metadata; it leaves the GPU
+disabled. Its U-Boot object compiled, host tests covered valid and invalid
+imports and transactional rollback, and the existing 40 Air importer cases
+passed. Both apply checks passed against their respective latest-source and
+current loader drafts using `--unidiff-zero`. They do not qualify firmware,
+mini PMP/TVM admission or a hardware boot.
+
+The same combined G15/G16/G17 graphics object and the DART object compiled on
+latest omacom integration `2dd4aab` after adapting the newer debug-statistics
+field and reconciling three display DART hunks. This does not cover final
+module linking, all display DART configurations, or GPU execution.
