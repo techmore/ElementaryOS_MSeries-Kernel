@@ -39,8 +39,19 @@ which differs from the existing staged module's
 `a150dcb959bb72b2aee1d67e90b3d0d8e41d6c078fbec2fad1ce9d6f806dfbfe`.
 The root-staging helper checks the latter exact hash, so this rebuild is not
 accepted as a replacement. A separate clean build with another output directory
-also had a different hash. We have not established binary reproducibility or
-proven the cause of those differences.
+also had a different hash.
+
+For the scripted rebuild, `llvm-objcopy --strip-debug
+--remove-section=.note.gnu.build-id` produced byte-identical files from the
+staged and rebuilt modules, both SHA-256
+`04c2f0bf884c9400ccf30f460a31518671900aa226619db8f479e2dafa970db9`.
+The original and rebuild contain their respective different module-build
+directory paths in debug strings, and have different GNU build IDs
+(`acae9d9250fe60c37027995fd15fd53a20bc1656` and
+`67d229f05634e864e26052f53c410cc6170e303e`). This comparison establishes
+equality of the remaining stripped ELF, including its code and relocation
+sections; the unstripped files and build IDs remain different. It does not
+establish hardware operation or justify replacing the staging hash check.
 
 Build and symbol checks do not test module loading. The mini PCIe controller,
 DART ownership, handoff and Ethernet have not been qualified on the candidate;
