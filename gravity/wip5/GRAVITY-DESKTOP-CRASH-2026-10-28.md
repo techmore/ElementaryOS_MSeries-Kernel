@@ -150,3 +150,11 @@ buffers, the SSBO sink and bindless sampler heap. The changed state and uniform
 objects compiled against Gravity 103. Pipeline builders, other uploads and
 mapping paths, cleanup and query/fence behavior remain incomplete; no fault
 injection or GPU runtime validation has been performed. It is not deployable.
+
+`mesa103-allocation-incomplete-v12.patch` (SHA-256
+`c21dee0446aa89e6ab89308acf31181f870aeddab5a6aeca7420e14aa55372a1`)
+adds checked paths for pipeline USC, varying linkage, precompiled-kernel
+arguments and USC uploads, indirect groups and draw parameters. The affected
+state object compiles against Gravity 103. Other command uploads, scratch and
+mapping allocations, and cleanup/query/fence behavior remain incomplete; it
+has not been fault-injected or GPU-tested and is not deployable.
