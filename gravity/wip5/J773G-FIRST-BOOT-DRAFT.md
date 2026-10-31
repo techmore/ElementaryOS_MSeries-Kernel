@@ -15,8 +15,9 @@ integrity, binary dependencies and stage 2 parameter structure were checked.
 This is **not Omarchy**: the full verified Omarchy ARM root is staged separately
 as described in `OMARCHY-ROOT-STAGING.md`.
 
-The Image was produced by the latest Aurora build; its module build was still
-running when this bundle was assembled. The mini's storage handoff, display,
+The Image and 1,016 matching modules were produced by the completed latest
+Aurora build; the module tree is staged separately and is not in this RAM-only
+bundle. The mini's storage handoff, display,
 serial and keyboard have not been exercised on this kernel. In particular,
 rear USB controller/DART ownership is unresolved and the GPU is disabled.
 The configured stage 1 is not known to be compatible with the installed Gravity
