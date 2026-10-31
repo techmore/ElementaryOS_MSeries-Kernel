@@ -73,8 +73,11 @@ before relying on the mini's internal disk.
   `dt_set_ipd()` explicitly returns without setting it when no built-in
   keyboard exists; the current mini Linux tree also lacks the property.
   A present property must still have the required four-byte form. The patched
-  U-Boot importer object compiled with `apple_m1_defconfig`; this is not a
-  handoff or boot test. The Air path still requires the property.
+  U-Boot importer object compiled with `apple_m1_defconfig`.
+  `python3 gravity/wip5/verify-uboot-mini-keyboard.py <patched-uboot-tree>`
+  exercised the production chosen importer with real libfdt: the Air path
+  rejects an absent property, the mini accepts absence, and the mini rejects
+  a malformed value. This is not a handoff or boot test.
 
 The currently booted Gravity tree exposes `gravity,efi-system-partition`, not
 `asahi,efi-system-partition`; the importer requires the latter in the m1n1
