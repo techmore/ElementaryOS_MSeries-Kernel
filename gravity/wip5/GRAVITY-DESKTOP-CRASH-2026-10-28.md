@@ -46,3 +46,13 @@ the context's reset/error handling; simply returning an empty encoder would
 leave callers with invalid command-buffer state. This source inspection does
 not prove that the current build reproduces the old crash. No patch was applied
 to the live Mesa installation.
+
+Further review of the original build-103 source found that `agx_batch_discard`
+marks a never-submitted batch submitted and invokes normal cleanup. That cleanup
+also finishes queries and may read timestamp/statistics data, so discarded work
+can be treated as completed for bookkeeping. In the render-flush failure path,
+a batch that also contains compute work can proceed to submission rather than
+being discarded. These are source-level failure-handling risks, not proof that
+either path caused the KWin crash. The extracted `agx_batch.c` was byte-matched
+against a fresh extraction of the build-103 debugsource package. A safe fix must
+handle context failure, unsubmitted queries and mixed-engine batches together.
