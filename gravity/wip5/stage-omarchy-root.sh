@@ -37,10 +37,10 @@ mount -t btrfs -o ro,rescue=nologreplay,loop,subvolid=256 -- "$image" "$mountpoi
 mounted=1
 btrfs subvolume create "$target"
 echo "Copying to $target; a failure leaves the partial subvolume for inspection."
-rsync -aHAX --numeric-ids -- "$mountpoint/" "$target/"
+rsync -aHAX --numeric-ids --filter='-x system.*' --filter='-x security.selinux' -- "$mountpoint/" "$target/"
 echo 'Copy completed. Checking metadata and contents with a dry run.'
 report=$(mktemp "$stage/omarchy-rsync-check.XXXXXXXX")
-rsync -aHAXnci --numeric-ids -- "$mountpoint/" "$target/" | tee "$report"
+rsync -aHAXnci --numeric-ids --filter='-x system.*' --filter='-x security.selinux' -- "$mountpoint/" "$target/" | tee "$report"
 if [[ -s $report ]]; then
   echo "Copy verification found differences; inspect $report before continuing." >&2
   exit 1
