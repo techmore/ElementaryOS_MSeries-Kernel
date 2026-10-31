@@ -98,3 +98,9 @@ is missing almost everything:
    them for J773g.
 4. **USB-C** (with Gravity's USB-PD fix), **PCIe Wi-Fi and Bluetooth**, **NVMe** board wiring.
 5. **Audio**: gaps 2 to 5, then HDMI audio (gap 6), then the SMC power keys (gap 7).
+
+## Status 2026-10-31 (later)
+
+- GPU step 1 done as patches in `aurora-port/` (kernel commits 0001-0003 and the m1n1 patch). The kernel
+  branch `elementaryos-mseries` is local until the token has the `workflow` scope.
+- Gap 8: **not needed** in Aurora (its G16 driver polls completion; see `aurora-port/README.md`).
