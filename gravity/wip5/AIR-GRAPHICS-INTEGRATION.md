@@ -171,3 +171,14 @@ This is a build and offline staging result, not a tested GPU or desktop. The
 mini GPU DT node remains disabled; its PMP/TVM and exact firmware admission,
 USB input, storage handoff and hardware boot are unqualified. It does not
 replace the already staged framebuffer rescue kernel or the installed system.
+
+A read-only comparison of the live mini DT and the graphics candidate found
+that the candidate's PMC voter (`0x382800000`/`0x10000`) and rail
+(`0x3828aa000`/`0x3000`) windows both lie inside the live Gravity DT's
+`dcp-fw-pmgr` resource (`0x382800000`/`0xbc000`). The live node has no PMC
+compatible property, while the candidate's PMC parent remains disabled; its
+CLPC child is created by the PMC driver only if that parent probes. The
+candidate T8132 CLPC policy has immediate GPU demand and no PMP backoff. These
+are DT/source observations, not proof of exclusive DCP ownership or a reason to
+enable the PMC. The overlapping firmware-described resource and mini-specific
+power/ownership handoff need review before testing CLPC or GPU floor changes.
