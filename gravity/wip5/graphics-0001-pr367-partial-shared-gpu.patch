@@ -163,3 +163,70 @@
              raw_dev,
              raw_stats,
              stats: None,
+--- a/drivers/gpu/drm/asahi/file.rs
++++ b/drivers/gpu/drm/asahi/file.rs
+@@ -731,7 +731,17 @@
+             device, size, data.flags, resv_obj, reclaim_cpu, pages_no_reclaim, commit,
+         )?;
+         if reg_data.gpu.prepare_new_objects() {
+-            gem::prepare_new_object(&gem)?;
++            #[cfg(CONFIG_DRM_ASAHI_G15)]
++            let is_g15 = reg_data.gpu.as_any().is::<crate::g15::Gpu>();
++            #[cfg(not(CONFIG_DRM_ASAHI_G15))]
++            let is_g15 = false;
++            if is_g15 {
++                gem::prepare_new_object_g15(&gem)?;
++            } else {
++                let registered = device.registration_guard().ok_or(ENODEV)?;
++                let parent: &kernel::platform::Device<kernel::device::Bound> = registered.as_ref();
++                gem::prepare_new_object_native(&gem, parent.as_ref())?;
++            }
+         }
+         let handle = gem.create_handle(file)?;
+         data.handle = handle;
+--- a/drivers/gpu/drm/asahi/gem.rs
++++ b/drivers/gpu/drm/asahi/gem.rs
+@@ -410,6 +410,23 @@
+     }
+ }
+-
++
++/// Populates and pins a new user object through its DMA mapping, before any CPU view exists.
++///
++/// On a device that is not DMA-coherent, the DMA mapping cleans the cacheable kernel alias of the
++/// freshly zeroed pages to the point of coherency, so that no dirty line can later overwrite data
++/// written through a write-combined view. The pin keeps reclaim from creating a new cacheable
++/// alias. Only used when the GPU asks for it ([`crate::gpu::Gpu::prepare_new_objects`]).
++///
++pub(crate) fn prepare_new_object_native(
++    gem: &Object,
++    dev: &kernel::device::Device<kernel::device::Bound>,
++) -> Result {
++    // The native backend requires a non-coherent DMA device. Use its DMA mapping
++    // rather than interpreting DMA addresses as CPU physical addresses.
++    let _sgt = held_sg_table(gem, dev)?;
++    Ok(())
++}
++
+ /// Purge advice for a VM-private, non-exportable object. Returns whether the
+ /// contents are retained (0 once purged).
+ pub(crate) fn madvise(gem: &Object, dontneed: bool) -> Result<u32> {
+@@ -429,7 +446,7 @@
+ /// The DMA mapping only cleans if the device is not marked DMA-coherent (G15's synthesized node
+ /// has no `dma-coherent`). Should it ever be marked so, the pages are cleaned here instead.
+ #[cfg(CONFIG_DRM_ASAHI_G15)]
+-pub(crate) fn prepare_new_object(gem: &Object) -> Result {
++pub(crate) fn prepare_new_object_g15(gem: &Object) -> Result {
+     // SAFETY: G15 objects belong to the retained bound platform device; user object
+     // creation occurs only after registration and before a file can outlive its device.
+     let dev: &kernel::device::Device = gem.dev().as_ref().as_ref();
+@@ -471,7 +488,7 @@
+ extern "C" { fn asahi_g15_dma_coherent(dev: *mut core::ffi::c_void) -> bool; }
+-
++
+ #[cfg(not(CONFIG_DRM_ASAHI_G15))]
+-pub(crate) fn prepare_new_object(_gem: &Object) -> Result { Err(EINVAL) }
++pub(crate) fn prepare_new_object_g15(_gem: &Object) -> Result { Err(EINVAL) }
+ /// Large user BOs have a cheap ENOMEM fallback instead of per-folio reclaim.
+ /// Keep ordinary resource allocations and kernel-owned backing on their existing
+ /// policy. 256 MiB also matches Mesa's maximum reusable BO-cache footprint.
