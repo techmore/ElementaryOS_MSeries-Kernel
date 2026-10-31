@@ -10,6 +10,7 @@ workflow files. These patch files keep the work safe until then: `git am 000*.pa
 | `0001-…share-the-G16-GPU-nodes…` | Rename `t8132-j713-gpu.dtsi` to `t8132-gpu.dtsi`: it describes the SoC, not the Air |
 | `0002-…t8132-j773g-describe-the-PMP-and-the-G16-GPU` | Mini board: pmp alias and DAPF hints, PMP DART/report/mailbox, MCC/PMC, include the GPU |
 | `0003-soc-apple-pmp-admit-J773g…` | `apple_pmp_g16_board()` = J713 or J773g, used only on GPU paths; display votes stay J713-only |
+| `0004-ci-build-the-elementaryos-mseries-kernel…` | CI on the fork's branch: builds Image, modules, J773g/J713 DTBs the way alarm-aurora builds linux-aurora (LLVM, Rust 1.99.0, bindgen 0.73.2, pinned and hash-checked config) and uploads them |
 | `m1n1-0001-kboot_gpu_m4-admit-J773g.patch` | For `aurora-silicon/m1n1` `aurora-wip`: accept `apple,j773g` in the G16 handoff |
 
 ## Why this should be enough for the GPU (static evidence)
@@ -48,3 +49,11 @@ re-polls every `g16_resnap_us` (100 us) while anything is published, with a 1-ji
 `run_poll()` fails only on an error from `poll()`; a hang is declared only when the stamps stop moving past
 a deadline that `progress()` renews. A lost or late notification delays the next poll by at most that
 period. No port.
+
+## Booting it on the mini
+
+The mini runs Gravity's boot chain (its m1n1 stage 2, U-Boot, GRUB). Gravity's m1n1 does not do Aurora's
+G16 handoff, so on that chain this kernel's GPU node keeps its zero placeholders and the driver stays off:
+safe, framebuffer only. GPU acceleration needs Aurora's m1n1 with `m1n1-0001` as stage 2, and Aurora's m1n1
+also needs the J773g storage (ANS) handoff, drafted in `../wip5/0005`, `0019`. Keep Gravity's entry as the
+rescue path.
