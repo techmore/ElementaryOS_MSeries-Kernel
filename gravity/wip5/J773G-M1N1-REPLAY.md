@@ -49,7 +49,8 @@ stage 2 SHA-1 `85587ed026d031e2241a99c3a71b4afb3279f3f4`, SHA-256
 binaries.** The direct-bundle stage 2 lacks the PMP-inspection marker string
 present in the diagnostic replay, so they are not interchangeable.
 
-The replay script also offers `--profile direct-stage2` (0005, 0006, 0010,
+The replay script also offers `--profile direct-stage1` (0005, 0006, 0010),
+`--profile direct-stage2` (0005, 0006, 0010,
 0018) and `--profile direct-stage2-inline` (those patches followed by 0019).
 The second profile's full source, excluding generated directories and comparing
 symlinks themselves, matches a preserved original local build tree. That tree's
@@ -69,8 +70,16 @@ boot remain untested.
 The allowlisted unconfigured stage 1, SHA-256
 `0597951acb4f9c6df2a3113e9e17f9814ab6e12b3cf754815224c4836a466b94`,
 predates the 0018 and 0019 patches in the local build record and used
-`NO_DISPLAY=1 RELEASE=1 CHAINLOADING=1`. A rebuild using 0005, 0006 and 0010
-did not match it, including after reusing original build objects; its exact
-build inputs remain unproven. Stage 1 needs a reviewed per-machine
-configuration. None of these experiments installs, enrolls or boots a loader,
-or demonstrates hardware operation or recovery.
+`NO_DISPLAY=1 RELEASE=1 CHAINLOADING=1`. The captured 2026-10-30 build command
+also used `CARGO_HOME=/tmp/j773g-cargo`, `RUSTUP_HOME=/tmp/j773g-rustup` and
+that Cargo home's `bin` first on PATH. The preserved rustup toolchain reports
+rustc and cargo 1.99.1; the earlier nonmatching retries used rustc 1.98.1.
+In an isolated copy of the preserved original build tree, reversing 0019 and
+0018, selecting Rust 1.99.1 and rebuilding produced the exact allowlisted
+stage-1 hash above. Its resulting source matches the `direct-stage1` replay
+when compared with `diff -qr --no-dereference`, excluding generated build and
+target directories. This result reused retained build objects; it does not
+prove a clean rebuild, nor fully establish every original build input. Stage 1
+needs a reviewed per-machine configuration. None of these experiments
+installs, enrolls or boots a loader, or demonstrates hardware operation or
+recovery.

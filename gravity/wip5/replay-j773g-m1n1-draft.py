@@ -25,10 +25,12 @@ def verify(path, expected):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--archive', required=True, type=Path)
 parser.add_argument('--output', required=True, type=Path, help='new source directory')
-parser.add_argument('--profile', choices=('diagnostic', 'direct-stage2', 'direct-stage2-inline'),
+parser.add_argument('--profile', choices=('diagnostic', 'direct-stage1', 'direct-stage2', 'direct-stage2-inline'),
                     default='diagnostic', help='recorded patch series (default: diagnostic)')
 args = parser.parse_args()
-patches = COMMON + ([PMP] if args.profile == 'diagnostic' else []) + [USB2]
+patches = COMMON + ([PMP] if args.profile == 'diagnostic' else [])
+if args.profile != 'direct-stage1':
+    patches += [USB2]
 if args.profile == 'direct-stage2-inline':
     patches += [INLINE]
 verify(args.archive, ARCHIVE_HASH)
