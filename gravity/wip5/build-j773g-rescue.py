@@ -5,13 +5,18 @@ root = pathlib.Path(__file__).resolve().parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--module-root', type=pathlib.Path, help='offline modules_install root for keyboard trial')
 parser.add_argument('--release', help='matching kernel release (required with --module-root)')
+parser.add_argument('--direct-root-bootstrap', action='store_true', help='experimental root mount and switch_root instead of rescue shell')
 parser.add_argument('--output', type=pathlib.Path, default=root / 'j773g-rescue.cpio.gz')
 args = parser.parse_args()
 if bool(args.module_root) != bool(args.release):
     parser.error('--module-root and --release must be supplied together')
+if args.direct_root_bootstrap and not args.module_root:
+    parser.error('--direct-root-bootstrap requires matching keyboard modules')
 programs = ['bash', 'mount', 'ls', 'cat', 'grep', 'dmesg', 'blkid', 'setsid', 'tty', 'find', 'sleep', 'uname']
 if args.module_root:
     programs.append('modprobe')
+if args.direct_root_bootstrap:
+    programs.append('switch_root')
 entries = {}
 for name in ['dev', 'proc', 'sys', 'tmp', 'run', 'mnt', 'usr', 'usr/bin', 'lib', 'lib64', 'etc']:
     entries[name] = (stat.S_IFDIR | 0o755, b'', 0, 0)
@@ -55,6 +60,9 @@ while :; do
 done
 '''
 init = init.encode()
+if args.direct_root_bootstrap:
+    entries['newroot'] = (stat.S_IFDIR | 0o755, b'', 0, 0)
+    init = (root / 'j773g-direct-root-init-draft.sh').read_bytes()
 entries['init'] = (stat.S_IFREG | 0o755, init, 0, 0)
 for name in programs:
     path = pathlib.Path('/usr/bin') / name
