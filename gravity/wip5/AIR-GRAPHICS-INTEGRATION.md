@@ -16,11 +16,12 @@ other integration session is completing that prerequisite in a separate tree.
 
 `graphics-0001-pr367-partial-shared-gpu.patch` records a partial three-way
 merge of #367 patch 8 against WIP5: module registration retains both G15 and
-G16 paths, and six other shared GPU files merge automatically. This patch is
+G16 paths, the driver probe structure retains G15/M3/G17 alongside G16,
+and six other shared GPU files merge automatically. This patch is
 not the full series and cannot be built or used alone. The Air #366 head
 `98a8f830df94a7dcaf7de37bfa915240afa2dda8` supplied the exact preimages;
 their patch blob hashes were checked before merging. Remaining patch 8
-conflicts include `driver.rs`, `file.rs`, `gem.rs`, `mmu.rs` and `pgtable.rs`;
+conflicts include `file.rs`, `gem.rs`, `mmu.rs` and `pgtable.rs`;
 WIP5 already has `mmu/ppl.rs` identical to the Air patch, while its existing
 `timestamp.rs` differs and needs review. Merging cannot be reduced to choosing
 one side: retain WIP5's newer G15/G17 behavior and the Air G16 lifetime rules.
