@@ -270,3 +270,13 @@ The m1n1 source was reconstructed from the documented pin and patches; it is
 not established to be identical to the earlier linked stage 2. These are
 separate raw binaries, not a packed or installed boot bundle. The diagnostic
 requires explicit opt-in, and no hardware or GPU operation has been tested.
+
+The build directory's `PROVENANCE.md` records the source files, configuration,
+commands, hashes and synthetic checks. The adapted U-Boot replay diff is
+also saved as `uboot-combined-gpu-diagnostic-draft.patch` (SHA-256
+`56b9d1e096cdfefc4812bbcbfe42b37ba714efdd9065fbfd390bf1daedb03f83`)
+and applies to the recorded combined U-Boot source. The saved
+`m1n1-scratch-to-diagnostic-build-draft.patch` (SHA-256
+`745c382c7288c2649be3d87401a78414715fed931238e58088e5840d49fc1986`)
+applies to the exact scratch baseline recorded in the build directory. Its
+full replay from the pristine m1n1 archive has not been established.
