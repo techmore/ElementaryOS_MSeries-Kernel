@@ -126,3 +126,11 @@ preparation. The changed objects compile against Gravity 103. Apple9 draw
 preparation, generic pools, mapping callers and cleanup remain incomplete;
 invalid ABI state also takes the unknown-reset path. No injected-failure or
 GPU runtime validation was performed, and the patch is not deployable.
+
+The isolated `mesa103-allocation-incomplete-v9.patch` (SHA-256
+`9d4de1b1011d072022d8f7642b254134046700d40834a1b7f17944a29bd59127`)
+adds checked Apple9 draw-preparation allocations and propagates preparation
+failure as unknown context loss. The changed objects compile against Gravity
+103. Earlier descriptor, texture and sampler allocations, generic pools,
+mapping and cleanup remain incomplete. It has not been fault-injected or
+tested on a GPU and must not be deployed.
