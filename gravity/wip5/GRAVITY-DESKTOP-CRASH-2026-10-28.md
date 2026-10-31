@@ -76,3 +76,12 @@ reports an unknown context reset instead. It applies to the extracted build-103
 source. Its three changed C files also compiled in the isolated build; it
 remains untested on hardware. Reset propagation, subsequent submissions and
 query-buffer semantics remain open.
+
+The third draft, `mesa103-failed-render-v3-draft.patch`, SHA-256
+`262cbbeeee13d14d95bf03857c61542ee81271d4857c80419c2633579f0f4532`,
+also discards later batches at flush after a preparation failure and rechecks
+failure after mapping a query buffer. Its changed AGX C files compiled against
+the exact Gravity 103 source. A failed query write can still leave an old
+availability value, and encoding before the later flush, actual buffer cleanup,
+reset handling and the original unchecked allocation remain unresolved. It is
+an isolated draft, not an installed or hardware-validated fix.
