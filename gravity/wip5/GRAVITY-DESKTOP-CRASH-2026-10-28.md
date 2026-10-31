@@ -25,3 +25,15 @@ does not establish the allocator's return value or the original faulting
 instruction, so a null allocation or any specific GPU failure remains a
 hypothesis. The exact build-102 packages were retrieved from the Gravity COPR
 archive for offline inspection; no package was installed.
+
+The user journal adds a relevant sequence for the same KWin PID: at
+20:32:36.390 it logged repeated `DRM_IOCTL_ASAHI_VM_BIND` I/O errors and
+`BO creation failed`, less than a second before the crash. In the matching
+build-102 source, `agx_bo_create` prints that buffer-creation message and
+returns NULL on allocation failure, while `agx_encoder_allocate` calls it and
+then passes its result to `agx_bo_map` without an explicit NULL check. This
+supports an allocation-failure propagation hypothesis, but the unavailable
+core and short recorded stack do not prove that this particular allocation
+returned NULL or explain why VM_BIND failed. Other applications continued to
+report VM_BIND I/O errors after the crash; kernel-side logs are needed to
+investigate the initiating failure.
