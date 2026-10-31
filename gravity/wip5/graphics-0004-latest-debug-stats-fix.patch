@@ -1,0 +1,10 @@
+--- a/drivers/gpu/drm/asahi/driver.rs
++++ b/drivers/gpu/drm/asahi/driver.rs
+@@ -469,6 +469,7 @@
+             raw_dev,
+             raw_stats,
+             stats: None,
++            debug_stats: None,
+         })
+     }
+ }

@@ -76,3 +76,12 @@ The same combined G15/G16/G17 graphics object and the DART object compiled on
 latest omacom integration `2dd4aab` after adapting the newer debug-statistics
 field and reconciling three display DART hunks. This does not cover final
 module linking, all display DART configurations, or GPU execution.
+
+For the newer omacom base, `graphics-0003-latest-platform-prerequisites.patch`
+records the partial #367 patches 1–6 on the exact `2dd4aab` mini/Air platform
+snapshot. `graphics-0004-latest-debug-stats-fix.patch` restores the newer G17
+initializer field after `graphics-0001`. These source records passed application
+checks against those exact intermediate trees; use `--unidiff-zero` for 0003.
+With `CONFIG_APPLE_DART_J713_DCP=y`, the reconciled retained-display DART
+object also compiled. Both its ownership semantics and J773g applicability
+still require review; this is not a completed native display handoff.
