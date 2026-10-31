@@ -60,6 +60,17 @@ Read-only selective extraction from the image confirms that `/lib` points to
 copy script records its rsync dry-run output and exits with an error when that
 comparison reports differences; an empty report is not a hardware boot test.
 
+For a later direct-root experiment, `stage-j773g-omarchy.py` builds an
+uninstalled m1n1 bundle using the graphics kernel, a supplied DTB and a staged
+root with matching modules. It supplies `root=PARTUUID=...`, Btrfs subvolume
+root flags and no initramfs. The graphics config builds GPT partition parsing,
+Apple NVMe, SART, DART and Btrfs into the kernel; the loader's boot grammar
+accepts `-` for no initramfs. A synthetic-root fixture verified generated
+arguments and artifact hashes. The supplied PARTUUID and top-level-relative
+subvolume path must be independently matched to the actual staged root before
+use; the script cannot establish this mapping. Storage handoff, init, display,
+input, firmware and recovery remain untested. No real root bundle was made.
+
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
 `87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
 and reports extended-attribute failures. Isolated checks preserved an actual
