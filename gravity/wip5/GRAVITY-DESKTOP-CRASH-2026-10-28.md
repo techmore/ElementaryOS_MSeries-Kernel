@@ -142,3 +142,11 @@ table allocation, propagating failure in draw and compute callers. The changed
 AGX state object compiles against Gravity 103. Other descriptor, uniform, pool
 and mapping paths and cleanup remain incomplete; no fault-injection or GPU
 runtime validation has been performed. It must not be deployed.
+
+`mesa103-allocation-incomplete-v11.patch` (SHA-256
+`73e93e59d3c8cfed65c48cc6bf42812db494b3873fe5158da35436bcef667450`)
+extends checked allocation to generic texture/sampler descriptors, uniform
+buffers, the SSBO sink and bindless sampler heap. The changed state and uniform
+objects compiled against Gravity 103. Pipeline builders, other uploads and
+mapping paths, cleanup and query/fence behavior remain incomplete; no fault
+injection or GPU runtime validation has been performed. It is not deployable.
