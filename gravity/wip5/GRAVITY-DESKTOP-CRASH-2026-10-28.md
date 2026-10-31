@@ -110,3 +110,11 @@ pool tracking, preserving the previous encoder link on failure. Its changed
 pool and AGX state files compiled against Gravity 103. Generic pool and mapping
 callers, generated nested calls, full cleanup and runtime behavior remain
 unverified; it is not deployable and was not run on the GPU.
+
+The next isolated draft, `mesa103-allocation-incomplete-v7.patch` (SHA-256
+`ec3f06b7140dde91b2a1447060d26a65e0d1e304209a92e0ff04a17415942613`),
+propagates encoder continuation failure through more nested draw, tessellation,
+copy and query paths. Its changed state, query and blit objects compiled against
+the exact Gravity 103 source. Generic pool and mapping callers, generated-call
+behavior, Apple9 preparation and cleanup remain unaudited; neither fault
+injection nor GPU runtime validation has been performed. It is not deployable.
