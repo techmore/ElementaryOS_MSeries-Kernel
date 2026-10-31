@@ -168,3 +168,12 @@ tessellation, user-index and shader-cache allocations, generic pool tracking,
 global mapping, query/fence cleanup and the Vulkan scratch wrapper remain
 incomplete; no fault-injection or GPU execution validated this draft. It must
 not be deployed.
+
+`mesa103-allocation-incomplete-v14.patch` (SHA-256
+`e829085317ebfa36971ee18c7954a500763546f86abf46e882080a40a74fdfe5`)
+extends checked allocation handling to user-index uploads, heap resources,
+restart descriptors, and the direct state-file pool allocation paths including
+geometry and tessellation. The changed state object compiles against Gravity
+103. Shared pools, shader caches, other mapping paths, arithmetic overflow,
+Vulkan scratch propagation and query/fence cleanup remain incomplete. It has
+not been fault-injected or GPU-tested and must not be deployed.
