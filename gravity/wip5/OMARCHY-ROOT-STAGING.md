@@ -30,3 +30,13 @@ A read-only comparison confirms the staged image's Btrfs filesystem UUID is
 different from the currently mounted Gravity root. Cloning the image would
 still duplicate its own UUID; attachment and installation must account for
 that separately.
+
+The practical metadata-correct staging path is a privileged, read-only loop
+mount of the verified image followed by `rsync -aHAX --numeric-ids` into a new,
+separately named Btrfs subvolume. Before any copy, recheck free space and all
+mounted filesystem UUIDs; the image has about 10.16 GB referenced uncompressed
+and two nested subvolumes (`portables` and `machines`) that need explicit
+handling. Verify owners, setuid bits, hardlinks, ACLs, capabilities and special
+files after copying. This does not provision a user, firmware or boot entry.
+The detailed attended plan is in the local staging cache; no mount or target
+subvolume has been created.
