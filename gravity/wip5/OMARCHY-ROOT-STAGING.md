@@ -142,3 +142,6 @@ check reads only the public account database: it does not create a user, read a
 password hash, establish that the account can authenticate, or verify a working
 login session. A host fixture covers the unprovisioned rejection before output
 creation; actual provisioning and hardware boot remain untested.
+The local-user check additionally requires that the declared home directory and
+shell resolve to existing paths inside the staged root. It still does not read
+or validate credentials or establish a working login.

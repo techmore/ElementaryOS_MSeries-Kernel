@@ -87,8 +87,16 @@ for line in passwd.read_text().splitlines():
     except ValueError:
         continue
     home, shell = fields[5:7]
-    if (fields[0] and 1000 <= uid <= 59999 and home.startswith('/') and
+    if not (fields[0] and 1000 <= uid <= 59999 and home.startswith('/') and
             shell.startswith('/') and pathlib.PurePosixPath(shell).name not in ('false', 'nologin')):
+        continue
+    try:
+        home_path = (root_dir / home.lstrip('/')).resolve(strict=True)
+        shell_path = (root_dir / shell.lstrip('/')).resolve(strict=True)
+    except (FileNotFoundError, OSError, RuntimeError):
+        continue
+    if (home_path.is_relative_to(root_dir) and shell_path.is_relative_to(root_dir) and
+            home_path.is_dir() and shell_path.is_file()):
         has_login_user = True
         break
 if not has_login_user:

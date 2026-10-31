@@ -20,6 +20,9 @@ class DirectRootValidation(unittest.TestCase):
         (self.root / 'etc').mkdir(parents=True)
         (self.root / 'etc/os-release').write_text('ID=omarchy\n')
         (self.root / 'etc/passwd').write_text('sample:x:1000:1000:Sample:/home/sample:/bin/bash\n')
+        (self.root / 'home/sample').mkdir(parents=True)
+        (self.root / 'bin').mkdir()
+        (self.root / 'bin/bash').write_text('fixture shell')
         modules = self.root / 'usr/lib/modules' / RELEASE
         modules.mkdir(parents=True)
         (modules / 'modules.dep').write_text('')
@@ -105,6 +108,24 @@ class DirectRootValidation(unittest.TestCase):
     def test_unprovisioned_root_rejected(self):
         self.prepare_recorded_fixture()
         (self.root / 'etc/passwd').write_text('root:x:0:0:root:/root:/bin/bash\n')
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('needs a provisioned local login user', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def test_missing_home_rejected(self):
+        self.prepare_recorded_fixture()
+        (self.root / 'home/sample').rmdir()
+        result = self.run_recorded_fixture()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('needs a provisioned local login user', result.stderr)
+        self.assertFalse((self.base / 'output').exists())
+
+    def test_shell_escaping_root_rejected(self):
+        self.prepare_recorded_fixture()
+        shell = self.root / 'bin/bash'
+        shell.unlink()
+        shell.symlink_to('/bin/bash')
         result = self.run_recorded_fixture()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('needs a provisioned local login user', result.stderr)
