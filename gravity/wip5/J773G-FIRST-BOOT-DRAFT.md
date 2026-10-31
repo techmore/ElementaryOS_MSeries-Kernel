@@ -32,6 +32,19 @@ build environment and is not a reproducible Omarchy userspace. The staged
 archive passed gzip, newc, shell syntax and packaged-library checks; physical
 console and input remain untested.
 
+The combined graphics kernel has a separate diagnostic bundle at
+`~/.cache/m4-kernel/latest-aurora/j773g-graphics-rescue-draft/`. Its GPU
+node remains disabled, and its original initramfs has no graphics or keyboard
+modules. An experimental graphics-matched keyboard initramfs was built at
+`~/.cache/m4-kernel/latest-aurora/j773g-graphics-keyboard-initramfs.cpio.gz`
+(SHA-256 `4a8cd5cd412a7dffd57a0e4ce8a8faf61a01f9912a49870dbd0e16e21c66f1b1`).
+The builder's optional `--module-root` and `--release` arguments package the
+SPMI, USB-C, PHY, DWC3 and Apple HID modules and their declared dependencies;
+its init attempts to load them. Archive extraction, shell syntax and offline
+module dependency resolution passed. It has not been paired with an installed
+boot configuration or tested on hardware; module presence does not establish
+that the USB controller, DART or keyboard works.
+
 An optional rear-keyboard experiment is recorded in
 `0017-j773g-usb2-keyboard-trial.patch` and
 `0018-m1n1-usb2-calibration-gate.patch`. The running Gravity system enumerates
