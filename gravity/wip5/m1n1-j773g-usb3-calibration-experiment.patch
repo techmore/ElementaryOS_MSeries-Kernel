@@ -1,0 +1,111 @@
+diff --git a/src/kboot_atc.c b/src/kboot_atc.c
+--- a/src/kboot_atc.c
++++ b/src/kboot_atc.c
+@@ -767,6 +767,24 @@
+     printf("FDT: Copied the DP calibration for %s\n", adt_path);
+ }
+ 
++/* Validate the J773g fixed-hub description before exporting banked values. */
++static bool dt_j773g_fixed_usb3_valid(const void *dt, int adt_node, int fdt_node, int port)
++{
++    static const char *const banks[] = {"usb2phy", "pipehandler", "core", "axi2af",
++                                        "lioa", "fabric", "common-config"};
++
++    if (chip_id != T8132 || fdt_node_check_compatible(dt, 0, "apple,j773g") || port != 2 ||
++        !fdt_getprop(dt, fdt_node, "apple,fixed-usb3", NULL) ||
++        fdt_node_check_compatible(dt, fdt_node, "apple,t8132-atcphy") ||
++        !adt_is_compatible_at(adt, adt_node, "atc-phy,t8132", 0) ||
++        fdt_stringlist_count(dt, fdt_node, "reg-names") != (int)ARRAY_SIZE(banks))
++        return false;
++    for (size_t i = 0; i < ARRAY_SIZE(banks); i++)
++        if (fdt_stringlist_search(dt, fdt_node, "reg-names", banks[i]) != (int)i)
++            return false;
++    return true;
++}
++
+ /* Publish the complete USB3 bundle or none of it, preserving USB2 fallback. */
+ static void dt_copy_t8132_usb3_tunables(void *dt, int adt_node, int fdt_node)
+ {
+@@ -825,6 +843,17 @@
+     dt_export_j700_atc(dt, adt_node, fdt_node);
+     if (adt_node < 0)
+         return;
++
++    /* Opt in only the J773g fixed front hub's banked PHY draft. */
++    if (!fdt_node_check_compatible(dt, 0, "apple,j773g") && port == 2 &&
++        fdt_getprop(dt, fdt_node, "apple,fixed-usb3", NULL)) {
++        if (!dt_j773g_fixed_usb3_valid(dt, adt_node, fdt_node, port)) {
++            printf("FDT: J773g fixed USB3 bank description invalid; no calibration copied\n");
++            return;
++        }
++        dt_copy_t8132_usb3_tunables(dt, adt_node, fdt_node);
++        return;
++    }
+ 
+     if (chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j713") &&
+         !fdt_node_check_compatible(dt, fdt_node, "apple,t8132-atcphy") &&
+diff --git a/tests/python/test_j773g_fixed_usb3_gate.py b/tests/python/test_j773g_fixed_usb3_gate.py
+new file mode 100644
+--- /dev/null
++++ b/tests/python/test_j773g_fixed_usb3_gate.py
+@@ -0,0 +1,60 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Compile and exercise the production J773g banked USB3 admission gate."""
++from pathlib import Path
++import subprocess
++
++
++def test_gate(tmp_path):
++    repo = Path(__file__).resolve().parents[2]
++    source = (repo / 'src/kboot_atc.c').read_text()
++    start = source.index('static bool dt_j773g_fixed_usb3_valid(')
++    stop = source.index('\n}\n', start) + 2
++    helper = source[start:stop]
++    pre = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <libfdt.h>
++#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
++#define T8132 8132
++static int chip_id = T8132;
++static void *adt;
++static bool adt_ok = true;
++static bool adt_is_compatible_at(void *tree, int node, const char *name, int index)
++{ (void)tree; (void)node; (void)name; (void)index; return adt_ok; }
++'''
++    test = r'''
++int main(void)
++{
++    char dt[4096]; int n;
++    static const char banks[] = "usb2phy\0pipehandler\0core\0axi2af\0lioa\0fabric\0common-config";
++    static const char wrong[] = "usb2phy\0pipehandler\0core\0lioa\0axi2af\0fabric\0common-config";
++    assert(!fdt_create_empty_tree(dt, sizeof(dt)));
++    assert(!fdt_setprop_string(dt, 0, "compatible", "apple,j773g"));
++    n = fdt_add_subnode(dt, 0, "phy"); assert(n >= 0);
++    assert(!fdt_setprop_string(dt, n, "compatible", "apple,t8132-atcphy"));
++    assert(!fdt_setprop(dt, n, "apple,fixed-usb3", NULL, 0));
++    assert(!fdt_setprop(dt, n, "reg-names", banks, sizeof(banks)));
++    assert(dt_j773g_fixed_usb3_valid(dt, 1, n, 2));
++    assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 1));
++    chip_id = 1; assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 2)); chip_id = T8132;
++    adt_ok = false; assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 2)); adt_ok = true;
++    assert(!fdt_setprop(dt, n, "reg-names", wrong, sizeof(wrong)));
++    assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 2));
++    assert(!fdt_setprop(dt, n, "reg-names", banks, sizeof(banks)));
++    assert(!fdt_delprop(dt, n, "apple,fixed-usb3"));
++    assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 2));
++    assert(!fdt_setprop(dt, n, "apple,fixed-usb3", NULL, 0));
++    assert(!fdt_setprop_string(dt, 0, "compatible", "apple,j713"));
++    n = fdt_path_offset(dt, "/phy"); assert(n >= 0);
++    assert(!dt_j773g_fixed_usb3_valid(dt, 1, n, 2));
++    puts("J773g USB3 gate: board, chip, port, ADT, opt-in and bank order passed");
++}
++'''
++    c = tmp_path / 'j773g-gate.c'
++    exe = tmp_path / 'j773g-gate'
++    c.write_text(pre + helper + '\n' + test)
++    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-I',
++                    str(repo / 'src/libfdt'), str(c), '-lfdt', '-o', str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
