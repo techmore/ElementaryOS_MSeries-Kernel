@@ -1,0 +1,148 @@
+From 5d25f5078a6344268727333128281f157322e5e3 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Sat, 31 Oct 2026 09:03:47 -0400
+Subject: [PATCH 3/3] soc: apple: pmp: admit J773g for the G16 GPU power path
+
+The Mac mini (J773g) has the same T8132 PMP and GPU as the MacBook Air
+(J713): its ADT carries a 34-entry PMP table with the GFX record at entry
+12 and DISP at entry 15, and the same GPU apertures, interrupts and
+firmware segments. Every gate on the GPU path is a board-name check.
+
+Add apple_pmp_g16_board() for J713 and J773g, and use it where the GPU
+depends on the board: the PMP vote-bridge registration (its table checks
+still apply), GFX power votes, the T8132 PMP report and the G16 driver's
+board check. Display (DISP) votes stay J713-only.
+
+Not built or booted on J773g.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/gpu/drm/asahi/g16/glue.c      |  4 ++--
+ drivers/pmdomain/apple/pmp-report.c   |  3 ++-
+ drivers/soc/apple/pmp-display.c       | 14 +++++++-------
+ include/linux/soc/apple/pmp-display.h | 12 ++++++++++++
+ 4 files changed, 23 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/gpu/drm/asahi/g16/glue.c b/drivers/gpu/drm/asahi/g16/glue.c
+index db0576a1e0fe..ae39fe80a893 100644
+--- a/drivers/gpu/drm/asahi/g16/glue.c
++++ b/drivers/gpu/drm/asahi/g16/glue.c
+@@ -143,10 +143,10 @@ int asahi_g16_cooling_sample(struct asahi_g16_cooling *cooling, u64 now,
+ 	return ret;
+ }
+ 
+-/* Whether this is a qualified J713/T8132 board. */
++/* Whether this is a qualified G16 board (J713 or J773g, T8132). */
+ bool asahi_g16_board(void)
+ {
+-	return apple_pmp_j713_board();
++	return apple_pmp_g16_board();
+ }
+ 
+ /*
+diff --git a/drivers/pmdomain/apple/pmp-report.c b/drivers/pmdomain/apple/pmp-report.c
+index 1641181d57ed..6775507d5266 100644
+--- a/drivers/pmdomain/apple/pmp-report.c
++++ b/drivers/pmdomain/apple/pmp-report.c
+@@ -345,7 +345,8 @@ int apple_pmp_report_wait_supplier_ready(struct device *supplier, unsigned int t
+ 	struct platform_device *pdev;
+ 	struct apple_pmp_report *rep;
+ 	u64 status;
+-	bool t8132 = of_machine_is_compatible("apple,j713") &&
++	bool t8132 = (of_machine_is_compatible("apple,j713") ||
++		      of_machine_is_compatible("apple,j773g")) &&
+ 		of_device_is_compatible(supplier->of_node, "apple,t8132-pmp-v2");
+ 	int ret;
+ 
+diff --git a/drivers/soc/apple/pmp-display.c b/drivers/soc/apple/pmp-display.c
+index fed0b13bdfe8..e25e19dcc53e 100644
+--- a/drivers/soc/apple/pmp-display.c
++++ b/drivers/soc/apple/pmp-display.c
+@@ -165,7 +165,7 @@ static DEFINE_MUTEX(pmp_display_registration);
+ 
+ bool apple_pmp_display_retained_board(void)
+ {
+-	return apple_pmp_j713_board();
++	return apple_pmp_g16_board();
+ }
+ 
+ /* The qualified loader publishes the existing PMP through its alias. */
+@@ -181,7 +181,7 @@ struct apple_pmp_display *apple_pmp_display_register(struct device *dev,
+ 	struct device_node *node, *qualified;
+ 	const void *table;
+ 	int size;
+-	bool match, j713 = apple_pmp_j713_board();
++	bool match, j713 = apple_pmp_g16_board();
+ 
+ 	if (!j713 || !dev->of_node ||
+ 	    !of_device_is_compatible(dev->of_node,
+@@ -219,7 +219,7 @@ struct apple_pmp_display *apple_pmp_display_register(struct device *dev,
+ 	pm_runtime_get_noresume(dev);
+ 	smp_store_release(&pmp_display, p);
+ 	dev_info(dev, "%s PMP vote bridge ready; retained existing PMP owner\n",
+-		 j713 ? "J713" : "J514S");
++		 of_machine_is_compatible("apple,j773g") ? "J773g" : j713 ? "J713" : "J514S");
+ out:
+ 	mutex_unlock(&pmp_display_registration);
+ 	return p;
+@@ -262,7 +262,7 @@ static struct apple_pmp_display *pmp_power_consumer(struct device *consumer,
+ 	struct device_node *pmp, *supplier;
+ 	bool match;
+ 
+-	if (apple_pmp_j713_board()) {
++	if (kind == PMP_POWER_AGX ? apple_pmp_g16_board() : apple_pmp_j713_board()) {
+ 		/* Both consumers must name the exact boot-profile node. */
+ 		if ((kind != PMP_POWER_AGX && kind != PMP_POWER_DISP) || !consumer->of_node ||
+ 		    !of_device_is_compatible(consumer->of_node,
+@@ -414,7 +414,7 @@ EXPORT_SYMBOL_GPL(apple_pmp_j713_display_prepare);
+ 
+ int apple_pmp_j713_gpu_prepare(struct device *consumer)
+ {
+-	return apple_pmp_j713_board() ? pmp_power_prepare(consumer, PMP_POWER_AGX) : -ENODEV;
++	return apple_pmp_g16_board() ? pmp_power_prepare(consumer, PMP_POWER_AGX) : -ENODEV;
+ }
+ EXPORT_SYMBOL_GPL(apple_pmp_j713_gpu_prepare);
+ 
+@@ -426,7 +426,7 @@ EXPORT_SYMBOL_GPL(apple_pmp_j713_display_check);
+ 
+ int apple_pmp_j713_gpu_check(struct device *consumer)
+ {
+-	return apple_pmp_j713_board() ? pmp_power_check(consumer, PMP_POWER_AGX) : -ENODEV;
++	return apple_pmp_g16_board() ? pmp_power_check(consumer, PMP_POWER_AGX) : -ENODEV;
+ }
+ EXPORT_SYMBOL_GPL(apple_pmp_j713_gpu_check);
+ 
+@@ -438,6 +438,6 @@ EXPORT_SYMBOL_GPL(apple_pmp_j713_display_get);
+ 
+ int apple_pmp_j713_gpu_get(struct device *consumer)
+ {
+-	return apple_pmp_j713_board() ? pmp_power_get(consumer, PMP_POWER_AGX) : -ENODEV;
++	return apple_pmp_g16_board() ? pmp_power_get(consumer, PMP_POWER_AGX) : -ENODEV;
+ }
+ EXPORT_SYMBOL_GPL(apple_pmp_j713_gpu_get);
+diff --git a/include/linux/soc/apple/pmp-display.h b/include/linux/soc/apple/pmp-display.h
+index f919a4c362d6..1b355bc35607 100644
+--- a/include/linux/soc/apple/pmp-display.h
++++ b/include/linux/soc/apple/pmp-display.h
+@@ -12,6 +12,18 @@ static inline bool apple_pmp_j713_board(void)
+ 	       of_machine_is_compatible("apple,t8132");
+ }
+ 
++/*
++ * T8132 boards whose G16 GPU votes power through the retained PMP. J773g
++ * carries the same PMP table shape and GPU handoff as J713. Display votes
++ * stay J713-only.
++ */
++static inline bool apple_pmp_g16_board(void)
++{
++	return (of_machine_is_compatible("apple,j713") ||
++		of_machine_is_compatible("apple,j773g")) &&
++	       of_machine_is_compatible("apple,t8132");
++}
++
+ struct device;
+ struct apple_pmp_display;
+ 
+-- 
+2.50.1 (Apple Git-155)
+
