@@ -39,5 +39,11 @@ btrfs subvolume create "$target"
 echo "Copying to $target; a failure leaves the partial subvolume for inspection."
 rsync -aHAX --numeric-ids -- "$mountpoint/" "$target/"
 echo 'Copy completed. Checking metadata and contents with a dry run.'
-rsync -aHAXnci --numeric-ids -- "$mountpoint/" "$target/"
+report=$(mktemp "$stage/omarchy-rsync-check.XXXXXXXX")
+rsync -aHAXnci --numeric-ids -- "$mountpoint/" "$target/" | tee "$report"
+if [[ -s $report ]]; then
+  echo "Copy verification found differences; inspect $report before continuing." >&2
+  exit 1
+fi
+echo "Rsync reported no differences; check record: $report"
 echo 'Staged generic ARM root only. Nested subvolume layout, provisioning, kernel and boot remain to be handled.'

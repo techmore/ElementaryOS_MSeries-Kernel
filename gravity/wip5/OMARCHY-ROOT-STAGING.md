@@ -55,6 +55,10 @@ recorded SHA-256 and kernel release, and refuses an existing destination.
 Its root operation has not been run or tested; the Asahi hash is only an
 identity check, not proof that the GPU works or that every module is intact.
 The kernel image, firmware and boot configuration still need integration.
+Read-only selective extraction from the image confirms that `/lib` points to
+`usr/lib` and `/usr/lib/modules` exists, as required by this script. The root
+copy script records its rsync dry-run output and exits with an error when that
+comparison reports differences; an empty report is not a hardware boot test.
 
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
 `87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
