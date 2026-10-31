@@ -59,14 +59,23 @@ before relying on the mini's internal disk.
   J773g ANS only when the device-tree alias is present and applies the retained
   memory reservations before reusing the existing live-ADT resource transfer.
   It deliberately does not enable J713 PMU or display handoffs on the mini.
+- `0006-m1n1-no-display-build-option.patch` exposes `NO_DISPLAY=1` in that
+  loader's generated build configuration. Without it, the Makefile silently
+  ignores the option and the intended framebuffer-preserving build is not made.
 
 The kernel drafts apply to the current WIP5 source with the preceding SMC
-patch; the board DTB compiles in the matching-input checkout. The loader patch
-applies to the pinned source archive; the modified `kboot.o` compiles with
-`NO_DISPLAY=1`. The full loader build progressed through its C and assembly
-objects but stopped at `build/librust.a` because `cargo` was unavailable.
-U-Boot's matching handoff still requires integration. This is a build
-integration starting point, not an enabled,
+patch; the board DTB compiles in the matching-input checkout. Both loader
+patches apply to the pinned source archive (SHA-256
+`5e853caee70e56ba082f33c1d557fa30d25e92c2c571251b8ff04bbbc356e244`). With
+isolated Rust 1.99.1 and `aarch64-unknown-none-softfloat`, the complete loader
+build produced both stages with `NO_DISPLAY`; stage 1 additionally has
+`CHAINLOADING`. The temporary artifacts were copied to
+`~/.cache/m4-kernel/wip5-source/m1n1/j773g-loader-draft/`: stage 1 SHA-256
+`c1b853663bdc4450fa23db8978c6c2f0aabd6b9e301bfa8541f945ad2f39f5eb`, stage 2
+`ce3e5d78163cb3ca7e7c469d5d4ceacde8bae0dbbda0bf95f488bc42a798d427`.
+These are non-release local builds; compiler warnings were reported in T8140
+display code. U-Boot's matching handoff still requires integration. This is a
+build integration starting point, not an enabled,
 bootable or hardware-qualified storage path. Do not install the draft loader.
 
 ## Sound on the current Gravity host

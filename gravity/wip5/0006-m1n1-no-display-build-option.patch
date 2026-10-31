@@ -1,0 +1,14 @@
+diff --git a/Makefile b/Makefile
+index fa4ca17..c63468a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -75,6 +75,9 @@ BASE_CFLAGS := -O2 -Wall -g -Wundef -Werror=strict-prototypes -fno-common -fno-P
+ CFLAGS := $(BASE_CFLAGS) -mgeneral-regs-only
+ 
+ CFG :=
++ifeq ($(NO_DISPLAY),1)
++CFG += NO_DISPLAY
++endif
+ ifeq ($(RELEASE),1)
+ CFG += RELEASE
+ endif
