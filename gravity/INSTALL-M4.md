@@ -11,7 +11,7 @@ One page. Do it in order. macOS stays installed and is your fallback the whole t
 
 ## 2. Install (macOS side)
 
-1. Double-click **`Omarchy-J773g-developer.pkg`** (location: _filled in when built_).
+1. Double-click **`Omarchy-J773g-developer.pkg`** in your home folder under `Omarchy-J773g` (`~/Omarchy-J773g/`, 3.4 GB, SHA-256 `6cfb60e46d14ce8d449bb1ed177f2c88442c321c621400217fe64df1c6e29395`). A version with Wi-Fi calibration, `Omarchy-J773g-developer-wifi.pkg`, will appear in the same folder later; either works, the Wi-Fi one is better.
    If macOS blocks it, right-click the file → **Open**, or go to System Settings → Privacy & Security → **Open Anyway**.
 2. Open **Omarchy Installer** from Applications and follow it. It shrinks the macOS partition, adds Omarchy beside it, and asks for your Mac password when it needs admin rights.
 3. At the end it asks you to shut down. It also records how long each step took, for the install-speed measurement.
