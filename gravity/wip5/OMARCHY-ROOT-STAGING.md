@@ -18,3 +18,10 @@ pages. Source review indicates the inspected inline frame is decoded using a
 matching Btrfs module and dependencies in an initramfs when it is modular.
 
 Read-only extraction from Btrfs root ID 256 shows the staged `/etc/fstab` and `/etc/crypttab` have no active entries. Its `/etc/mkinitcpio.conf` uses `HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems fsck)` with an empty explicit `MODULES` array. These are generic image defaults, not a configured mini installation. A future boot target needs an explicit root identity and an initramfs built for the exact candidate kernel; blindly running `autodetect` against the currently booted Gravity kernel may omit modules needed by that candidate. The latest diagnostic config has Apple NVMe, DART, SART and Btrfs built in, but its USB DT nodes remain disabled and firmware or network availability is not established. No root image, boot files or host configuration were changed by this inspection.
+
+The same candidate is preserved here as
+`btrfs-restore-inline-zstd-draft.patch` (SHA-1
+`46ab7d261ce4736e129fb3fb9b7dac2fbd4ed4d7`); context formatting differs from
+the cached original. It reverse-checks against the patched btrfs-progs v7.1
+source with `git apply --unidiff-zero`, and needs broader review before an
+upstream proposal.
