@@ -62,9 +62,10 @@ An isolated proposal is saved as `mesa103-failed-render-draft.patch`, SHA-256
 It discards the full mixed batch on render preparation failure, marks a context
 fault and avoids publishing timestamp results for discarded work. A host
 harness exercised the modified dispatch and query-cancellation functions with
-stubs, and the patch applies to the extracted Gravity build-103 source. It has
-not been compiled as Mesa, tested on a GPU, or reviewed for real buffer
-lifetimes and state-tracker behavior. It does not fix the separate unchecked
+stubs, and the patch applies to the extracted Gravity build-103 source. Its
+three changed C files compiled against the exact source, but it has not been
+GPU-tested or validated for real buffer lifetimes and state-tracker behavior.
+It does not fix the separate unchecked
 encoder allocation/mapping path or establish the original VM_BIND cause. Do
 not deploy or upstream it as a validated fix.
 
@@ -72,5 +73,6 @@ The follow-up `mesa103-failed-render-v2-draft.patch` (SHA-256
 `705a1d749a7f8253bbfbf56313145b1918c23098237fc7d90abbd576ba9f9a52`)
 separates driver-side batch failure from the existing guilty-context flag and
 reports an unknown context reset instead. It applies to the extracted build-103
-source. It remains uncompiled and untested on hardware at this point; reset
-propagation, subsequent submissions and query-buffer semantics remain open.
+source. Its three changed C files also compiled in the isolated build; it
+remains untested on hardware. Reset propagation, subsequent submissions and
+query-buffer semantics remain open.
