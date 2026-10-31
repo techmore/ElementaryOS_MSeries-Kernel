@@ -10,6 +10,7 @@ import shutil
 p = argparse.ArgumentParser(description=__doc__)
 for name in ('stage1', 'stage2', 'uboot', 'source-dtb', 'target-dtb', 'image', 'output'):
     p.add_argument('--' + name, type=Path, required=True)
+p.add_argument('--usb2-trial', action='store_true', help='explicitly select the untested rear USB2 target DTB')
 a = p.parse_args()
 expected = {
     'stage1': '78f2977b1545a38dad54b4cf0f27875d422779805102ed2d4bfb33d346eb8db0',
@@ -17,7 +18,8 @@ expected = {
     'uboot': '192255d6aeb196089f8e699ec90543ef15cf13474a0745ad4cc0aec6a9c2ecf9',
     'image': 'd7503a309985d172374c3ef1045fdab7fb1e4b370118d0f48fbe021221107de7',
     'source_dtb': '56a8d2613d1cdecf319607ffd13cafaba46f65d5c0c7709dc56ef50d707898ef',
-    'target_dtb': '2ba45795b6da0156a3eaef2101f2f45bacc4f77e2992474c59df107b680d5c4d',
+    'target_dtb': ('963a6adaa8a858fe898f4da1a4f49a33dad0730329e646ec9175d0ceb8b789ec'
+                   if a.usb2_trial else '2ba45795b6da0156a3eaef2101f2f45bacc4f77e2992474c59df107b680d5c4d'),
 }
 for name, want in expected.items():
     if hashlib.sha256(getattr(a, name).read_bytes()).hexdigest() != want:
@@ -40,6 +42,7 @@ for f in sorted(a.output.iterdir()):
 (a.output / 'manifest.json').write_text(json.dumps({
     'status': 'uninstalled and unbooted diagnostic draft; stage1 unconfigured',
     'warning': 'No root, boot command, working display, input or recovery is established.',
+    'usb2_trial': a.usb2_trial,
     'artifacts': artifacts,
 }, indent=2) + '\n')
 print('Staged', a.output, '; no boot files changed')
