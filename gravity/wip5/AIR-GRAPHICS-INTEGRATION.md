@@ -110,3 +110,17 @@ resulting J773g DTB compiled (SHA-1 `25f1d50cdd0e70b84d6511d9ac319dbb17d5bbc7`,
 SHA-256 `abff43e472901a55798b0c3ad833574d13c6fc52ea07a7cf7499180ba440cbc9`)
 and its GPU remains disabled. This sequence is experimental and still lacks
 native display #367 patch 7 and mini power/firmware admission.
+
+The m1n1 J713 documentation requires an ESP stage 2 built with `RELEASE=1`,
+`CHAINLOADING=1` and `ESP_STAGE2=1`. A corrected `NO_DISPLAY=1` build is
+staged as `stage2-esp-gpu-handoff.bin` (SHA-1
+`0ad74a7876bc8f5c1491b9b06dcba322b5c2e0c9`, SHA-256
+`d721e93e1a365bab3eedbe43028f378a8116dc8946c666488dbabb0e80522845`).
+`stage2-esp-candidate.bin` appends the marked latest mini DTB and gzip-compressed
+U-Boot in the documented order (SHA-1 `fd20e098e27d06b4ceac8478447f8fbe0e9a094a`,
+SHA-256 `1dc71a2eee1b85f3495cc9cc3967c4053186ac76dc4e1f615f2d80b54c6165d1`).
+The companion bare `stage1-release-gpu-handoff.bin` is unconfigured; it needs a
+reviewed ESP identity and stage2 path. The bundle has not been installed or
+booted, and it predates the separate USB calibration draft. Keep the previous
+boot path available; do not assume the installed Gravity stage1 can load this
+stage2.
