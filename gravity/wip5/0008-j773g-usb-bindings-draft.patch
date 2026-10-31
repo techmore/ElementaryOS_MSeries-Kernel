@@ -1,0 +1,58 @@
+diff --git a/Documentation/devicetree/bindings/iommu/apple,dart.yaml b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+index 44a0499..ad3f8e9 100644
+--- a/Documentation/devicetree/bindings/iommu/apple,dart.yaml
++++ b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+@@ -37,6 +37,7 @@ properties:
+           - enum:
+               - apple,t6020-dart
+               - apple,t8122-dart
++              - apple,t8132-dart
+               - apple,t8140-dart
+               - apple,t8142-dart
+           - const: apple,t8110-dart
+diff --git a/Documentation/devicetree/bindings/phy/apple,atcphy.yaml b/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
+index 3e36244..dc7d1ee 100644
+--- a/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
++++ b/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
+@@ -82,6 +82,9 @@ properties:
+               - apple,t8112-atcphy
+           - const: apple,t8103-atcphy
+       - const: apple,t8103-atcphy
++      - items:
++          - const: apple,t8132-atcphy
++          - const: apple,t8122-atcphy
+       - const: apple,t8140-atcphy
+       - const: apple,t8142-atcphy
+ 
+diff --git a/Documentation/devicetree/bindings/spmi/apple,spmi.yaml b/Documentation/devicetree/bindings/spmi/apple,spmi.yaml
+index f88e21c..1dae751 100644
+--- a/Documentation/devicetree/bindings/spmi/apple,spmi.yaml
++++ b/Documentation/devicetree/bindings/spmi/apple,spmi.yaml
+@@ -25,6 +25,7 @@ properties:
+               - apple,t8012-spmi
+               - apple,t8015-spmi
+               - apple,t8122-spmi
++              - apple,t8132-spmi
+               - apple,t8140-spmi
+           - const: apple,t8103-spmi
+       - items:
+@@ -58,6 +59,7 @@ if:
+         enum:
+           - apple,t8122-spmi
+           - apple,t6030-spmi
++          - apple,t8132-spmi
+           - apple,t6031-spmi
+ then:
+   required:
+diff --git a/Documentation/devicetree/bindings/usb/apple,dwc3.yaml b/Documentation/devicetree/bindings/usb/apple,dwc3.yaml
+index 9dc0adc..fb8a4d4 100644
+--- a/Documentation/devicetree/bindings/usb/apple,dwc3.yaml
++++ b/Documentation/devicetree/bindings/usb/apple,dwc3.yaml
+@@ -24,6 +24,7 @@ properties:
+               - apple,t6000-dwc3
+               - apple,t6020-dwc3
+               - apple,t8112-dwc3
++              - apple,t8132-dwc3
+               - apple,t8140-dwc3
+               - apple,t8142-dwc3
+           - const: apple,t8103-dwc3
