@@ -104,3 +104,14 @@ is missing almost everything:
 - GPU step 1 done as patches in `aurora-port/` (kernel commits 0001-0003 and the m1n1 patch). The kernel
   branch `elementaryos-mseries` is local until the token has the `workflow` scope.
 - Gap 8: **not needed** in Aurora (its G16 driver polls completion; see `aurora-port/README.md`).
+- Display (step 3), sized. The mini's HDMI port is on `dcpext0` with the DP transmitter (`dptx-phy`);
+  Aurora's `t8132-j773g.dts` already keeps `ps_dispext0_fe` and `ps_dptx_phy` on for the boot framebuffer,
+  so a desktop can run at the boot resolution with the GPU rendering into it. Proper mode setting is new
+  bring-up in Aurora, not a gate to widen:
+  - Aurora's M4 display driver (`drivers/gpu/drm/apple/iomfb_m4.c`) probes only on `apple,j713`, only for
+    the internal-panel `dcp` node, and only for DCP firmware UUID `81BAF476-679D-3CC0-8C6A-E6B6FA659D5E`.
+  - The J773g ADT's `dcp`, `dcpext0` and `dcpext1` all carry that same UUID, so the firmware protocol is
+    the one Aurora already speaks.
+  - Aurora has no T8132 `dcpext`/`dispext`/`dptx` device-tree nodes (power domains only). Gravity's
+    `t8132.dtsi` and `t8132-j773g.dts` have them, and its `drm/apple` drives HDMI on the mini; those are the
+    reference for the DT nodes and the DPTX/HDMI link path.
