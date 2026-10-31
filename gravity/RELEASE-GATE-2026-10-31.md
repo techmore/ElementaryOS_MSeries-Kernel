@@ -54,3 +54,13 @@ Startup Disk still lists Gravity, its boot policy entry goes with the stub conta
 - [ ] Network (Ethernet or Wi-Fi)
 - [ ] Claude Code installed and answering on the new system
 - [ ] Reboot and shutdown work; macOS still boots from Startup Disk
+
+## Measurements the clean install makes possible
+
+- **Install speed**: wall-clock time from launching the installer in macOS to (a) the end of the macOS
+  stage, (b) first Linux boot, (c) the desktop, (d) Claude Code answering. Record the installer and image
+  versions and the network used, since the download dominates. Repeat at least twice.
+- **MLX performance**: once the GPU is up, run the same MLX workload (techmore/omarchy-mlx Vulkan backend)
+  on Linux and on macOS on this mini: tokens per second for prompt and generation on a fixed model and
+  prompt, plus power if available (joshuaswarren/coreglass measures where Linux inference loses speed).
+  Record kernel, Mesa and MLX commits with each result.
