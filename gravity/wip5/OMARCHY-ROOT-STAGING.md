@@ -164,3 +164,9 @@ explicit `--allow-unprovisioned` option and labels a bundle without a local user
 as an unprovisioned diagnostic. The default still requires the account check.
 This does not establish interactive access, recovery, a working loader, or a
 bootable desktop.
+
+Additional disposable user/mount-namespace fixtures bind a pseudo-terminal only
+inside the test namespace and mock the staged chroot commands. They verified the
+provisioning command order, resulting `0440` wheel rule, and removal of the
+temporary policy on a simulated password failure. These fixtures do not run the
+real staged `useradd`, `passwd`, PAM, `visudo`, or a real password prompt.
