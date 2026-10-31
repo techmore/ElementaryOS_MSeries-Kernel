@@ -13,3 +13,15 @@ graphics path. It does not identify whether Mesa, the kernel GPU driver,
 firmware, or a different interaction caused the fault, and does not establish
 that the current Plasma greeter has the same problem. No GPU workload or
 changes to the running desktop were made for this inspection.
+
+The crash journal identifies Gravity Mesa build `102`; the currently installed
+package is build `103`. The archived build-102 binary and matching debug
+package have build ID `600230e15a50bf5241f015700cd59d40360c6981`.
+`eu-addr2line` resolves the journal's library-relative address `0x1506800`
+to `src/gallium/drivers/asahi/agx_batch.c:87`, the `agx_bo_create` call in
+`agx_encoder_allocate`. The next instruction in the archived binary is at
+that address, immediately after the allocation call. The short recorded stack
+does not establish the allocator's return value or the original faulting
+instruction, so a null allocation or any specific GPU failure remains a
+hypothesis. The exact build-102 packages were retrieved from the Gravity COPR
+archive for offline inspection; no package was installed.
