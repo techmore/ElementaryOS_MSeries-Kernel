@@ -32,3 +32,20 @@ The partial patch passed `git apply --check` against the Air-forward scratch
 snapshot. No GPU build or hardware test is claimed. After #366 is integrated,
 replay the graphics series on the completed prerequisite, resolve each conflict,
 compile the resulting drivers and only then prepare a hardware qualification.
+
+`graphics-0002-g16-exploratory.patch` preserves the G16 source and an initial
+WIP-first resolution of shared UAT/page-table conflicts, together with the
+G16 Kconfig/Makefile integration. It is based on #367 patch 9 and the
+preceding Air-forward snapshot; apply with `git apply --unidiff-zero` after
+checking the exact base and applying the other prerequisites. It is an
+experimental source record, not a deployable patch series: the ownership and
+page-table conflict choices still need semantic review, and patch 6's display
+DART merge is incomplete. The J713 firmware and board admission remain J713
+specific; they do not qualify the J773g mini.
+
+On 2026-10-30, an isolated WIP5-derived tree with these changes and the
+partial #367 prerequisites built `drivers/gpu/drm/asahi/asahi.o` with
+`CONFIG_DRM_ASAHI=m`, G15, G16 and UAT adoption enabled. This compiled Rust
+and C and linked the driver object; it did not run final module modpost, build
+an integrated kernel, verify DMA lifetime, or exercise hardware. The source
+patch SHA-1 is `30d21d1a3565d08a648a0008098f7ad24a4d4127`.
