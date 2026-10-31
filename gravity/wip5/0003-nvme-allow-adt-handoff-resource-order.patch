@@ -1,0 +1,26 @@
+diff --git a/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml b/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
+index fc8a4afd5..d66138c75 100644
+--- a/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
++++ b/Documentation/devicetree/bindings/nvme/apple,nvme-ans.yaml
+@@ -39,11 +39,16 @@ properties:
+       - description: NVMMU registers, a separate region since T8132
+ 
+   reg-names:
+-    minItems: 2
+-    items:
+-      - const: nvme
+-      - const: ans
+-      - const: nvmmu
++    oneOf:
++      - minItems: 2
++        items:
++          - const: nvme
++          - const: ans
++          - const: nvmmu
++      - items:
++          - const: nvme
++          - const: nvmmu
++          - const: ans
+ 
+   resets:
+     maxItems: 1
