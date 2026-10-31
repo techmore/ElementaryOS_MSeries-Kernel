@@ -85,3 +85,12 @@ the exact Gravity 103 source. A failed query write can still leave an old
 availability value, and encoding before the later flush, actual buffer cleanup,
 reset handling and the original unchecked allocation remain unresolved. It is
 an isolated draft, not an installed or hardware-validated fix.
+
+The separate, explicitly incomplete `mesa103-allocation-incomplete-v4.patch`
+(SHA-256 `c716c6f3756ed54edf0b2b1fe05509cc1f7c607f852d7e2d9f5733876464b86e`)
+adds checks and failure propagation for initial encoder allocation and mapping,
+and prevents mmap ioctl errors from continuing with an invalid offset. Seven
+changed C files compiled against the exact Gravity 103 source. Secondary
+encoder allocations, pool continuation, other mapping callers and nested
+context-loss handling remain incomplete; no fault injection or hardware run
+has validated it. This is a work-in-progress artifact and must not be deployed.
