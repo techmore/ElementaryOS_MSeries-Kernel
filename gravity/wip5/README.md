@@ -47,3 +47,6 @@ not replace the WIP base.
 The [30-day Aurora branch review](AURORA-BRANCH-REVIEW-2026-10-30.md)
 tracks all 125 heads checked against the newer integration base and identifies
 mini-relevant work and hardware-specific references.
+
+[Omarchy ARM root staging](OMARCHY-ROOT-STAGING.md) records the verified
+generic userspace artifact and remaining mini boot requirements.
