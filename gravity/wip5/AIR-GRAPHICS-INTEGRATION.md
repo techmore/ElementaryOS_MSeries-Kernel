@@ -49,3 +49,14 @@ partial #367 prerequisites built `drivers/gpu/drm/asahi/asahi.o` with
 and C and linked the driver object; it did not run final module modpost, build
 an integrated kernel, verify DMA lifetime, or exercise hardware. The source
 patch SHA-1 is `30d21d1a3565d08a648a0008098f7ad24a4d4127`.
+
+`0010-m1n1-j773g-gpu-resource-draft.patch` adapts the pinned Air m1n1
+`cda8314d2121c0279e4ca811bc6c6293a663e5d0` to publish validated mini GPU
+resources only with an explicit empty opt-in property on a disabled node. It
+keeps the device disabled and does not relax the firmware identity or PMP
+board gates. The real m1n1 C object compiled, and its real-libfdt host harness
+passed the existing Air cases and mini opt-in, missing/malformed opt-in and
+already-enabled refusal cases. The patch passes `git apply --unidiff-zero
+--check` against that pin; it requires mini DT placeholders and a U-Boot
+GPU-resource importer before the handoff can be used. It has not been tested
+on hardware and is not part of the built loader binary above.
