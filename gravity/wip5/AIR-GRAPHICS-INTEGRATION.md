@@ -142,3 +142,16 @@ storage session initialization and retention are not established. Do not use
 that packed bundle for a boot attempt. The separately staged direct rescue
 uses `boot=`, whose `boot_storage_load()` initializes NVMe and whose successful
 handoff sets the retention flag; that source path is also untested on hardware.
+
+`0019-m1n1-j773g-inline-nvme.patch` addresses that source-level gap for an
+explicit J773g/T8132, matching firmware target and ANS-alias opt-in: it
+initializes the session, requires a live post-M4 controller before handoff,
+retains it for the next stage and cleans up on failure. The payload object and
+complete ESP stage 2 linked, and `verify-m1n1-inline-nvme.py` passed nine
+mocked cases against the patched control-flow fragments. The revised raw stage
+2 SHA-1 is `1a47b08343d866a871b14f812ba930dfc801cb3f`; a new packed
+DTB/U-Boot candidate is SHA-1 `6f022a61c9d4ad599fe6bf5533f42f58addf5205`
+and SHA-256 `d6dd789d1d2bb272d92010266027f565b58c8e7a8a9fca81406ae3302cacfafe`.
+Both are staged locally. This corrects the identified source path but does not
+prove live ANS initialization, U-Boot adoption, disk integrity or boot safety.
+The older packed candidate retains the blocker and should not be used.
