@@ -33,7 +33,7 @@ cleanup() {
   rmdir -- "$mountpoint" || true
 }
 trap cleanup EXIT
-mount -t btrfs -o ro,nologreplay,loop,subvolid=256 -- "$image" "$mountpoint"
+mount -t btrfs -o ro,rescue=nologreplay,loop,subvolid=256 -- "$image" "$mountpoint"
 mounted=1
 btrfs subvolume create "$target"
 echo "Copying to $target; a failure leaves the partial subvolume for inspection."
