@@ -26,12 +26,16 @@ int main(int argc,char **argv) {
  unsigned char good[]={2,1,2,3,4,5}, bad[]={1,1,2,3,4,5}, zero[6]={0};
  assert(!fdt_setprop(s,sn,"local-mac-address",good,6));
  assert(j773_ethernet_mac(d,s)==0); assert(!fdt_getprop(d,dn,"local-mac-address",NULL));
+ assert(!fdt_setprop_u32(d,chosen,"u-boot,j773g-ethernet-mac",1));
+ assert(j773_ethernet_mac(d,s)<0);
+ chosen=fdt_path_offset(d,"/chosen"); assert(!fdt_delprop(d,chosen,"u-boot,j773g-ethernet-mac"));
  assert(!fdt_setprop(d,chosen,"u-boot,j773g-ethernet-mac",NULL,0));
  dn=fdt_path_offset(d,"/soc/pcie@1cb0000000/pci@2,0/ethernet@0,0");
  assert(j773_ethernet_mac(d,s)==0); const void *m=fdt_getprop(d,dn,"local-mac-address",&len);
  assert(m && len==6 && !memcmp(m,good,6));
  assert(!strcmp(fdt_getprop(d,dn,"status",NULL),"disabled"));
  assert(!fdt_setprop(s,sn,"local-mac-address",bad,6)); assert(j773_ethernet_mac(d,s)<0);
+ m=fdt_getprop(d,dn,"local-mac-address",&len); assert(m && len==6 && !memcmp(m,good,6));
  assert(!fdt_setprop(s,sn,"local-mac-address",zero,6)); assert(j773_ethernet_mac(d,s)<0);
  assert(!fdt_setprop(s,sn,"local-mac-address",good,5)); assert(j773_ethernet_mac(d,s)<0);
  assert(!fdt_setprop(s,sn,"local-mac-address",good,6));
