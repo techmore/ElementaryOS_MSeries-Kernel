@@ -1,0 +1,36 @@
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+index dbccf8e..17e4b8c 100644
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -3145,6 +3145,17 @@ static const char *apple_dart_t8110_v2_fault_name(u32 exception)
+ 	return "unknown";
+ }
+ 
++/* The v2 fault bitmap and per-stream status live beyond the base page. */
++static bool apple_dart_t8110_v2_mmio_valid(u16 version, unsigned int streams,
++					  resource_size_t size)
++{
++	if (version < 0x0202)
++		return true;
++	if (!streams || streams > DART_MAX_STREAMS)
++		return false;
++	return size >= DART_T8110_EXCEPTION_ADDR_HI(streams - 1) + sizeof(u32);
++}
++
+ static bool apple_dart_t8110_v2_block_pending(u16 version, u32 block_error)
+ {
+ 	return version >= 0x0203 &&
+@@ -3532,6 +3543,13 @@ static int apple_dart_probe(struct platform_device *pdev)
+ 	}
+ 
+ params_done:
++	if (dart->hw->type == DART_T8110 &&
++	    !apple_dart_t8110_v2_mmio_valid(dart->version, dart->num_streams,
++					   resource_size(res))) {
++		dev_err(dev, "DART v2 fault registers exceed MMIO resource %pr\n", res);
++		ret = -EINVAL;
++		goto err_clk_disable;
++	}
+ 	dart->dma_min = 0;
+ 	dart->dma_max = DMA_BIT_MASK(dart->ias);
+ 	dart->dma_offset = 0;

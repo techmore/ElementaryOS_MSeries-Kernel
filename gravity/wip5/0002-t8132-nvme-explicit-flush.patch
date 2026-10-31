@@ -1,0 +1,13 @@
+diff --git a/drivers/nvme/host/apple.c b/drivers/nvme/host/apple.c
+index d3ef47fa8..f51002604 100644
+--- a/drivers/nvme/host/apple.c
++++ b/drivers/nvme/host/apple.c
+@@ -2627,6 +2627,8 @@ static const struct apple_nvme_hw apple_nvme_t8132_hw = {
+ 	.has_separate_nvmmu = true,
+ 	.needs_ioq_registers = true,
+ 	.max_queue_depth = 64,
++	/* J713 testing found that explicit flushes are required across reset. */
++	.quirks = NVME_QUIRK_BROKEN_FUA,
+ };
+ 
+ static const struct apple_nvme_hw apple_nvme_t8140_hw = {

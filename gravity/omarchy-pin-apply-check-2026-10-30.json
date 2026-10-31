@@ -1,0 +1,342 @@
+{
+  "method": "git apply --check per patch independently against pristine source; not a series replay or semantic review",
+  "source": "https://github.com/omacom/linux-aurora",
+  "commit": "3bdf11d3acb6ea1511b0611ddd40ac5336b7b215",
+  "results": [
+    {
+      "file": "0001-arm64-dts-apple-Add-minimal-t8132-M4-device-trees.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j713.dts:15\nerror: arch/arm64/boot/dts/apple/t8132-j713.dts: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-pmgr.dtsi:152\nerror: arch/arm64/boot/dts/apple/t8132-pmgr.dtsi: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:64\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0002-t8132-smc.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:454\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0003-dts-apple-t8132-Add-usb-atcphy-nodes.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:23\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:481\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0004-t8132-pcie.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:114\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi:15\nerror: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:720\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0005-PCI-pwrctrl-Export-per-device-APIs.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/pci/pwrctrl/core.c:314\nerror: drivers/pci/pwrctrl/core.c: patch does not apply"
+    },
+    {
+      "file": "0006-PCI-apple-Integrate-pwrctrl-API.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/pci/controller/Kconfig:47\nerror: drivers/pci/controller/Kconfig: patch does not apply\nerror: patch failed: drivers/pci/controller/pcie-apple.c:30\nerror: drivers/pci/controller/pcie-apple.c: patch does not apply"
+    },
+    {
+      "file": "0007-t8132-wifi-pwren.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi:218\nerror: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:799\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0008-dt-bindings-nvme-Add-apple-t8132-nvme-ans2-compatibl.patch",
+      "applies_independently": true,
+      "diagnostic": ""
+    },
+    {
+      "file": "0009-nvme-apple-add-t8132-M4-ANS2-NVMe-support.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/nvme/host/apple.c:42\nerror: drivers/nvme/host/apple.c: patch does not apply"
+    },
+    {
+      "file": "0010-arm64-dts-apple-t8132-Add-NVMe-nodes.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:860\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0011-drm-apple-bring-up-T8132-DCP-hotplug.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: Documentation/devicetree/bindings/cpufreq/apple,cluster-cpufreq.yaml:36\nerror: Documentation/devicetree/bindings/cpufreq/apple,cluster-cpufreq.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/iommu/apple,dart.yaml:32\nerror: Documentation/devicetree/bindings/iommu/apple,dart.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/iommu/apple,sart.yaml:34\nerror: Documentation/devicetree/bindings/iommu/apple,sart.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml:31\nerror: Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/mfd/apple,smc.yaml:20\nerror: Documentation/devicetree/bindings/mfd/apple,smc.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/pci/apple,pcie.yaml:44\nerror: Documentation/devicetree/bindings/pci/apple,pcie.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/spmi/apple,spmi.yaml:25\nerror: Documentation/devicetree/bindings/spmi/apple,spmi.yaml: patch does not apply\nerror: patch failed: Documentation/devicetree/bindings/usb/apple,dwc3.yaml:24\nerror: Documentation/devicetree/bindings/usb/apple,dwc3.yaml: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:21\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi:16\nerror: arch/arm64/boot/dts/apple/t8132-jxxx.dtsi: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-pmgr.dtsi:152\nerror: arch/arm64/boot/dts/apple/t8132-pmgr.dtsi: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:212\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply\nerror: patch failed: arch/arm64/kernel/pi/idreg-override.c:176\nerror: arch/arm64/kernel/pi/idreg-override.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/Makefile:10\nerror: drivers/gpu/drm/apple/Makefile: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/afk.c:5\nerror: drivers/gpu/drm/apple/afk.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/afk.h:9\nerror: drivers/gpu/drm/apple/afk.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/apple_drv.c:10\nerror: drivers/gpu/drm/apple/apple_drv.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/av.c:393\nerror: drivers/gpu/drm/apple/av.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/connector.c:115\nerror: drivers/gpu/drm/apple/connector.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp-internal.h:18\nerror: drivers/gpu/drm/apple/dcp-internal.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp.c:7\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp.h:56\nerror: drivers/gpu/drm/apple/dcp.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dptxep.c:5\nerror: drivers/gpu/drm/apple/dptxep.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/epic/dpavservep.c:21\nerror: drivers/gpu/drm/apple/epic/dpavservep.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/ibootep.c:2\nerror: drivers/gpu/drm/apple/ibootep.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb.c:191\nerror: drivers/gpu/drm/apple/iomfb.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb.h:290\nerror: drivers/gpu/drm/apple/iomfb.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_template.c:20\nerror: drivers/gpu/drm/apple/iomfb_template.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_template.h:31\nerror: drivers/gpu/drm/apple/iomfb_template.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_v12_3.c:3\nerror: drivers/gpu/drm/apple/iomfb_v12_3.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_v13_3.c:3\nerror: drivers/gpu/drm/apple/iomfb_v13_3.c: patch does not apply\nerror: drivers/gpu/drm/apple/iomfb_v26_6.c: already exists in working directory\nerror: drivers/gpu/drm/apple/iomfb_v26_6.h: already exists in working directory\nerror: patch failed: drivers/gpu/drm/apple/parser.c:366\nerror: drivers/gpu/drm/apple/parser.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/parser.h:93\nerror: drivers/gpu/drm/apple/parser.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/plane.c:333\nerror: drivers/gpu/drm/apple/plane.c: patch does not apply\nerror: patch failed: drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h:19\nerror: drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h: patch does not apply\nerror: patch failed: drivers/phy/apple/atc.c:615\nerror: drivers/phy/apple/atc.c: patch does not apply\nerror: patch failed: drivers/soc/apple/mailbox.c:251\nerror: drivers/soc/apple/mailbox.c: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit-crashlog.c:208\nerror: drivers/soc/apple/rtkit-crashlog.c: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit-internal.h:38\nerror: drivers/soc/apple/rtkit-internal.h: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit.c:61\nerror: drivers/soc/apple/rtkit.c: patch does not apply\nerror: patch failed: drivers/tty/serial/Kconfig:97\nerror: drivers/tty/serial/Kconfig: patch does not apply\nerror: drivers/tty/serial/apple_dockchannel_early_uart.c: already exists in working directory\nerror: patch failed: drivers/usb/dwc3/dwc3-apple.c:444\nerror: drivers/usb/dwc3/dwc3-apple.c: patch does not apply\nerror: patch failed: drivers/usb/typec/Makefile:5\nerror: drivers/usb/typec/Makefile: patch does not apply"
+    },
+    {
+      "file": "0012-drm-apple-bring-up-T8132-HDMI-audio.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: Documentation/devicetree/bindings/dma/apple,sio.yaml:23\nerror: Documentation/devicetree/bindings/dma/apple,sio.yaml: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:18\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply\nerror: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:438\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply\nerror: patch failed: drivers/dma/apple-sio.c:411\nerror: drivers/dma/apple-sio.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/afk.c:748\nerror: drivers/gpu/drm/apple/afk.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/afk.h:68\nerror: drivers/gpu/drm/apple/afk.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/audio.c:39\nerror: drivers/gpu/drm/apple/audio.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/av.c:69\nerror: drivers/gpu/drm/apple/av.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/av.h:9\nerror: drivers/gpu/drm/apple/av.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp.c:672\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dptxep.c:533\nerror: drivers/gpu/drm/apple/dptxep.c: patch does not apply"
+    },
+    {
+      "file": "0013-drm-apple-add-writable-DPTX-HPD-debug-control.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/connector.c:166\nerror: drivers/gpu/drm/apple/connector.c: patch does not apply"
+    },
+    {
+      "file": "0014-KVM-arm64-Add-Apple-M4-Donan-to-broken-SEIS-workarou.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/include/asm/cputype.h:153\nerror: arch/arm64/include/asm/cputype.h: patch does not apply"
+    },
+    {
+      "file": "0015-arm64-dts-apple-enable-the-T8132-Mac-mini-SSD.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:111\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply"
+    },
+    {
+      "file": "0016-drm-asahi-add-asynchronous-M4-GPU-prototype-driver.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/asahi/Makefile:1\nerror: drivers/gpu/drm/asahi/Makefile: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit-internal.h:39\nerror: drivers/soc/apple/rtkit-internal.h: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit.c:171\nerror: drivers/soc/apple/rtkit.c: patch does not apply\nerror: patch failed: include/linux/soc/apple/rtkit.h:105\nerror: include/linux/soc/apple/rtkit.h: patch does not apply\nerror: patch failed: rust/kernel/drm/file.rs:20\nerror: rust/kernel/drm/file.rs: patch does not apply\nerror: patch failed: rust/kernel/drm/gem/shmem.rs:448\nerror: rust/kernel/drm/gem/shmem.rs: patch does not apply\nerror: rust/kernel/iosys_map.rs: No such file or directory\nerror: patch failed: rust/kernel/soc/apple/rtkit.rs:242\nerror: rust/kernel/soc/apple/rtkit.rs: patch does not apply"
+    },
+    {
+      "file": "0017-drm-asahi-simplify-M4-validation-and-firmware-encode.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_queue.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_util.rs: No such file or directory"
+    },
+    {
+      "file": "0018-drm-asahi-batch-M4-memory-publication-and-clean-only.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_mem.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory"
+    },
+    {
+      "file": "0019-drm-asahi-enable-local-indirect-compute-on-M4.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_cdm.rs: No such file or directory"
+    },
+    {
+      "file": "0020-drm-asahi-pipeline-M4-firmware-submissions-and-retir.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory"
+    },
+    {
+      "file": "0021-drm-asahi-give-M4-userspace-queues-independent-firmw.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_queue.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory"
+    },
+    {
+      "file": "0022-drm-asahi-retire-M4-work-on-firmware-notifications.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_fw.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory"
+    },
+    {
+      "file": "0023-drm-asahi-pipeline-M4-engines-with-independent-resou.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory"
+    },
+    {
+      "file": "0024-drm-asahi-batch-M4-submissions-and-scope-mapping-syn.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_mem.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory"
+    },
+    {
+      "file": "0025-drm-asahi-queue-M4-dependencies-in-firmware-and-shar.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_cdm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_queue.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory"
+    },
+    {
+      "file": "0026-drm-asahi-index-M4-memory-and-queue-pending-cache-cl.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_pgtable.rs: No such file or directory"
+    },
+    {
+      "file": "0027-drm-asahi-reuse-M4-Work-and-scratch-after-notifier-r.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory"
+    },
+    {
+      "file": "0028-drm-asahi-enable-native-M4-render-scheduling-and-sha.patch",
+      "applies_independently": false,
+      "diagnostic": "error: arch/arm64/configs/m4_gpu_defconfig: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory"
+    },
+    {
+      "file": "0029-drm-asahi-adapt-M4-to-the-desktop-kernel.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: patch failed: drivers/soc/apple/rtkit.c:833\nerror: drivers/soc/apple/rtkit.c: patch does not apply\nerror: patch failed: include/linux/soc/apple/rtkit.h:105\nerror: include/linux/soc/apple/rtkit.h: patch does not apply\nerror: patch failed: rust/kernel/drm/file.rs:20\nerror: rust/kernel/drm/file.rs: patch does not apply\nerror: rust/kernel/iosys_map.rs: No such file or directory"
+    },
+    {
+      "file": "0030-drm-asahi-retire-M4-GEM-mappings-when-handles-close.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: patch failed: rust/kernel/drm/gem/shmem.rs:448\nerror: rust/kernel/drm/gem/shmem.rs: patch does not apply"
+    },
+    {
+      "file": "0031-drm-asahi-report-pending-M4-work-on-unowned-firmware.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory"
+    },
+    {
+      "file": "0032-drm-asahi-wire-M4-GPU-into-the-T8132-desktop-platfor.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/asahi/Kconfig:12\nerror: drivers/gpu/drm/asahi/Kconfig: patch does not apply\nerror: drivers/gpu/drm/asahi/g16_platform.rs: No such file or directory"
+    },
+    {
+      "file": "0033-drm-asahi-share-software-floating-point-with-the-M4-.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/m4_float.rs: No such file or directory"
+    },
+    {
+      "file": "0034-drm-asahi-handle-M4-firmware-counter-rollover.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_compute.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory"
+    },
+    {
+      "file": "0035-drm-asahi-report-the-M4-GPU-revision-from-hardware.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory"
+    },
+    {
+      "file": "0036-drm-asahi-release-M4-buffer-backing-after-VM-unmap.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory"
+    },
+    {
+      "file": "0037-drm-asahi-restore-the-M4-128-KiB-tile-memory-limit.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory"
+    },
+    {
+      "file": "0038-drm-asahi-support-fragment-stage-render-barriers-on-.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_queue.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: patch failed: include/uapi/drm/asahi_drm.h:213\nerror: include/uapi/drm/asahi_drm.h: patch does not apply"
+    },
+    {
+      "file": "0039-drm-asahi-grow-M4-tiler-backing-from-a-shared-VM-are.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/asahi_m4.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_render.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_tvb.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_vm.rs: No such file or directory"
+    },
+    {
+      "file": "0040-drm-apple-recognize-the-26.6.2-DCP-firmware-compatib.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/dcp.c:1596\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply"
+    },
+    {
+      "file": "0041-drm-apple-support-fragmented-compact-AFK-messages.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/afk.c:3\nerror: drivers/gpu/drm/apple/afk.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/afk.h:10\nerror: drivers/gpu/drm/apple/afk.h: patch does not apply"
+    },
+    {
+      "file": "0042-drm-apple-fetch-and-validate-complete-DCP-audio-capa.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/audio.c:27\nerror: drivers/gpu/drm/apple/audio.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/av.c:69\nerror: drivers/gpu/drm/apple/av.c: patch does not apply"
+    },
+    {
+      "file": "0043-drm-apple-constrain-PCM-formats-to-the-retained-T813.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/audio.c:47\nerror: drivers/gpu/drm/apple/audio.c: patch does not apply"
+    },
+    {
+      "file": "0044-dt-bindings-iommu-apple-dart-describe-the-usable-DMA.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: Documentation/devicetree/bindings/iommu/apple,dart.yaml:46\nerror: Documentation/devicetree/bindings/iommu/apple,dart.yaml: patch does not apply"
+    },
+    {
+      "file": "0045-dmaengine-apple-admac-support-T8132-split-channel-ba.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: Documentation/devicetree/bindings/dma/apple,admac.yaml:39\nerror: Documentation/devicetree/bindings/dma/apple,admac.yaml: patch does not apply\nerror: patch failed: drivers/dma/apple-admac.c:8\nerror: drivers/dma/apple-admac.c: patch does not apply"
+    },
+    {
+      "file": "0046-ASoC-apple-mca-support-the-T8132-banked-TX-path.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: sound/soc/apple/mca.c:219\nerror: sound/soc/apple/mca.c: patch does not apply"
+    },
+    {
+      "file": "0047-ASoC-tas2764-add-fail-closed-protected-attenuation-h.patch",
+      "applies_independently": true,
+      "diagnostic": ""
+    },
+    {
+      "file": "0048-ASoC-apple-add-kernel-protected-J773g-speaker-playba.patch",
+      "applies_independently": true,
+      "diagnostic": ""
+    },
+    {
+      "file": "0049-arm64-dts-apple-add-T8132-audio-controllers-and-powe.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:668\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    },
+    {
+      "file": "0050-arm64-dts-apple-enable-the-J773g-internal-speaker.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:17\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply"
+    },
+    {
+      "file": "0051-arm64-dts-apple-use-the-display-FE-domain-for-J773g-.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132-j773g.dts:46\nerror: arch/arm64/boot/dts/apple/t8132-j773g.dts: patch does not apply"
+    },
+    {
+      "file": "0052-Bluetooth-hci_bcm4377-require-only-beamforming-calib.patch",
+      "applies_independently": true,
+      "diagnostic": ""
+    },
+    {
+      "file": "0053-ASoC-apple-t8132-rely-on-ALSA-for-underrun-stopping.patch",
+      "applies_independently": false,
+      "diagnostic": "error: sound/soc/apple/t8132/pcm.c: No such file or directory\nerror: sound/soc/apple/t8132/progress.h: No such file or directory"
+    },
+    {
+      "file": "0054-drm-apple-dcp-match-26.6.0-firmware-compatibility-st.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/dcp.c:1596\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply"
+    },
+    {
+      "file": "0055-ASoC-apple-t8132-remove-the-codec-speaker-volume-con.patch",
+      "applies_independently": false,
+      "diagnostic": "error: sound/soc/apple/t8132/pcm.c: No such file or directory"
+    },
+    {
+      "file": "0056-drm-apple-select-T8132-DCP-protocol-from-exact-OS-fi.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/dcp.c:1573\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply"
+    },
+    {
+      "file": "0057-Add-MacBook-Air-M4-MTP-keyboard-trackpad-support.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: Documentation/devicetree/bindings/iommu/apple,dart.yaml:60\nerror: Documentation/devicetree/bindings/iommu/apple,dart.yaml: patch does not apply\nerror: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:75\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply\nerror: patch failed: drivers/iommu/apple-dart.c:230\nerror: drivers/iommu/apple-dart.c: patch does not apply\nerror: patch failed: drivers/soc/apple/dockchannel.c:12\nerror: drivers/soc/apple/dockchannel.c: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit-helper.c:19\nerror: drivers/soc/apple/rtkit-helper.c: patch does not apply"
+    },
+    {
+      "file": "0058-HID-dockchannel-retain-BUG_ON-removal-and-defer-tear.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/Kconfig:5\nerror: drivers/hid/dockchannel-hid/Kconfig: patch does not apply\nerror: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:17\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply\nerror: patch failed: drivers/soc/apple/dockchannel.c:12\nerror: drivers/soc/apple/dockchannel.c: patch does not apply\nerror: patch failed: drivers/soc/apple/rtkit-helper.c:9\nerror: drivers/soc/apple/rtkit-helper.c: patch does not apply\nerror: patch failed: include/linux/soc/apple/dockchannel.h:21\nerror: include/linux/soc/apple/dockchannel.h: patch does not apply\nerror: patch failed: include/linux/soc/apple/rtkit.h:223\nerror: include/linux/soc/apple/rtkit.h: patch does not apply"
+    },
+    {
+      "file": "0059-HID-dockchannel-use-native-LE-protocol-fields.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:40\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply"
+    },
+    {
+      "file": "0060-HID-dockchannel-preserve-baseline-command-and-failur.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:17\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply"
+    },
+    {
+      "file": "0061-HID-dockchannel-retain-baseline-firmware-allocation-.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:181\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply"
+    },
+    {
+      "file": "0062-HID-dockchannel-leave-legacy-parsing-and-GPIO-discov.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:524\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply"
+    },
+    {
+      "file": "0063-HID-dockchannel-retain-FIFO-reads-and-baseline-packe.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/hid/dockchannel-hid/dockchannel-hid.c:203\nerror: drivers/hid/dockchannel-hid/dockchannel-hid.c: patch does not apply"
+    },
+    {
+      "file": "0064-iommu-apple-dart-leave-existing-probe-power-cleanup-.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/iommu/apple-dart.c:1541\nerror: drivers/iommu/apple-dart.c: patch does not apply"
+    },
+    {
+      "file": "0065-drm-apple-bring-up-the-J715-internal-panel-on-firmwa.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: drivers/gpu/drm/apple/Kconfig:5\nerror: drivers/gpu/drm/apple/Kconfig: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp-internal.h:304\nerror: drivers/gpu/drm/apple/dcp-internal.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp.c:19\nerror: drivers/gpu/drm/apple/dcp.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/dcp_backlight.c:215\nerror: drivers/gpu/drm/apple/dcp_backlight.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_template.c:16\nerror: drivers/gpu/drm/apple/iomfb_template.c: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_template.h:58\nerror: drivers/gpu/drm/apple/iomfb_template.h: patch does not apply\nerror: patch failed: drivers/gpu/drm/apple/iomfb_v26_6.c:76\nerror: drivers/gpu/drm/apple/iomfb_v26_6.c: patch does not apply"
+    },
+    {
+      "file": "0066-drm-asahi-poll-M4-completion-when-a-firmware-notific.patch",
+      "applies_independently": false,
+      "diagnostic": "error: drivers/gpu/drm/asahi/g16_drm.rs: No such file or directory\nerror: drivers/gpu/drm/asahi/g16_runtime.rs: No such file or directory"
+    },
+    {
+      "file": "0067-arm64-dts-apple-t8132-add-the-SMC-reboot-node.patch",
+      "applies_independently": false,
+      "diagnostic": "error: patch failed: arch/arm64/boot/dts/apple/t8132.dtsi:836\nerror: arch/arm64/boot/dts/apple/t8132.dtsi: patch does not apply"
+    }
+  ]
+}

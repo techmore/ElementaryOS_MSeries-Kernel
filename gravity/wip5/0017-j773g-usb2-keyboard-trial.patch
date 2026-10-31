@@ -1,0 +1,27 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g-usb2-keyboard-trial.dtsi b/arch/arm64/boot/dts/apple/t8132-j773g-usb2-keyboard-trial.dtsi
+new file mode 100644
+index 0000000..dc4165e
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-j773g-usb2-keyboard-trial.dtsi
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * Optional, unqualified J773g rear-left USB2 keyboard bring-up.
++ * Not included in the ordinary board tree. Requires the T8132 ATC USB2
++ * driver and the DART v2 MMIO bounds guard; a short v2 DART must refuse
++ * probe instead of touching unavailable fault registers. No USB3 banks,
++ * calibration or other rear Type-C controller is enabled here.
++ */
++&nub_spmi_a0 {
++	status = "okay";
++};
++
++/* This SPMI controller is shared: only the keyboard port is admitted. */
++&hpm0 { status = "disabled"; };
++&hpm1 { status = "okay"; };
++&hpm3 { status = "disabled"; };
++
++&atcphy1 { status = "okay"; };
++&dwc3_1_dart_0 { status = "okay"; };
++&dwc3_1_dart_1 { status = "okay"; };
++&dwc3_1 { status = "okay"; };

@@ -1,0 +1,78 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -22,8 +22,11 @@
+ 	aliases {
+ 		ans = &nvme;
+ 		ans-mbox = &ans_mbox;
++		bluetooth0 = &bluetooth0;
++		ethernet0 = &ethernet0;
+ 		pmp = &pmp;
+ 		sart-ans = &sart;
++		wifi0 = &wifi0;
+ 	};
+ 
+ 	chosen {
+@@ -65,6 +68,62 @@
+  */
+ &framebuffer0 {
+ 	power-domains = <&ps_dispext0_fe>, <&ps_dptx_phy>;
++};
++
++/*
++ * Built-in PCIe (J773g ADT /arm-io/apcie): port 0 carries the BCM4388
++ * Wi-Fi/Bluetooth module ("sakhalin"), port 2 the on-board Ethernet. Port 1
++ * is not wired on this board.
++ */
++&dart_apcie0 {
++	status = "okay";
++};
++
++&dart_apcie2 {
++	status = "okay";
++};
++
++&pcie0 {
++	status = "okay";
++	bus-range = <0 2>;
++	iommu-map = <0x100 &dart_apcie0 16 1>,
++		    <0x200 &dart_apcie2 16 1>;
++	iommu-map-mask = <0xff00>;
++};
++
++&port00 {
++	/* ADT wlan function-reg_on = SMC key gP13; pci-bridge0 PERST# GPIO 0xa3. */
++	pwren-gpios = <&smc_gpio 19 GPIO_ACTIVE_HIGH>;
++	reset-gpios = <&pinctrl_ap 163 GPIO_ACTIVE_LOW>;
++
++	wifi0: wifi@0,0 {
++		compatible = "pci14e4,4434";
++		reg = <0x10000 0x0 0x0 0x0 0x0>;
++		brcm,board-type = "apple,sakhalin";
++		/* To be filled by the loader */
++		local-mac-address = [00 00 00 00 00 00];
++		apple,antenna-sku = "XX";
++	};
++
++	bluetooth0: bluetooth@0,1 {
++		compatible = "pci14e4,5f72";
++		reg = <0x10100 0x0 0x0 0x0 0x0>;
++		brcm,board-type = "apple,sakhalin";
++		/* To be filled by the loader */
++		local-bd-address = [00 00 00 00 00 00];
++	};
++};
++
++&port02 {
++	status = "okay";
++	/* ADT pci-bridge2 PERST# GPIO 0xa5. */
++	reset-gpios = <&pinctrl_ap 165 GPIO_ACTIVE_LOW>;
++
++	ethernet0: ethernet@0,0 {
++		reg = <0x20000 0x0 0x0 0x0 0x0>;
++		/* To be filled by the loader */
++		local-mac-address = [00 10 18 00 00 00];
++	};
+ };
+ 
+ &smc {

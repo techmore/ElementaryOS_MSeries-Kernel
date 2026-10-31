@@ -1,0 +1,162 @@
+diff --git a/arch/arm/include/asm/arch-apple/j713_fdt.h b/arch/arm/include/asm/arch-apple/j713_fdt.h
+index 94072ec..904485d 100644
+--- a/arch/arm/include/asm/arch-apple/j713_fdt.h
++++ b/arch/arm/include/asm/arch-apple/j713_fdt.h
+@@ -12,6 +12,9 @@
+ #endif
+ #endif
+ 
++int apple_j773_import_fdt(void *blob, const void *source);
++int apple_j773_complete_fdt(void *blob);
++
+ int apple_j713_import_fdt(void *blob, const void *source);
+ int apple_j713_complete_fdt(void *blob);
+ 
+diff --git a/arch/arm/mach-apple/board.c b/arch/arm/mach-apple/board.c
+index 20c6f69..d061288 100644
+--- a/arch/arm/mach-apple/board.c
++++ b/arch/arm/mach-apple/board.c
+@@ -1410,11 +1410,17 @@ int ft_board_setup(void *blob, struct bd_info *bd)
+ {
+ 	struct udevice *dev;
+ 	const char *stdoutname;
+-	int node, ret, imported;
++	int node, ret, imported, mini_imported;
+ 
+ 	imported = 0;
+-	if (IS_ENABLED(CONFIG_APPLE_J713_FDT))
+-		imported = apple_j713_import_fdt(blob, gd->fdt_blob);
++	mini_imported = 0;
++	if (IS_ENABLED(CONFIG_APPLE_J713_FDT)) {
++		mini_imported = apple_j773_import_fdt(blob, gd->fdt_blob);
++		if (mini_imported < 0)
++			return mini_imported;
++		if (!mini_imported)
++			imported = apple_j713_import_fdt(blob, gd->fdt_blob);
++	}
+ 	if (imported < 0) {
+ 		printf("J713: refused OS devicetree runtime import (%d)\n", imported);
+ 		return imported;
+@@ -1426,6 +1432,12 @@ int ft_board_setup(void *blob, struct bd_info *bd)
+ 		if (ret)
+ 			return ret;
+ 	}
++	if (IS_ENABLED(CONFIG_APPLE_J713_FDT) && mini_imported) {
++		ret = apple_j773_complete_fdt(blob);
++		if (ret)
++			return ret;
++		printf("J773g: storage devicetree runtime import complete\n");
++	}
+ 	if (IS_ENABLED(CONFIG_APPLE_J713_FDT) && imported) {
+ 		ret = apple_j713_complete_fdt(blob);
+ 		if (ret)
+diff --git a/arch/arm/mach-apple/j713_fdt.c b/arch/arm/mach-apple/j713_fdt.c
+index 04a8b4b..e55c7f3 100644
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -855,6 +855,105 @@ static int j713_chosen(void *dst, const void *src)
+ 	return j713_copy_string(dst, 0, src, 0, "serial-number", 128, true);
+ }
+ 
++/* Import only the storage handoff for an explicitly opted-in J773g tree.
++ * All edits occur on a scratch FDT; no J713 input or display policy is used.
++ */
++int apple_j773_import_fdt(void *blob, const void *source)
++{
++	static const char * const aliases[] = { "ans", "ans-mbox", "sart-ans" };
++	static const int sizes[] = { 48, 16, 16 };
++	const char *identity;
++	void *scratch;
++	int chosen, len, ret, i;
++	size_t capacity = fdt_totalsize(blob), used;
++
++	chosen = fdt_path_offset(blob, "/chosen");
++	identity = chosen < 0 ? NULL : fdt_getprop(blob, chosen, "u-boot,j773g-dtb-source", &len);
++	if (!identity)
++		return 0;
++	if (len != 41 || identity[40])
++		return -EINVAL;
++	for (i = 0; i < 40; i++)
++		if (!((identity[i] >= '0' && identity[i] <= '9') ||
++		      (identity[i] >= 'a' && identity[i] <= 'f')))
++			return -EINVAL;
++	if (blob == source || !source || fdt_check_header(source) ||
++	    fdt_totalsize(source) > J713_FDT_MAX_SOURCE || capacity > J713_FDT_MAX_BUFFER ||
++	    fdt_check_full(source, fdt_totalsize(source)) || fdt_check_full(blob, capacity) ||
++	    fdt_node_check_compatible(source, 0, "apple,j773g") ||
++	    fdt_node_check_compatible(blob, 0, "apple,j773g") ||
++	    fdt_node_check_compatible(source, 0, "apple,t8132") ||
++	    fdt_node_check_compatible(blob, 0, "apple,t8132"))
++		return -EINVAL;
++	used = fdt_off_dt_strings(blob) + fdt_size_dt_strings(blob);
++	if (used > J713_FDT_MAX_SOURCE || capacity < used + fdt_totalsize(source) + J713_FDT_EXTRA_PAD)
++		return -ENOSPC;
++	scratch = malloc(capacity);
++	if (!scratch)
++		return -ENOMEM;
++	ret = fdt_open_into(blob, scratch, capacity);
++	if (ret)
++		goto out_j773;
++	chosen = fdt_path_offset(scratch, "/chosen");
++	ret = fdt_delprop(scratch, chosen, "u-boot,j773g-dtb-imported");
++	if (ret && ret != -FDT_ERR_NOTFOUND)
++		goto out_j773;
++	ret = j713_reservations(scratch, source);
++	ret = ret ?: j713_cpus(scratch, source);
++	for (i = 0; !ret && i < ARRAY_SIZE(aliases); i++) {
++		int sn = j713_alias_node(source, aliases[i]);
++		int dn = j713_alias_node(scratch, aliases[i]);
++		int sp, dp, status_len;
++		const char *status;
++		if (sn < 0 || dn < 0 || j713_check_ranges(source, sn, "reg", sizes[i])) {
++			ret = -EINVAL;
++			break;
++		}
++		sp = fdt_parent_offset(source, sn);
++		dp = fdt_parent_offset(scratch, dn);
++		if (sp < 0 || dp < 0 || fdt_address_cells(source, sp) != fdt_address_cells(scratch, dp) ||
++		    fdt_size_cells(source, sp) != fdt_size_cells(scratch, dp)) {
++			ret = -EINVAL;
++			break;
++		}
++		if (i == 0 && (fdt_stringlist_count(source, sn, "reg-names") != 3 ||
++		    fdt_stringlist_search(source, sn, "reg-names", "nvme") != 0 ||
++		    fdt_stringlist_search(source, sn, "reg-names", "nvmmu") != 1 ||
++		    fdt_stringlist_search(source, sn, "reg-names", "ans") != 2 ||
++		    fdt_stringlist_count(scratch, dn, "reg-names") != 3 ||
++		    fdt_stringlist_search(scratch, dn, "reg-names", "nvme") != 0 ||
++		    fdt_stringlist_search(scratch, dn, "reg-names", "nvmmu") != 1 ||
++		    fdt_stringlist_search(scratch, dn, "reg-names", "ans") != 2)) {
++			ret = -EINVAL;
++			break;
++		}
++		ret = j713_copy_prop(scratch, dn, source, sn, "reg", sizes[i]);
++		if (!ret && i < 2)
++			ret = j713_copy_prop(scratch, dn, source, sn, "interrupts", i == 0 ? 12 : 48);
++		if (!ret)
++			ret = j713_copy_string(scratch, dn, source, sn, "status", 16, true);
++		if (!ret && fdt_node_check_compatible(source, sn, i == 0 ? "apple,t8132-nvme-ans2" :
++				 i == 1 ? "apple,asc-mailbox-v4" : "apple,t6000-sart"))
++			ret = -EINVAL;
++		status = fdt_getprop(source, sn, "status", &status_len);
++		if (!ret && (!status || status_len != 5 || memcmp(status, "okay", 5)))
++			ret = -EINVAL;
++	}
++	ret = ret ?: j713_chosen(scratch, source);
++	if (!ret)
++		memcpy(blob, scratch, capacity);
++out_j773:
++	free(scratch);
++	return ret ? ret : 1;
++}
++
++int apple_j773_complete_fdt(void *blob)
++{
++	int chosen = fdt_path_offset(blob, "/chosen");
++
++	return chosen < 0 ? chosen : fdt_setprop_u32(blob, chosen, "u-boot,j773g-dtb-imported", 1);
++}
++
+ /* Return 1 only for an opted-in, fully imported tree, 0 for the legacy path.
+  * Failure never changes either the caller's OS tree or m1n1's control tree.
+  * The completion marker records import, not input readiness. MTP additionally

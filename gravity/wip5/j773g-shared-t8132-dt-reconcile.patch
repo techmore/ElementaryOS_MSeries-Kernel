@@ -1,0 +1,135 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -66,18 +66,7 @@
+ 		status = "disabled";
+ 	};
+ 
+-	smc_mbox: mailbox@38c608000 {
+-		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
+-		reg = <0x3 0x8c608000 0x0 0x4000>;
+-		interrupt-parent = <&aic>;
+-		interrupts = <AIC_IRQ 561 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 562 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 563 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 564 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "send-empty", "send-not-empty",
+-		                  "recv-empty", "recv-not-empty";
+-		#mbox-cells = <0>;
+-	};
++
+ 
+ 	smc: smc@38c600000 {
+ 		compatible = "apple,t8132-smc", "apple,t8103-smc";
+@@ -85,6 +74,7 @@
+ 		      <0x3 0x8de00000 0x0 0x100000>;
+ 		reg-names = "smc", "sram";
+ 		mboxes = <&smc_mbox>;
++		status = "okay";
+ 
+ 		smc_gpio: gpio {
+ 			compatible = "apple,smc-gpio";
+@@ -102,3 +92,7 @@
+ };
+ 
+ #include "t8132-j773g-usb.dtsi"
++
++&smc_mbox {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi b/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
+@@ -76,24 +76,7 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy0: phy@403000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x03000000 0x0 0x4c000>,
+-				<0x4 0x03050000 0x0 0x8000>,
+-				<0x4 0x00000000 0x0 0x8000>,
+-				<0x4 0x02a90000 0x0 0x4000>,
+-				<0x4 0x02a84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
+-			#phy-cells = <1>;
+-			#reset-cells = <0>;
+-
+-			orientation-switch;
+-			mode-switch;
+-			power-domains = <&ps_atc0_usb>;
+-			status = "disabled";
+-		};
++
+ 
+ 		dwc3_1: usb@40a280000 {
+ 			compatible = "apple,t8132-dwc3", "apple,t8103-dwc3";
+@@ -134,24 +117,7 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy1: phy@40b000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x0b000000 0x0 0x4c000>,
+-				<0x4 0x0b050000 0x0 0x8000>,
+-				<0x4 0x08000000 0x0 0x8000>,
+-				<0x4 0x0aa90000 0x0 0x4000>,
+-				<0x4 0x0aa84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
+-			#phy-cells = <1>;
+-			#reset-cells = <0>;
+-
+-			orientation-switch;
+-			mode-switch;
+-			power-domains = <&ps_atc1_usb>;
+-			status = "disabled";
+-		};
++
+ 
+ 		dwc3_3: usb@41a280000 {
+ 			compatible = "apple,t8132-dwc3", "apple,t8103-dwc3";
+@@ -192,19 +158,13 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy3: phy@41b000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x1b000000 0x0 0x4c000>,
+-				<0x4 0x1b050000 0x0 0x8000>,
+-				<0x4 0x18000000 0x0 0x8000>,
+-				<0x4 0x1aa90000 0x0 0x4000>,
+-				<0x4 0x1aa84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
++		atcphy3: phy@41aa90000 {
++			compatible = "apple,t8132-atcphy";
++			reg = <0x4 0x1aa90000 0x0 0x4000>,
++			      <0x4 0x1aa84000 0x0 0x4000>;
++			reg-names = "usb2phy", "pipehandler";
+ 			#phy-cells = <1>;
+ 			#reset-cells = <0>;
+-
+ 			orientation-switch;
+ 			mode-switch;
+ 			power-domains = <&ps_atc3_usb>;
+@@ -331,6 +291,7 @@
+ };
+ 
+ &atcphy0 {
++	power-domains = <&ps_atc0_usb>;
+ 	ports {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+@@ -352,6 +313,7 @@
+ };
+ 
+ &atcphy1 {
++	power-domains = <&ps_atc1_usb>;
+ 	ports {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;

@@ -11,5 +11,6 @@ run python3 -m unittest discover -s qualification -p 'test_*.py'
 run python3 tools/test-kernel-config.py
 for f in fairydust/usb4/test-*.py fairydust/debian/test-*.py fairydust/usb4/tools/test-staging-tools.py; do run python3 "$f"; done
 run python3 aurora/check_freezes.py
+run python3 gravity/check_series.py
 run bash -n fairydust/debian/build.sh fairydust/debian/fetch-asahi-boot-packages.sh aurora-sep/install-aurora-sep.sh
 exit $fail

@@ -1,0 +1,9 @@
+# Mesa 103 allocation and Vulkan loss draft v19
+
+`mesa103-allocation-incomplete-v19.patch` is an incomplete cumulative draft against the exact Gravity Mesa 103 source RPM. It is not a deployable or upstream-ready fix. SHA-256: `4aebf5a7891a55a7729dd8225e838bd5836b2bfa2503551898f92a9ce48be054`.
+
+The Vulkan runtime worker now uses bounded pending-wait slices to recheck device loss. Healthy waits remain indefinite by default, and the configured `MESA_VK_MAX_TIMEOUT` remains an overall deadline. Queue drain periodically checks loss and worker error paths broadcast the condition. The affected `vk_queue.c` and `vk_sync.c` objects compiled in the isolated exact-source build; earlier v18 objects also compiled.
+
+A host-only C11 multithreaded harness, `mesa103-queue-drain-host-test.c`, includes the actual patched `vk_queue.c` and calls its internal drain function. With a three-second outer timeout, the healthy case removed and signaled its pending item after 250 ms (longer than two polling intervals) and returned `VK_SUCCESS`; the loss case set device loss without signaling the condition and returned `VK_ERROR_DEVICE_LOST`. Both passed. The harness uses a stub for device-loss reporting and the Mesa build's util and C11 libraries. It does not execute the worker's sync wait, submit work, use Vulkan, or exercise a GPU.
+
+This does not validate the bounded worker wait, concurrent driver submission, timeout edge cases, or the shared runtime's behavior across other Vulkan drivers. Scratch BO retirement is not proven safe on device teardown or failed/partial GPU submissions. Candidate kernel queue destruction removes the queue from an XArray but does not establish an idle guarantee; the source identity of the running Gravity kernel has not been established. Other allocation and mapping paths, cache and compiler failures, and query/fence cleanup remain incomplete. No live installation or GPU workload was performed.

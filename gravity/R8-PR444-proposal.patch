@@ -1,0 +1,781 @@
+diff --git a/mseries/m4-mini/assemble-boot-chain.py b/mseries/m4-mini/assemble-boot-chain.py
+index 138212d..58c0293 100644
+--- a/mseries/m4-mini/assemble-boot-chain.py
++++ b/mseries/m4-mini/assemble-boot-chain.py
+@@ -21,12 +21,33 @@ def sha(data):
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
++def candidate_kernel_receipt(candidate, baseline):
++    """Accept only the isolated Omarchy R8 recipe, not an arbitrary DTB receipt."""
++    expected = json.loads((HERE / 'gravity/compatibility/package-versions.json').read_text())
++    version = '7.1.13+elementary.m4.gravity1-8'
++    packaging = json.loads((HERE / 'gravity/patches/manifest.json').read_text())
++    contracts = candidate.get('source_contracts', {})
++    idle = candidate.get('m4_idle_checks', {})
++    if (candidate.get('commit') != baseline['commit']
++            or candidate.get('source_archive_sha256') != baseline['source_archive_sha256']
++            or candidate.get('target') != 'omarchy'
++            or candidate.get('kernel_release') != '7.1.13-omarchy-m4-r8-ARCH'
++            or candidate.get('packaging_patches') != packaging
++            or candidate.get('compatibility_patches') != expected[version]
++            or contracts.get('boot_cpu_wfi_selection_before_first_idle') is not True
++            or contracts.get('bcm4388_waits_for_wifi_function') is not True
++            or idle.get('apple_wfi_quirk_init_linked') is not True):
++        raise ValueError('Omarchy R8 source and build receipt required')
++    return candidate
++
++
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--bootloader', type=Path, required=True, help='corrected verified stage output directory')
+     parser.add_argument('--u-boot', type=Path, required=True)
+     parser.add_argument('--dtb', type=Path, required=True)
+     parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--kernel-receipt', type=Path, help='Omarchy R8 build receipt')
+     parser.add_argument('--bootloader-receipt', type=Path, help='trusted fresh build receipt; requires paired U-Boot receipt')
+     parser.add_argument('--uboot-receipt', type=Path, help='trusted fresh build receipt; requires paired stage receipt')
+     args = parser.parse_args()
+@@ -35,6 +56,8 @@ def main():
+     loader = json.loads((HERE / 'receipts/2026-10-21-gravity-bootloader-nodisplay.json').read_text())
+     uboot = json.loads((HERE / 'receipts/2026-10-21-gravity-uboot-wrapper.json').read_text())
+     kernel = json.loads((HERE / 'receipts/2026-10-21-gravity-kernel-build.json').read_text())
++    if args.kernel_receipt:
++        kernel = candidate_kernel_receipt(json.loads(args.kernel_receipt.read_text()), kernel)
+     if bool(args.bootloader_receipt) != bool(args.uboot_receipt):
+         raise ValueError('paired trusted fresh boot receipts required')
+     fresh = bool(args.bootloader_receipt)
+@@ -103,6 +126,8 @@ def main():
+         'source_commits': {'bootloader': loader['commit'], 'uboot': uboot['commit'], 'kernel': kernel['commit']},
+         'stage1': 'separate artifact; not concatenated or authorized',
+         'source_dtb': 'loader fixups still required; not an observed firmware/memory map',
++        'kernel_release': kernel.get('kernel_release'),
++        'kernel_receipt_scope': 'receipt consistency only; source/build provenance requires independent verification',
+         'factory_promotion': False, 'installer_admission': False,
+         'esp_written': False, 'hardware_validated': False,
+     }
+diff --git a/mseries/m4-mini/build-kernel.py b/mseries/m4-mini/build-kernel.py
+index 5a893d1..992d9b2 100644
+--- a/mseries/m4-mini/build-kernel.py
++++ b/mseries/m4-mini/build-kernel.py
+@@ -14,7 +14,8 @@ import tarfile
+ HERE = Path(__file__).resolve().parent
+ ARCHIVE_SHA256 = '045c64540fa4210394c899cad6320c5bf9090a66919938d986aeaad0033946e8'
+ COMMIT = '4fc326f6c25ccceb7515e2635c22e01fde5d3bac'
+-RELEASE = '7.1.13-elementary-m4-gravity1'
++RELEASE = '7.1.13-elementary-m4-gravity1-r8'
++OMARCHY_RELEASE = '7.1.13-omarchy-m4-r8-ARCH'
+ 
+ 
+ def digest(path):
+@@ -88,7 +89,7 @@ def source_patch_gate(source, compatibility_version=None):
+     return contracts
+ 
+ 
+-def config_gate(path):
++def config_gate(path, release=RELEASE):
+     values = dict(line.split('=', 1) for line in path.read_text().splitlines()
+                   if line.startswith('CONFIG_') and '=' in line)
+     for key, value in {'CONFIG_ARCH_APPLE': 'y', 'CONFIG_ARM64_16K_PAGES': 'y',
+@@ -97,7 +98,7 @@ def config_gate(path):
+                        'CONFIG_DRM_ASAHI_M4': 'm',
+                        'CONFIG_RUST': 'y', 'CONFIG_DRM_APPLE': 'm',
+                        'CONFIG_AQTION': 'm', 'CONFIG_TIGON3': 'm',
+-                       'CONFIG_LOCALVERSION': '"-elementary-m4-gravity1"'}.items():
++                       'CONFIG_LOCALVERSION': '"' + release.removeprefix('7.1.13') + '"'}.items():
+         if values.get(key) != value:
+             raise ValueError(f'resolved configuration must have {key}={value}')
+ 
+@@ -139,7 +140,9 @@ def main():
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--rust-library', type=Path, required=True)
+     parser.add_argument('--jobs', type=int, default=2)
++    parser.add_argument('--target', choices=['elementary', 'omarchy'], default='elementary')
+     args = parser.parse_args()
++    release = OMARCHY_RELEASE if args.target == 'omarchy' else RELEASE
+     if args.jobs < 1 or args.output.exists():
+         raise ValueError('positive jobs and a new output directory required')
+     if digest(args.archive) != ARCHIVE_SHA256:
+@@ -175,18 +178,22 @@ def main():
+          str(HERE / 'gravity/gravity-aarch64.config'),
+          str(HERE / 'gravity/elementary-target.config')])
+     run([str(source / 'scripts/config'), '--file', str(build / '.config'),
+-         '--set-str', 'LOCALVERSION', '-elementary-m4-gravity1', '--disable', 'LOCALVERSION_AUTO'])
++         '--set-str', 'LOCALVERSION', release.removeprefix('7.1.13'), '--disable', 'LOCALVERSION_AUTO'])
+     run(base + ['olddefconfig'])
+-    config_gate(build / '.config')
++    config_gate(build / '.config', release)
+     run(base + [f'-j{args.jobs}', 'Image', 'modules', 'dtbs'])
++    actual_release = (build / 'include/config/kernel.release').read_text().strip()
++    if actual_release != release:
++        raise ValueError('built kernel release mismatch: ' + actual_release)
+     idle_checks = check_apple_idle_image(build, root / 'apple-idle-disassembly.txt')
+     artifacts = ['arch/arm64/boot/Image', 'drivers/gpu/drm/asahi/asahi_m4.ko',
+                  'arch/arm64/boot/dts/apple/t8132-j773g.dtb',
++                 'drivers/gpu/drm/apple/appledrm.ko',
+                  'drivers/net/ethernet/aquantia/atlantic/atlantic.ko',
+                  'drivers/net/ethernet/broadcom/tg3.ko']
+     hashes = {path: digest(build / path) for path in artifacts}
+     receipt = {'repository': 'GravityLinux/linux', 'commit': COMMIT,
+-               'source_archive_sha256': ARCHIVE_SHA256, 'kernel_release': RELEASE,
++               'source_archive_sha256': ARCHIVE_SHA256, 'kernel_release': release, 'target': args.target,
+                'config_sha256': digest(build / '.config'), 'artifacts': hashes,
+                'packaging_patches': patches, 'compatibility_patches': compatibility,
+                'm4_idle_checks': idle_checks, 'source_contracts': source_contracts,
+diff --git a/mseries/m4-mini/build-research-image.py b/mseries/m4-mini/build-research-image.py
+index a7fed02..dc06aba 100644
+--- a/mseries/m4-mini/build-research-image.py
++++ b/mseries/m4-mini/build-research-image.py
+@@ -43,14 +43,27 @@ def profile_package_versions(profile, controls):
+     result = {}
+     if set(controls) != set(PACKAGE_NAMES):
+         raise ValueError('complete package controls required')
+-    for kind, name in PACKAGE_NAMES.items():
++    for kind, default_name in PACKAGE_NAMES.items():
+         control = controls[kind]
+-        if control.get('Package') != name or control.get('Architecture') != 'arm64':
++        name = control.get('Package')
++        allowed = {default_name}
++        if kind == 'kernel':
++            allowed.add('linux-image-elementary-m4-gravity1-r8')
++        if name not in allowed or control.get('Architecture') != 'arm64':
+             raise ValueError('wrong candidate package identity or architecture: ' + kind)
+         pins = re.findall(r'^\s+' + re.escape(name) + r'=([^\s]+)\s*$', profile, re.MULTILINE)
+         if len(pins) != 1 or pins[0] != control.get('Version'):
+             raise ValueError('candidate version differs from committed image profile: ' + kind)
+         result[kind] = pins[0]
++    is_r8 = controls['kernel']['Package'] == 'linux-image-elementary-m4-gravity1-r8'
++    other = 'linux-image-elementary-m4-gravity1' if is_r8 else 'linux-image-elementary-m4-gravity1-r8'
++    if re.search(r'^\s+' + re.escape(other) + r'=([^\s]+)\s*$', profile, re.MULTILINE):
++        raise ValueError('profile must select exactly one kernel package')
++    if is_r8 and (result['kernel'] != '7.1.13+elementary.m4.gravity1-8'
++                  or result['policy'] != '20261021-3'):
++        raise ValueError('R8 kernel requires its matched versioned policy')
++    if not is_r8 and result['policy'] == '20261021-3':
++        raise ValueError('R8 policy cannot be paired with an older kernel')
+     return result
+ 
+ 
+diff --git a/mseries/m4-mini/check-kernel-package.py b/mseries/m4-mini/check-kernel-package.py
+index d44f6ab..5a1f9b7 100644
+--- a/mseries/m4-mini/check-kernel-package.py
++++ b/mseries/m4-mini/check-kernel-package.py
+@@ -12,7 +12,8 @@ import tempfile
+ 
+ COMMIT = '4fc326f6c25ccceb7515e2635c22e01fde5d3bac'
+ SOURCE_SHA = '045c64540fa4210394c899cad6320c5bf9090a66919938d986aeaad0033946e8'
+-RELEASE = '7.1.13-elementary-m4-gravity1'
++LEGACY_RELEASE = '7.1.13-elementary-m4-gravity1'
++R8_RELEASE = '7.1.13-elementary-m4-gravity1-r8'
+ MODULES = ['drivers/gpu/drm/asahi/asahi_m4.ko', 'drivers/gpu/drm/apple/appledrm.ko',
+            'drivers/net/ethernet/aquantia/atlantic/atlantic.ko', 'drivers/net/ethernet/broadcom/tg3.ko']
+ 
+@@ -39,17 +40,23 @@ def main():
+         raise ValueError('package differs from packaging receipt')
+     fields = subprocess.check_output(['dpkg-deb', '-f', str(args.package), 'Package', 'Version', 'Architecture'], text=True)
+     rows = fields.splitlines()
+-    if (len(rows) != 3 or rows[0] != 'Package: linux-image-elementary-m4-gravity1'
+-            or rows[2] != 'Architecture: arm64' or rows[1] not in [
++    if (len(rows) != 3 or rows[2] != 'Architecture: arm64' or rows[1] not in [
+                 'Version: 7.1.13+elementary.m4.gravity1-2', 'Version: 7.1.13+elementary.m4.gravity1-3',
+                 'Version: 7.1.13+elementary.m4.gravity1-4', 'Version: 7.1.13+elementary.m4.gravity1-5',
+                 'Version: 7.1.13+elementary.m4.gravity1-6',
+-                'Version: 7.1.13+elementary.m4.gravity1-7']):
++                'Version: 7.1.13+elementary.m4.gravity1-7',
++                'Version: 7.1.13+elementary.m4.gravity1-8']):
+         raise ValueError('unexpected package identity')
+     version = rows[1].removeprefix('Version: ')
++    is_r8 = version == '7.1.13+elementary.m4.gravity1-8'
++    release = R8_RELEASE if is_r8 else LEGACY_RELEASE
++    expected_name = 'linux-image-elementary-m4-gravity1-r8' if is_r8 else 'linux-image-elementary-m4-gravity1'
++    if rows[0] != 'Package: ' + expected_name or build.get('kernel_release') != release:
++        raise ValueError('package name and kernel release must match its revision')
+     is_live_media_candidate = version in {'7.1.13+elementary.m4.gravity1-6',
+-                                         '7.1.13+elementary.m4.gravity1-7'}
+-    is_r7 = version == '7.1.13+elementary.m4.gravity1-7'
++                                         '7.1.13+elementary.m4.gravity1-7',
++                                         '7.1.13+elementary.m4.gravity1-8'}
++    is_r7 = version in {'7.1.13+elementary.m4.gravity1-7', '7.1.13+elementary.m4.gravity1-8'}
+     if is_live_media_candidate:
+         checks = build.get('m4_idle_checks', {})
+         if (checks.get('apple_cpu_wfi_linked') is not True
+@@ -68,7 +75,7 @@ def main():
+     with tempfile.TemporaryDirectory(prefix='m4-kernel-check-', dir=args.package.resolve().parent) as temp:
+         root = Path(temp)
+         subprocess.run(['dpkg-deb', '--extract', str(args.package), str(root)], check=True)
+-        module_root = root / 'usr/lib/modules' / RELEASE
++        module_root = root / 'usr/lib/modules' / release
+         image = module_root / 'vmlinuz'
+         if digest(image) != build['artifacts']['arch/arm64/boot/Image']:
+             raise ValueError('Image mismatch')
+@@ -76,7 +83,7 @@ def main():
+             header = stream.read(64)
+         if header[56:60] != b'ARM\x64' or ((struct.unpack_from('<Q', header, 24)[0] >> 1) & 3) != 2:
+             raise ValueError('ARM64 16 KiB Image required')
+-        config = module_root / ('config-' + RELEASE)
++        config = module_root / ('config-' + release)
+         if digest(config) != build['config_sha256']:
+             raise ValueError('kernel config mismatch')
+         if is_live_media_candidate:
+@@ -101,10 +108,10 @@ def main():
+             if elf[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', elf, 18)[0] != 183:
+                 raise ValueError('AArch64 module required: ' + name)
+             vermagic = subprocess.check_output(['modinfo', '-F', 'vermagic', str(module)], text=True)
+-            if vermagic.split()[0] != RELEASE:
++            if vermagic.split()[0] != release:
+                 raise ValueError('module release mismatch')
+         for name in ['asahi_m4', 'appledrm', 'atlantic', 'tg3']:
+-            result = subprocess.check_output(['modprobe', '-d', str(root / 'usr'), '-S', RELEASE,
++            result = subprocess.check_output(['modprobe', '-d', str(root / 'usr'), '-S', release,
+                                               '--show-depends', name], text=True)
+             if 'insmod ' not in result:
+                 raise ValueError('unresolved module: ' + name)
+diff --git a/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch b/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch
+new file mode 100644
+index 0000000..031c7a7
+--- /dev/null
++++ b/mseries/m4-mini/gravity/compatibility/0011-m4-notification-timeout-rescue.patch
+@@ -0,0 +1,101 @@
++From 40d468ebf57d0c35161f5b9a24c4746b3554966f Mon Sep 17 00:00:00 2001
++From: Techmore <sdolbec1@gmail.com>
++Date: Wed, 28 Oct 2026 22:28:20 -0400
++Subject: [PATCH] drm/asahi: poll M4 completion when a firmware notification
++ times out
++
++The M4 submission worker treated a notification wait that hit its
++timeout as a fatal GPU failure. `wake_result?` at the top of the loop
++returned the wait's ETIMEDOUT before `retire()` polled the completion
++stamps, so one late or lost firmware notification poisoned the runtime
++and set `device.failed`. Every later submit and VM_BIND then failed with
++EIO until reboot, even if the work had already finished. retire()'s own
++10 s no-progress watchdog, which names the stuck Work, never ran.
++
++Seen three times on 2026-10-28 on a Mac mini M4 (Gravity 7.1.13-509)
++during normal desktop use: "submission pipeline failed: ETIMEDOUT, 128
++jobs, 42 issued" with no "async Work ... timeout" line and no firmware
++fault event.
++
++Treat ETIMEDOUT from the wait as "poll now": fall through to retire(),
++which still fails the GPU on a real 10 s stall. Cap the wait at 250 ms
++while work is in flight, so a lost notification costs milliseconds.
++Log the first 64 rescues.
++
++This mirrors the safety poll in GravityLinux/linux replacement/210-gpu
++(g16_drm_pump.rs), backported to the 7.1 driver.
++
++Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
++---
++ drivers/gpu/drm/asahi/g16_drm.rs     | 21 ++++++++++++++++++++-
++ drivers/gpu/drm/asahi/g16_runtime.rs | 12 ++++++++++--
++ 2 files changed, 30 insertions(+), 3 deletions(-)
++
++diff --git a/drivers/gpu/drm/asahi/g16_drm.rs b/drivers/gpu/drm/asahi/g16_drm.rs
++index 22a864dcbb1b..4ba76065e4ff 100644
++--- a/drivers/gpu/drm/asahi/g16_drm.rs
+++++ b/drivers/gpu/drm/asahi/g16_drm.rs
++@@ -1043,7 +1043,16 @@ impl WorkItem for Execution {
++             let mut engine = this.device.engine.lock();
++             let mut runtime = this.device.runtime.lock();
++             let result = (|| -> Result<bool> {
++-                wake_result?;
+++                // No notification within the wait window is not a hang by
+++                // itself: a firmware completion notification can be late or
+++                // lost. Poll the completion stamps below; retire() keeps its
+++                // own 10 s no-progress watchdog and reports a real hang.
+++                // (Backport of the safety poll in replacement/210-gpu.)
+++                let timed_out = match wake_result {
+++                    Err(e) if e == ETIMEDOUT => true,
+++                    Err(e) => return Err(e),
+++                    Ok(()) => false,
+++                };
++                 generation?;
++                 if this.device.failed.load(Ordering::Acquire) {
++                     return Err(EIO);
++@@ -1064,6 +1073,16 @@ impl WorkItem for Execution {
++                         job.error = Some(error);
++                     }
++                     progress = true;
+++                    if timed_out {
+++                        static REPORTED: core::sync::atomic::AtomicU32 =
+++                            core::sync::atomic::AtomicU32::new(0);
+++                        if REPORTED.fetch_add(1, Ordering::Relaxed) < 64 {
+++                            pr_warn!(
+++                                "G16: notification wait timed out; polling retired Work {:#x}\n",
+++                                id
+++                            );
+++                        }
+++                    }
++                 }
++                 let mut admitted = 0;
++                 loop {
++diff --git a/drivers/gpu/drm/asahi/g16_runtime.rs b/drivers/gpu/drm/asahi/g16_runtime.rs
++index 9d818e2a40e6..460856793265 100644
++--- a/drivers/gpu/drm/asahi/g16_runtime.rs
+++++ b/drivers/gpu/drm/asahi/g16_runtime.rs
++@@ -784,11 +784,19 @@ impl Bootstrap {
++     /// Notifications do not extend the watchdog. Only retirement progress
++     /// resets it, so trace traffic cannot keep a stuck command alive.
++     pub(crate) fn watchdog_remaining_ms(&self) -> u32 {
++-        self.flights
+++        let watchdog = self
+++            .flights
++             .iter()
++             .map(|flight| (10000 - flight.started.elapsed().as_millis()).clamp(1, 10000) as u32)
++             .min()
++-            .unwrap_or(10000)
+++            .unwrap_or(10000);
+++        // With work outstanding, recheck completion at least this often, so a
+++        // late or lost notification costs milliseconds instead of a hang.
+++        if self.flights.is_empty() {
+++            watchdog
+++        } else {
+++            watchdog.min(250)
+++        }
++     }
++ }
++ 
++-- 
++2.53.0
++
+diff --git a/mseries/m4-mini/gravity/compatibility/README.md b/mseries/m4-mini/gravity/compatibility/README.md
+index a5430e5..1bc15ad 100644
+--- a/mseries/m4-mini/gravity/compatibility/README.md
++++ b/mseries/m4-mini/gravity/compatibility/README.md
+@@ -6,7 +6,7 @@ passed independent package checks, but its M4 WFI selector runs at
+ `early_initcall`, after the boot CPU can already idle. R6 is therefore historical
+ and superseded.
+ 
+-The current source recipe targets R7. It keeps the R6 WFI/WFxT, built-in
++The current source recipe targets R8, building on R7 and adding the M4 notification timeout rescue patch 0011. R8 has not been built or hardware-qualified. It keeps the R6 WFI/WFxT, built-in
+ ISO9660/SCSI CD-ROM, Apple watchdog and scheduler fixes, then adds Aurora's
+ boot-CPU-before-first-idle WFI initialization and two BCM4388 Bluetooth fixes.
+ The R7 kernel build and package inspection are pending. The M4 mini is not
+@@ -24,6 +24,7 @@ available for native tests.
+ | 0008 | Select register-preserving WFI from `smp_prepare_boot_cpu()` before first idle; Aurora 34649b455f4a |
+ | 0009 | Preserve BCM4388 common calibration-property setup; Aurora f7c762f2ef6b5d6a04394e433e1aa56dbb50ec4a |
+ | 0010 | Defer BCM4388 Bluetooth until its Wi-Fi function binds; Aurora 053566b82614496ae4b99017680f113376b3ba24 |
++| 0011 | Poll M4 completion on a notification timeout; local Gravity 0066, based on Gravity replacement/210-gpu. |
+ 
+ The T8132 split-channel ADMAC change from Aurora is already present in the
+ pinned Gravity driver and enabled by the J773g DT, so it is not duplicated here.
+@@ -32,7 +33,7 @@ outside this plain-M4 candidate. The DART output-range hardening remains a
+ reviewed follow-up; the candidate has not been tested with malformed or
+ boundary-crossing mappings.
+ 
+-`package-versions.json` binds R3, R4, R5, R6 and R7 to distinct immutable patch
++`package-versions.json` binds R3, R4, R5, R6, R7 and R8 to distinct immutable patch
+ sets; `resulting-files-by-version.json` preserves the matching source hashes.
+ R7 source checks require the Apple selector call inside `smp_prepare_boot_cpu()`
+ before the boot CPU idle path, verify the linked selector symbol, and check that
+diff --git a/mseries/m4-mini/gravity/compatibility/manifest.json b/mseries/m4-mini/gravity/compatibility/manifest.json
+index 7666877..7e80469 100644
+--- a/mseries/m4-mini/gravity/compatibility/manifest.json
++++ b/mseries/m4-mini/gravity/compatibility/manifest.json
+@@ -8,5 +8,6 @@
+   "0007-apple-m4-register-preserving-wfi.patch": "86af703ffcdc237eab43049202e0b15c610596a7b63f29dcbe92246a7d1ba3b8",
+   "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
+   "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
+-  "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c"
++  "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c",
++  "0011-m4-notification-timeout-rescue.patch": "41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2"
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/package-versions.json b/mseries/m4-mini/gravity/compatibility/package-versions.json
+index 2892dfd..3391ed2 100644
+--- a/mseries/m4-mini/gravity/compatibility/package-versions.json
++++ b/mseries/m4-mini/gravity/compatibility/package-versions.json
+@@ -34,5 +34,18 @@
+     "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
+     "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
+     "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c"
++  },
++  "7.1.13+elementary.m4.gravity1-8": {
++    "0001-drm-scheduler-initialize-storage.patch": "dcf4ec926d19f8718ca50d7238f65e39a67f169924ba6d3b0429b128a17699d4",
++    "0002-m4-terminal-timeout-retention.patch": "151e9366751ebca92dd23c58362741ea90b650ab46e79ac150ce4616223aef1b",
++    "0003-scheduler-allocation-owner.patch": "00f5b32d531c967e406e0a5295fb25931d49fcc530eae51ab862e015c7debf42",
++    "0004-drm-module-and-work-lifetime.patch": "f002743ce94285fc961d88bed1df77fe7557fb0dcf179994b6dbbb86460a5a71",
++    "0005-scheduler-disjoint-timeout-state.patch": "bd33ff4539fc8ae935aee58dffd344e1a83b0e72f64621e2ddbe2df92f80c940",
++    "0006-scheduler-final-cancellation.patch": "04521a88611194d64e5b4f1e4b0d7d6e70da25577b2d021d353e897d0bc3ae55",
++    "0007-apple-m4-register-preserving-wfi.patch": "86af703ffcdc237eab43049202e0b15c610596a7b63f29dcbe92246a7d1ba3b8",
++    "0008-apple-m4-wfi-before-first-idle.patch": "28b4e2d2dd8b2e1b5635f710f7179d3cfdc42fb0e8d5c326f46332fd2dc5004f",
++    "0009-bcm4388-read-common-calibration.patch": "ac22dd5b99a3c98ee4541ea2bf7518fe83c2ee2e45af0abdb7fefc0a51148fc7",
++    "0010-bcm4388-wait-for-wifi.patch": "72997b7faa4ad192312e222701e6003d46b75f732a1edc78ad7f747e0e7bd06c",
++    "0011-m4-notification-timeout-rescue.patch": "41b429c9a837a40586df02389432eade495f67201c1081b053bd0e42e1adeda2"
+   }
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json b/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
+index 612c503..aeace2b 100644
+--- a/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
++++ b/mseries/m4-mini/gravity/compatibility/resulting-files-by-version.json
+@@ -58,5 +58,26 @@
+     "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
+     "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
+     "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8"
++  },
++  "7.1.13+elementary.m4.gravity1-8": {
++    "drivers/gpu/drm/scheduler/sched_main.c": "472a8898f6f74ce024dd397d89617484be0404b59a915418556ce019bffd88b8",
++    "rust/kernel/drm/sched.rs": "61fda9d31fe62722348a47bcc78df97539fa29db953ccd758fd6086ef9284941",
++    "include/drm/gpu_scheduler.h": "f6cb92b835484468c719286c249844eddbefc581d415c1a8210af6c8e95713e1",
++    "drivers/gpu/drm/asahi/g16_drm.rs": "b488b1520e3eae3b6e1161eec4e9dd64f4b233bd2a54c73044602a362c290554",
++    "drivers/gpu/drm/scheduler/sched_entity.c": "24720d2607b02d68f59068033cfa476afe66b8c28e66b5468d11bd8ad2d34ec3",
++    "rust/kernel/drm/driver.rs": "70e8531882929833ba0af490f3dcd709917ea2e8c443f061cc1d8274d60cf4d8",
++    "rust/kernel/drm/device.rs": "716824518bbb481905145fe917a852d492549721755d0eac76551ec4f7411a36",
++    "rust/kernel/drm/gem/mod.rs": "ed6bdf0619625e171c053a12754b6dfdeb3b63bec40c92899f0c1fb905a27dc5",
++    "drivers/gpu/drm/asahi/queue/mod.rs": "6ecf440b04c0c51fb050e7dbbdc3cdf4407bfaf347075d880fa9d594a432d35d",
++    "drivers/gpu/drm/asahi/driver.rs": "45ce2157a6b59e879e5b3bbb1bcc6dec6b6458b67b5161a8a4a9e7a8293660b1",
++    "arch/arm64/include/asm/apple-idle.h": "32090688bde41a0c23feffc93fd754ea2025eb73f8a9adeab5ec0cdcad38eca5",
++    "arch/arm64/include/asm/cputype.h": "3df0e51016f43a12d4432b1fc716318096cb034488d866fcfb4da750cfc874ce",
++    "arch/arm64/kernel/Makefile": "83c84acd640d302cb5ab5a499b1583d0ef5cdcbbc66b7234cd82226107e1741a",
++    "arch/arm64/kernel/idle-apple.S": "ae36d25beff91eecf643e7cbe5f9ce1112818461042213a1a8acd2ea618f019b",
++    "arch/arm64/kernel/idle.c": "c3667aaedcf476b2c87eb4c497cdab9cc37680abcab5e2788716981db17268d1",
++    "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
++    "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
++    "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8",
++    "drivers/gpu/drm/asahi/g16_runtime.rs": "1f5c6760de0d72ea898eb66b3e2f7484b1d9c9ec838f99f7318b6894a2503f47"
+   }
+ }
+diff --git a/mseries/m4-mini/gravity/compatibility/resulting-files.json b/mseries/m4-mini/gravity/compatibility/resulting-files.json
+index da10de9..37b7d92 100644
+--- a/mseries/m4-mini/gravity/compatibility/resulting-files.json
++++ b/mseries/m4-mini/gravity/compatibility/resulting-files.json
+@@ -2,7 +2,7 @@
+   "drivers/gpu/drm/scheduler/sched_main.c": "472a8898f6f74ce024dd397d89617484be0404b59a915418556ce019bffd88b8",
+   "rust/kernel/drm/sched.rs": "61fda9d31fe62722348a47bcc78df97539fa29db953ccd758fd6086ef9284941",
+   "include/drm/gpu_scheduler.h": "f6cb92b835484468c719286c249844eddbefc581d415c1a8210af6c8e95713e1",
+-  "drivers/gpu/drm/asahi/g16_drm.rs": "ea399e483c9b7372725b6888a68a58e77092101e6f8c85324a0e1cf28f353ecf",
++  "drivers/gpu/drm/asahi/g16_drm.rs": "b488b1520e3eae3b6e1161eec4e9dd64f4b233bd2a54c73044602a362c290554",
+   "drivers/gpu/drm/scheduler/sched_entity.c": "24720d2607b02d68f59068033cfa476afe66b8c28e66b5468d11bd8ad2d34ec3",
+   "rust/kernel/drm/driver.rs": "70e8531882929833ba0af490f3dcd709917ea2e8c443f061cc1d8274d60cf4d8",
+   "rust/kernel/drm/device.rs": "716824518bbb481905145fe917a852d492549721755d0eac76551ec4f7411a36",
+@@ -16,5 +16,6 @@
+   "arch/arm64/kernel/idle.c": "c3667aaedcf476b2c87eb4c497cdab9cc37680abcab5e2788716981db17268d1",
+   "arch/arm64/kernel/pi/idreg-override.c": "bfd3e97942abad57495980bd3577709e4c44eb474663ea0d5de604f42ce62dca",
+   "arch/arm64/kernel/smp.c": "65fabdb0a9b08628f754e6e91c19598652099b95df63d536a7eaaf744c4baa07",
+-  "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8"
++  "drivers/bluetooth/hci_bcm4377.c": "c6ce08f9e0d7e1a16d4dd1b5d5d424aabe7ea866d478c9876b345333ba7f2af8",
++  "drivers/gpu/drm/asahi/g16_runtime.rs": "1f5c6760de0d72ea898eb66b3e2f7484b1d9c9ec838f99f7318b6894a2503f47"
+ }
+diff --git a/mseries/m4-mini/package-kernel.py b/mseries/m4-mini/package-kernel.py
+index fad2101..7414793 100644
+--- a/mseries/m4-mini/package-kernel.py
++++ b/mseries/m4-mini/package-kernel.py
+@@ -13,8 +13,8 @@ HERE = Path(__file__).resolve().parent
+ spec = importlib.util.spec_from_file_location('m4_kernel', HERE / 'build-kernel.py')
+ kernel = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(kernel)
+-NAME = 'linux-image-elementary-m4-gravity1'
+-VERSION = '7.1.13+elementary.m4.gravity1-7'
++NAME = 'linux-image-elementary-m4-gravity1-r8'
++VERSION = '7.1.13+elementary.m4.gravity1-8'
+ 
+ 
+ def check(build, archive):
+diff --git a/mseries/m4-mini/package-policy.py b/mseries/m4-mini/package-policy.py
+index 5a368fa..141a8aa 100644
+--- a/mseries/m4-mini/package-policy.py
++++ b/mseries/m4-mini/package-policy.py
+@@ -17,7 +17,13 @@ VERSION = '20261021-2'
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--output', type=Path, required=True)
++    parser.add_argument('--kernel-revision', choices=['legacy', 'r8'], default='legacy')
+     args = parser.parse_args()
++    kernel_name = 'linux-image-elementary-m4-gravity1'
++    version = VERSION
++    if args.kernel_revision == 'r8':
++        kernel_name += '-r8'
++        version = '20261021-3'
+     if args.output.exists():
+         raise ValueError('new output directory required')
+     args.output.mkdir(parents=True)
+@@ -45,8 +51,8 @@ def main():
+         (docs / 'README').write_text('Candidate M4 mini image policy only. No local installation or hardware sleep qualification.\nRemoval via package upgrade is required when M4 sleep is supported.\nAdministrator configuration overrides vendor settings.\n')
+         control = payload / 'DEBIAN'
+         control.mkdir()
+-        (control / 'control').write_text(f'Package: {NAME}\nVersion: {VERSION}\nArchitecture: arm64\nMaintainer: ElementaryOS MSeries contributors <builder@localhost>\nDepends: systemd, initramfs-tools, linux-image-elementary-m4-gravity1\nSection: admin\nPriority: optional\nDescription: Temporary power and early-driver policy for M4 mini images\n Disables unsupported system sleep through vendor configuration.\n')
+-        package = args.output / f'{NAME}_{VERSION}_arm64.deb'
++        (control / 'control').write_text(f'Package: {NAME}\nVersion: {version}\nArchitecture: arm64\nMaintainer: ElementaryOS MSeries contributors <builder@localhost>\nDepends: systemd, initramfs-tools, {kernel_name}\nSection: admin\nPriority: optional\nDescription: Temporary power and early-driver policy for M4 mini images\n Disables unsupported system sleep through vendor configuration.\n')
++        package = args.output / f'{NAME}_{version}_arm64.deb'
+         subprocess.run(['dpkg-deb', '--root-owner-group', '--build', str(payload), str(package)], check=True)
+     (args.output / 'receipt.json').write_text(json.dumps({
+         'package': package.name, 'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest(),
+diff --git a/mseries/m4-mini/prepare-hosted-image-inputs.py b/mseries/m4-mini/prepare-hosted-image-inputs.py
+index a3cb8dc..df934a0 100644
+--- a/mseries/m4-mini/prepare-hosted-image-inputs.py
++++ b/mseries/m4-mini/prepare-hosted-image-inputs.py
+@@ -15,13 +15,14 @@ import sys
+ HERE = Path(__file__).resolve().parent
+ PREFIXES = {'kernel': 'linux-image-elementary-m4-gravity1_',
+             'mesa': 'elementary-m4-gravity-mesa1_'}
++R8_KERNEL_PREFIX = 'linux-image-elementary-m4-gravity1-r8_'
+ 
+ 
+ def package(directory, kind):
+     receipt = json.loads((directory / 'receipt.json').read_text())
+     name = receipt['package']
+     if (not isinstance(name, str) or Path(name).name != name or
+-            not name.startswith(PREFIXES[kind]) or not name.endswith('_arm64.deb') or
++            not name.startswith((PREFIXES[kind], R8_KERNEL_PREFIX) if kind == 'kernel' else (PREFIXES[kind],)) or not name.endswith('_arm64.deb') or
+             '\\' in name):
+         raise ValueError('expected component package basename required: ' + kind)
+     if {p.name for p in directory.glob('*.deb')} != {name}:
+diff --git a/mseries/m4-mini/prepare-image-inputs.py b/mseries/m4-mini/prepare-image-inputs.py
+index aadaad7..6e15675 100644
+--- a/mseries/m4-mini/prepare-image-inputs.py
++++ b/mseries/m4-mini/prepare-image-inputs.py
+@@ -31,6 +31,15 @@ def digest(path):
+ 
+ def live_hook_patch(original, baseline, build):
+     changed = original
++    old_release = baseline['kernel_release']
++    new_release = build['kernel_release']
++    for value in (old_release, new_release):
++        if not value or not all(c.isalnum() or c in '.+-_' for c in value):
++            raise ValueError('invalid kernel release')
++    old_line = 'release=' + old_release + '\n'
++    if changed.count(old_line) != 1:
++        raise ValueError('live hook no longer matches reviewed release')
++    changed = changed.replace(old_line, 'release=' + new_release + '\n', 1)
+     for old, new in [(baseline['artifacts']['arch/arm64/boot/Image'], build['artifacts']['arch/arm64/boot/Image']),
+                      (baseline['config_sha256'], build['config_sha256'])]:
+         if changed.count(old) != 1:
+@@ -73,8 +82,12 @@ def main():
+         if name == 'mesa':
+             command += ['--smoke', str(args.smoke.resolve())]
+         subprocess.run(command, check=True)
+-    subprocess.run([sys.executable, str(HERE / 'package-policy.py'),
+-                    '--output', str((args.output / 'policy-build').resolve())], check=True)
++    kernel_check = json.loads((records / 'kernel-check.json').read_text())
++    policy_command = [sys.executable, str(HERE / 'package-policy.py'),
++                      '--output', str((args.output / 'policy-build').resolve())]
++    if kernel_check['package_version'] == '7.1.13+elementary.m4.gravity1-8':
++        policy_command += ['--kernel-revision', 'r8']
++    subprocess.run(policy_command, check=True)
+     policy = json.loads((args.output / 'policy-build/receipt.json').read_text())
+     packages = args.output / 'packages'
+     packages.mkdir()
+diff --git a/mseries/m4-mini/test_r8_boot_receipt.py b/mseries/m4-mini/test_r8_boot_receipt.py
+new file mode 100644
+index 0000000..290cd7e
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_boot_receipt.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++"""Ensure staged boot DTBs are tied to the complete R8 source recipe."""
++import copy
++import importlib.util
++import json
++from pathlib import Path
++import unittest
++
++HERE=Path(__file__).resolve().parent
++spec=importlib.util.spec_from_file_location('boot', HERE/'assemble-boot-chain.py')
++boot=importlib.util.module_from_spec(spec)
++spec.loader.exec_module(boot)
++
++class BootReceiptTests(unittest.TestCase):
++    def setUp(self):
++        self.baseline=json.loads((HERE/'receipts/2026-10-21-gravity-kernel-build.json').read_text())
++        versions=json.loads((HERE/'gravity/compatibility/package-versions.json').read_text())
++        self.receipt={'commit':self.baseline['commit'], 'source_archive_sha256':self.baseline['source_archive_sha256'],
++             'target':'omarchy', 'kernel_release':'7.1.13-omarchy-m4-r8-ARCH',
++             'packaging_patches':json.loads((HERE/'gravity/patches/manifest.json').read_text()),
++             'compatibility_patches':versions['7.1.13+elementary.m4.gravity1-8'],
++             'source_contracts':{'boot_cpu_wfi_selection_before_first_idle':True,'bcm4388_waits_for_wifi_function':True},
++             'm4_idle_checks':{'apple_wfi_quirk_init_linked':True}}
++    def test_match(self): self.assertIs(boot.candidate_kernel_receipt(self.receipt,self.baseline),self.receipt)
++    def test_reject_wrong_target_release_patch_and_contract(self):
++        for field,value in [('target','elementary'),('kernel_release','other-ARCH'),('compatibility_patches',{}),('source_contracts',{})]:
++            with self.subTest(field=field):
++                candidate=copy.deepcopy(self.receipt);candidate[field]=value
++                with self.assertRaises(ValueError): boot.candidate_kernel_receipt(candidate,self.baseline)
++if __name__=='__main__':unittest.main()
+diff --git a/mseries/m4-mini/test_r8_identity.py b/mseries/m4-mini/test_r8_identity.py
+new file mode 100644
+index 0000000..8ae6b7d
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_identity.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++"""Check R8 package identity cannot be confused with retained R7."""
++import importlib.util
++import json
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++HERE = Path(__file__).resolve().parent
++spec = importlib.util.spec_from_file_location('m4_check', HERE / 'check-kernel-package.py')
++checker = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(checker)
++
++class IdentityTest(unittest.TestCase):
++    def check_identity(self, revision, name, release, should_pass):
++        version = '7.1.13+elementary.m4.gravity1-' + revision
++        versions = json.loads((HERE / 'gravity/compatibility/package-versions.json').read_text())
++        with tempfile.TemporaryDirectory() as temp:
++            root = Path(temp)
++            package = root / 'candidate.deb'
++            package.write_bytes(b'not a real package')
++            (root / 'package.json').write_text(json.dumps({'package_sha256': checker.digest(package)}))
++            (root / 'build.json').write_text(json.dumps({
++                'commit': checker.COMMIT, 'source_archive_sha256': checker.SOURCE_SHA,
++                'kernel_release': release, 'compatibility_patches': versions[version],
++                'm4_idle_checks': {'apple_cpu_wfi_linked': True,
++                    'apple_wfi_quirk_init_linked': True,
++                    'state_save_restore_instructions_present': True,
++                    'm4_wfxt_override_literal_present': True, 'disassembly_sha256': 'a' * 64},
++                'source_contracts': {'boot_cpu_wfi_selection_before_first_idle': True,
++                                     'bcm4388_waits_for_wifi_function': True}}))
++            fields = f'Package: {name}\nVersion: {version}\nArchitecture: arm64\n'
++            argv = ['check-kernel-package.py', '--package', str(package), '--package-receipt', str(root / 'package.json'),
++                    '--build-receipt', str(root / 'build.json'), '--receipt', str(root / 'result.json')]
++            with patch.object(sys, 'argv', argv), patch.object(checker.subprocess, 'check_output', return_value=fields), \
++                 patch.object(checker.subprocess, 'run', side_effect=RuntimeError('reached extraction')):
++                if should_pass:
++                    with self.assertRaisesRegex(RuntimeError, 'reached extraction'): checker.main()
++                else:
++                    with self.assertRaisesRegex(ValueError, 'package name and kernel release'): checker.main()
++
++    def test_retained_r7(self):
++        self.check_identity('7', 'linux-image-elementary-m4-gravity1', checker.LEGACY_RELEASE, True)
++
++    def test_r8(self):
++        self.check_identity('8', 'linux-image-elementary-m4-gravity1-r8', checker.R8_RELEASE, True)
++
++    def test_reject_r8_with_old_release(self):
++        self.check_identity('8', 'linux-image-elementary-m4-gravity1-r8', checker.LEGACY_RELEASE, False)
++
++    def test_reject_r8_with_old_package_name(self):
++        self.check_identity('8', 'linux-image-elementary-m4-gravity1', checker.R8_RELEASE, False)
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/mseries/m4-mini/test_r8_image_selection.py b/mseries/m4-mini/test_r8_image_selection.py
+new file mode 100644
+index 0000000..e00d1a4
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_image_selection.py
+@@ -0,0 +1,83 @@
++#!/usr/bin/env python3
++"""R8 image admission and policy remain explicit and version matched."""
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++HERE = Path(__file__).resolve().parent
++
++def load(name, filename):
++    spec = importlib.util.spec_from_file_location(name, HERE / filename)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++image = load('image', 'build-research-image.py')
++hosted = load('hosted', 'prepare-hosted-image-inputs.py')
++policy = load('policy', 'package-policy.py')
++
++class R8ImageTests(unittest.TestCase):
++    def controls(self, r8=False):
++        return {'kernel': {'Package': 'linux-image-elementary-m4-gravity1' + ('-r8' if r8 else ''),
++                           'Version': '7.1.13+elementary.m4.gravity1-' + ('8' if r8 else '5'), 'Architecture': 'arm64'},
++                'mesa': {'Package': 'elementary-m4-gravity-mesa1', 'Version': '1', 'Architecture': 'arm64'},
++                'policy': {'Package': 'elementary-m4-gravity-policy', 'Version': '20261021-' + ('3' if r8 else '2'), 'Architecture': 'arm64'}}
++
++    def profile(self, controls):
++        return ''.join('    ' + c['Package'] + '=' + c['Version'] + '\n' for c in controls.values())
++
++    def test_old_profile_does_not_accept_r8(self):
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(self.controls()), self.controls(True))
++
++    def test_explicit_r8_and_legacy_pass(self):
++        for r8 in (False, True):
++            controls = self.controls(r8)
++            self.assertEqual(image.profile_package_versions(self.profile(controls), controls)['kernel'], controls['kernel']['Version'])
++
++    def test_reject_mixed_kernel_or_policy(self):
++        controls = self.controls(True)
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(controls) + '    linux-image-elementary-m4-gravity1=7.1.13+elementary.m4.gravity1-5\n', controls)
++        controls['policy']['Version'] = '20261021-2'
++        with self.assertRaises(ValueError): image.profile_package_versions(self.profile(controls), controls)
++
++    def test_hosted_receipt_allows_both_kernel_names_and_checks_hash(self):
++        for suffix in ('', '-r8'):
++            with tempfile.TemporaryDirectory() as t:
++                d = Path(t); name = 'linux-image-elementary-m4-gravity1' + suffix + '_v_arm64.deb'
++                (d / name).write_bytes(b'x'); (d / 'receipt.json').write_text(json.dumps({'package':name, 'package_sha256':hashlib.sha256(b'x').hexdigest()}))
++                self.assertEqual(hosted.package(d, 'kernel'), d / name)
++                (d / name).write_bytes(b'bad')
++                with self.assertRaises(ValueError): hosted.package(d, 'kernel')
++
++    def test_live_hook_tracks_new_release_and_rejects_bad_release(self):
++        baseline = {'kernel_release': '7.1.13-elementary-m4-gravity1',
++                    'artifacts': {'arch/arm64/boot/Image': 'a'*64}, 'config_sha256': 'b'*64}
++        candidate = {'kernel_release': '7.1.13-elementary-m4-gravity1-r8',
++                     'artifacts': {'arch/arm64/boot/Image': 'c'*64}, 'config_sha256': 'd'*64}
++        hook = 'release=' + baseline['kernel_release'] + '\n' + 'a'*64 + '\n' + 'b'*64 + '\n'
++        diff = image.inputs_module.live_hook_patch(hook, baseline, candidate)
++        self.assertIn('+release=' + candidate['kernel_release'], diff)
++        candidate['kernel_release'] = 'bad\ncommand'
++        with self.assertRaises(ValueError): image.inputs_module.live_hook_patch(hook, baseline, candidate)
++
++    def test_policy_revisions_generate_matching_dependency(self):
++        for r8 in (False, True):
++            with tempfile.TemporaryDirectory() as t:
++                root=Path(t); source=root / 'gravity/policy';source.mkdir(parents=True)
++                for name in ['90-gravity-no-sleep.conf','90-gravity-no-sleep-logind.conf','90-gravity-block-sleep-service.conf']:
++                    (source/name).write_text('fixture')
++                output=root/'out'; argv=['package-policy.py','--output',str(output)] + (['--kernel-revision','r8'] if r8 else [])
++                def build(cmd, **kwargs):
++                    data=(Path(cmd[-2])/'DEBIAN/control').read_text()
++                    expected='linux-image-elementary-m4-gravity1' + ('-r8' if r8 else '')
++                    self.assertIn('Depends: systemd, initramfs-tools, '+expected+'\n',data)
++                    self.assertIn('Version: 20261021-'+('3' if r8 else '2')+'\n',data)
++                    Path(cmd[-1]).write_bytes(b'fixture')
++                with patch.object(policy, 'HERE', root), patch.object(sys, 'argv', argv), patch.object(policy.subprocess, 'run', side_effect=build): policy.main()
++
++if __name__ == '__main__': unittest.main()
+diff --git a/mseries/m4-mini/test_r8_target.py b/mseries/m4-mini/test_r8_target.py
+new file mode 100644
+index 0000000..29d7dd7
+--- /dev/null
++++ b/mseries/m4-mini/test_r8_target.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++"""The Omarchy build must have its own kernel identity and config."""
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++HERE=Path(__file__).resolve().parent
++spec=importlib.util.spec_from_file_location('kernel', HERE/'build-kernel.py')
++kernel=importlib.util.module_from_spec(spec)
++spec.loader.exec_module(kernel)
++
++class TargetTests(unittest.TestCase):
++    def write_config(self, path, release):
++        path.write_text('\n'.join(['CONFIG_ARCH_APPLE=y', 'CONFIG_ARM64_16K_PAGES=y',
++            'CONFIG_BLK_DEV_SR=y', 'CONFIG_ISO9660_FS=y', 'CONFIG_APPLE_WATCHDOG=y',
++            'CONFIG_DRM_ASAHI_M4=m', 'CONFIG_RUST=y', 'CONFIG_DRM_APPLE=m',
++            'CONFIG_AQTION=m', 'CONFIG_TIGON3=m',
++            'CONFIG_LOCALVERSION="'+release.removeprefix('7.1.13')+'"'])+'\n')
++
++    def test_targets_are_separate_and_omarchy_release_is_discoverable(self):
++        self.assertNotEqual(kernel.RELEASE, kernel.OMARCHY_RELEASE)
++        self.assertTrue(kernel.OMARCHY_RELEASE.endswith('-ARCH'))
++        with tempfile.TemporaryDirectory() as temp:
++            config=Path(temp)/'.config'
++            for release in (kernel.RELEASE, kernel.OMARCHY_RELEASE):
++                self.write_config(config, release)
++                kernel.config_gate(config, release)
++                other=kernel.OMARCHY_RELEASE if release==kernel.RELEASE else kernel.RELEASE
++                with self.assertRaises(ValueError): kernel.config_gate(config, other)
++
++if __name__=='__main__': unittest.main()

@@ -1,0 +1,274 @@
+diff --git a/Engine/overlay/src/omarchy_image.py b/Engine/overlay/src/omarchy_image.py
+index e99c7f8..9182894 100644
+--- a/Engine/overlay/src/omarchy_image.py
++++ b/Engine/overlay/src/omarchy_image.py
+@@ -18,26 +18,69 @@ WRITE_VERIFICATION = "source-sha256-write-flushed-v1"
+ PARTITION = re.compile(r"^disk[0-9]+s[0-9]+$")
+ 
+ 
++# Extra copies of the performance log, on the new install's ESP, so the
++# owner can read the macOS-side timings from Linux after first boot
++# (/boot/efi/asahi/install-timing.jsonl). Registered by mirror_to().
++TIMING_NAME = "install-timing.jsonl"
++_mirrors = []
++
++
++def _utc(seconds):
++    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds))
++
++
++def _append(path, line):
++    try:
++        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT
++                     | os.O_NOFOLLOW, 0o644 if path in _mirrors else 0o600)
++        with os.fdopen(fd, "a") as stream:
++            stream.write(line)
++    except OSError:
++        logging.warning("Performance record could not be saved")
++
++
++def mirror_to(directory):
++    """Copy the log so far into DIRECTORY and append every later record."""
++    path = os.path.join(directory, TIMING_NAME)
++    source = os.environ.get("OMARCHY_PERFORMANCE_LOG")
++    try:
++        if source and os.path.isfile(source):
++            with open(source) as stream:
++                _append(path, stream.read())
++    except OSError:
++        logging.warning("Performance log could not be copied to the ESP")
++    if path not in _mirrors:
++        _mirrors.append(path)
++
++
++def mark(event, **fields):
++    """A point-in-time record (for example: the handoff to Recovery)."""
++    now = time.time()
++    record = dict(phase=event, started_at=_utc(now), ended_at=_utc(now),
++                  seconds=0.0, outcome="mark", **fields)
++    _write(record)
++
++
++def _write(record):
++    line = json.dumps(record, sort_keys=True) + "\n"
++    logging.info("PERFORMANCE %s", line.strip())
++    path = os.environ.get("OMARCHY_PERFORMANCE_LOG")
++    for target in ([path] if path else []) + _mirrors:
++        _append(target, line)
++
++
+ @contextmanager
+ def timing(phase, **fields):
+     start = time.monotonic()
++    wall = time.time()
+     outcome = "failed"
+     try:
+         yield
+         outcome = "completed"
+     finally:
+-        record = dict(phase=phase, seconds=time.monotonic() - start,
+-                      outcome=outcome, **fields)
+-        logging.info("PERFORMANCE %s", json.dumps(record, sort_keys=True))
+-        path = os.environ.get("OMARCHY_PERFORMANCE_LOG")
+-        if path:
+-            try:
+-                fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT
+-                             | os.O_NOFOLLOW, 0o600)
+-                with os.fdopen(fd, "a") as stream:
+-                    stream.write(json.dumps(record, sort_keys=True) + "\n")
+-            except OSError:
+-                logging.warning("Performance record could not be saved")
++        _write(dict(phase=phase, seconds=time.monotonic() - start,
++                    started_at=_utc(wall), ended_at=_utc(time.time()),
++                    outcome=outcome, **fields))
+ 
+ 
+ def flush_device(target):
+diff --git a/Sources/OmarchyAppleInstaller/InstallerPerformance.swift b/Sources/OmarchyAppleInstaller/InstallerPerformance.swift
+index 18d2331..0e99984 100644
+--- a/Sources/OmarchyAppleInstaller/InstallerPerformance.swift
++++ b/Sources/OmarchyAppleInstaller/InstallerPerformance.swift
+@@ -2,16 +2,50 @@
+   import Foundation
+   import OSLog
+ 
+-  enum InstallerPerformance {
++  public enum InstallerPerformance {
+     private static let logger = Logger(
+       subsystem: InstallerProductIdentity.appIdentifier, category: "performance")
+ 
++    /// Wall-clock records the owner can line up with the engine's ESP log
++    /// (/boot/efi/asahi/install-timing.jsonl) and Linux's first-boot log.
++    /// ~/Library/Logs for the app; /var/log for the root helper.
++    static let logURL: URL = {
++      let base = getuid() == 0
++        ? URL(fileURLWithPath: "/var/log", isDirectory: true)
++        : FileManager.default.homeDirectoryForCurrentUser
++          .appendingPathComponent("Library/Logs", isDirectory: true)
++      return base.appendingPathComponent("omarchy-installer-timing.jsonl")
++    }()
++
++    static func record(_ phase: String, start: Date, end: Date, completed: Bool) {
++      let iso = ISO8601DateFormatter()
++      let line = "{\"phase\":\"\(phase)\",\"started_at\":\"\(iso.string(from: start))\","
++        + "\"ended_at\":\"\(iso.string(from: end))\",\"seconds\":\(end.timeIntervalSince(start)),"
++        + "\"outcome\":\"\(completed ? "completed" : "failed")\"}\n"
++      guard let data = line.data(using: .utf8) else { return }
++      if let handle = try? FileHandle(forWritingTo: logURL) {
++        defer { try? handle.close() }
++        _ = try? handle.seekToEnd()
++        try? handle.write(contentsOf: data)
++      } else {
++        try? data.write(to: logURL)
++      }
++    }
++
++    /// Call once from the app delegate's launch: the start of the measurement.
++    public static func markLaunch() {
++      let now = Date()
++      record("app_launched", start: now, end: now, completed: true)
++    }
++
+     static func measure<T>(_ phase: String, _ action: () throws -> T) rethrows -> T {
+       let start = ProcessInfo.processInfo.systemUptime
++      let wallStart = Date()
+       var completed = false
+       defer {
+         let seconds = ProcessInfo.processInfo.systemUptime - start
+         logger.notice("phase=\(phase, privacy: .public) seconds=\(seconds) completed=\(completed)")
++        record(phase, start: wallStart, end: Date(), completed: completed)
+       }
+       let result = try action()
+       completed = true
+diff --git a/Sources/OmarchyAppleInstallerApp/OmarchyAppleInstallerApp.swift b/Sources/OmarchyAppleInstallerApp/OmarchyAppleInstallerApp.swift
+index 2f34921..4a075a1 100644
+--- a/Sources/OmarchyAppleInstallerApp/OmarchyAppleInstallerApp.swift
++++ b/Sources/OmarchyAppleInstallerApp/OmarchyAppleInstallerApp.swift
+@@ -42,6 +42,7 @@ private final class InstallerApplicationDelegate: NSObject, NSApplicationDelegat
+   }
+ 
+   func applicationDidFinishLaunching(_ notification: Notification) {
++    InstallerPerformance.markLaunch()
+     // The install ends with a shutdown the app itself requests. macOS would
+     // otherwise treat it as an app open at shutdown and bring it back at the
+     // next login, so someone rebooting from Omarchy into macOS met the
+diff --git a/image-builder/builder/install-timing/omarchy-install-timing b/image-builder/builder/install-timing/omarchy-install-timing
+new file mode 100644
+index 0000000..357942a
+--- /dev/null
++++ b/image-builder/builder/install-timing/omarchy-install-timing
+@@ -0,0 +1,29 @@
++#!/bin/bash
++# Record the Linux half of the install-speed measurement (release gate
++# 2026-10-31): first boot, the desktop, and Claude Code answering. The macOS
++# half (app phases, engine phases with UTC start/end) is on the ESP as
++# /boot/efi/asahi/install-timing.jsonl, written by the installer engine.
++#   omarchy-install-timing boot      (system unit, once, after multi-user)
++#   omarchy-install-timing desktop   (Hyprland exec-once, once per install)
++#   omarchy-install-timing claude    (run by hand after `claude` answers)
++set -euo pipefail
++log=/var/log/omarchy/install-timing.jsonl
++esp=/boot/efi/asahi/install-timing.jsonl
++now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
++emit() { printf '{"phase":"%s","at":"%s","uptime_s":%s%s}\n' "$1" "$(now)" \
++  "$(cut -d' ' -f1 /proc/uptime)" "${2:-}" | tee -a "$log" >/dev/null; }
++mkdir -p "${log%/*}" 2>/dev/null || true
++case ${1:-} in
++  boot)
++    [[ -e $log ]] && exit 0
++    [[ -r $esp ]] && sed 's/^{/{"source":"macos",/' "$esp" >>"$log"
++    emit linux_first_boot ",\"kernel\":\"$(uname -r)\",\"systemd_analyze\":\"$(systemd-analyze 2>/dev/null | head -1 | tr -d '"')\""
++    ;;
++  desktop)
++    grep -q '"phase":"desktop_ready"' "$log" 2>/dev/null && exit 0
++    renderer=$(eglinfo -B 2>/dev/null | grep -m1 'OpenGL renderer' | cut -d: -f2- | sed 's/^ *//; s/"//g' || true)
++    emit desktop_ready ",\"renderer\":\"${renderer:-unknown}\""
++    ;;
++  claude) emit claude_code_answering ",\"version\":\"$(claude --version 2>/dev/null | tr -d '"')\"" ;;
++  *) echo "usage: $0 boot|desktop|claude" >&2; exit 64 ;;
++esac
+diff --git a/image-builder/builder/install-timing/omarchy-install-timing.service b/image-builder/builder/install-timing/omarchy-install-timing.service
+new file mode 100644
+index 0000000..77d9e69
+--- /dev/null
++++ b/image-builder/builder/install-timing/omarchy-install-timing.service
+@@ -0,0 +1,11 @@
++[Unit]
++Description=Record first-boot install timing
++After=multi-user.target local-fs.target boot-efi.mount
++ConditionPathExists=!/var/log/omarchy/install-timing.jsonl
++
++[Service]
++Type=oneshot
++ExecStart=/usr/local/bin/omarchy-install-timing boot
++
++[Install]
++WantedBy=multi-user.target
+diff --git a/Engine/overlay/src/omarchy_asahi.py b/Engine/overlay/src/omarchy_asahi.py
+index b1cbc6c..f17bdeb 100644
+--- a/Engine/overlay/src/omarchy_asahi.py
++++ b/Engine/overlay/src/omarchy_asahi.py
+@@ -30,8 +30,9 @@ import omarchy_mt7932
+ import omarchy_mt7932_policy
+ import omarchy_als
+ import omarchy_isp
+ import omarchy_recovery
++import omarchy_image
+ import omarchy_planner
+ from omarchy_image import (
+     WRITE_VERIFICATION, flush_device, hash_target, open_target, timing, write_image,
+ )
+@@ -1531,8 +1543,10 @@ class AsahiStage1Adapter:
+             shutil.copy(
+                 "installer.log",
+                 os.path.join(target, "installer.log"),
+             )
++            # Linux reads it as /boot/efi/asahi/install-timing.jsonl.
++            omarchy_image.mirror_to(target)
+         return self._installed_evidence(plan)
+ 
+     def validate_installed_checkpoint(
+         self,
+@@ -1654,8 +1668,9 @@ class AsahiStage1Adapter:
+             raise AsahiAdapterError("installed content checkpoint changed")
+ 
+     def prepare_recovery_handoff(self, plan):
+         self._require_preflight()
++        omarchy_image.mark("recovery_handoff_begin")
+         owner = os.environ.get("OMARCHY_MACHINE_OWNER", "")
+         if MACHINE_OWNER_PATTERN.fullmatch(owner) is None:
+             raise AsahiAdapterError("machine owner is unavailable")
+ 
+diff --git a/image-builder/bin/build-mac-image b/image-builder/bin/build-mac-image
+index bc445da..6f29dfa 100755
+--- a/image-builder/bin/build-mac-image
++++ b/image-builder/bin/build-mac-image
+@@ -1301,6 +1301,7 @@ configure_image() {
+   activate_limine
+   stage_board_boot_payloads
+   stage_recovery_app
++  stage_install_timing
+   arm_first_boot
+   # Recorded once the boot setup, which could change packages, is done.
+   record_packages
+@@ -1330,6 +1331,20 @@ stage_recovery_app() {
+     fail "could not stage the pinned Recovery app"
+ }
+ 
++# Install-speed measurement (owner's release gate): a oneshot that merges the
++# installer's ESP timing log into /var/log/omarchy/install-timing.jsonl on first
++# boot and appends the Linux milestones. The desktop milestone is the user
++# session's (`exec-once = omarchy-install-timing desktop`); the `/var/log/omarchy`
++# directory must be writable by the owner for it (or log via the user journal).
++stage_install_timing() {
++  install -Dm0755 "$ROOT/builder/install-timing/omarchy-install-timing" "$target/usr/local/bin/omarchy-install-timing"
++  install -Dm0644 "$ROOT/builder/install-timing/omarchy-install-timing.service" \
++    "$target/etc/systemd/system/omarchy-install-timing.service"
++  mkdir -p "$target/etc/systemd/system/multi-user.target.wants"
++  ln -sf ../omarchy-install-timing.service "$target/etc/systemd/system/multi-user.target.wants/"
++  install -d -m 1777 "$target/var/log/omarchy"
++}
++
+ # Board payloads come from the same authenticated m1n1-aurora package as Stage 2.
+ # The engine's per-board contract (BOARD_STAGE1, BOARD_STAGE2): the MacBook
+ # Neo boots its raw Stage 1 as esp/aurora/stage1-j700.bin and takes

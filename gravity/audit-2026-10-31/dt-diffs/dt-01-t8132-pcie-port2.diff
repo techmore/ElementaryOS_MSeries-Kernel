@@ -1,0 +1,70 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -1042,6 +1042,16 @@
+ 		#iommu-cells = <1>;
+ 	};
+ 
++	dart_apcie2: iommu@492000000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x92000000 0x0 0x20000>;
++		/* J773g ADT /arm-io/dart-apcie2, interrupt-parent AIC. */
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1250 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
+ 	pcie0: pcie@1cb0000000 {
+ 		status = "disabled";
+ 		compatible = "apple,t8132-pcie";
+@@ -1050,11 +1060,19 @@
+ 		reg = <0x1c 0xb0000000 0x0 0x10000000>, /* config */
+ 		      <0x4 0x94000000 0x0 0x4000>,     /* common */
+ 		      <0x4 0x90028000 0x0 0x8000>,     /* port 0 */
+-		      <0x4 0x97020000 0x0 0x4000>;     /* port 0 PHY glue */
+-		reg-names = "config", "rc", "port0", "phy0";
++		      <0x4 0x97020000 0x0 0x4000>,     /* port 0 PHY glue */
++		      <0x4 0x92028000 0x0 0x8000>,     /* port 2 */
++		      <0x4 0x97028000 0x0 0x4000>;     /* port 2 PHY glue */
++		reg-names = "config", "rc", "port0", "phy0", "port2", "phy2";
+ 
++		/*
++		 * One interrupt per root port, indexed by port number. The
++		 * J773g ADT /arm-io/apcie lists 1231, 1240 and 1249.
++		 */
+ 		interrupt-parent = <&aic>;
+-		interrupts = <AIC_IRQ 1231 IRQ_TYPE_LEVEL_HIGH>;
++		interrupts = <AIC_IRQ 1231 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 1240 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 1249 IRQ_TYPE_LEVEL_HIGH>;
+ 
+ 		msi-controller;
+ 		msi-parent = <&pcie0>;
+@@ -1089,6 +1107,26 @@
+ 					<0 0 0 4 &port00 0 0 0 3>;
+ 
+ 
++		};
++
++		/* Mac mini: on-board Ethernet (ADT pci-bridge2, PERST# GPIO 165). */
++		port02: pci@2,0 {
++			device_type = "pci";
++			reg = <0x1000 0x0 0x0 0x0 0x0>;
++			bus-range = <2 2>;
++
++			#address-cells = <3>;
++			#size-cells = <2>;
++			ranges;
++
++			interrupt-controller;
++			#interrupt-cells = <1>;
++			interrupt-map-mask = <0 0 0 7>;
++			interrupt-map = <0 0 0 1 &port02 0 0 0 0>,
++					<0 0 0 2 &port02 0 0 0 1>,
++					<0 0 0 3 &port02 0 0 0 2>,
++					<0 0 0 4 &port02 0 0 0 3>;
++			status = "disabled";
+ 		};
+ 	};
+ };

@@ -1,0 +1,91 @@
+--- a/Documentation/devicetree/bindings/pci/apple,pcie.yaml
++++ b/Documentation/devicetree/bindings/pci/apple,pcie.yaml
+@@ -59,6 +59,10 @@
+           - const: apple,t8122-pcie
+           - const: apple,t6020-pcie
+       - const: apple,t6020-pcie
++      - const: apple,t8132-pcie
++      - items:
++          - const: apple,t8132-pcie
++          - const: apple,t6020-pcie
+       - const: apple,t8140-pcie
+       - const: apple,t8103-pciec
+       - items:
+@@ -213,6 +217,9 @@
+         compatible:
+           contains:
+             const: apple,t6020-pcie
++          not:
++            contains:
++              const: apple,t8132-pcie
+     then:
+       properties:
+         reg-names:
+@@ -284,20 +291,53 @@
+               interrupts:
+                 maxItems: 3
+           else:
+-            properties:
+-              reg-names:
+-                minItems: 3
+-                items:
+-                  - const: config
+-                  - const: rc
+-                  - const: port0
+-                  - const: port1
+-                  - const: port2
+-                  - const: port3
+-                  - const: phy0
+-                  - const: phy1
+-                  - const: phy2
+-                  - const: phy3
++            allOf:
++              - if:
++                  properties:
++                    compatible:
++                      contains:
++                        const: apple,t8132-pcie
++                then:
++                  oneOf:
++                    - properties:
++                        reg:
++                          minItems: 4
++                          maxItems: 4
++                        reg-names:
++                          items:
++                            - const: config
++                            - const: rc
++                            - const: port0
++                            - const: phy0
++                    - properties:
++                        reg:
++                          minItems: 8
++                          maxItems: 8
++                        reg-names:
++                          items:
++                            - const: config
++                            - const: rc
++                            - const: port0
++                            - const: port1
++                            - const: port2
++                            - const: phy0
++                            - const: phy1
++                            - const: phy2
++                else:
++                  properties:
++                    reg-names:
++                      minItems: 3
++                      items:
++                        - const: config
++                        - const: rc
++                        - const: port0
++                        - const: port1
++                        - const: port2
++                        - const: port3
++                        - const: phy0
++                        - const: phy1
++                        - const: phy2
++                        - const: phy3
+       patternProperties:
+         "^pci@":
+           properties:

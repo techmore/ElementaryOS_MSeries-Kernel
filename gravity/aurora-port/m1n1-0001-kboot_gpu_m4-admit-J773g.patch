@@ -1,0 +1,44 @@
+From: claude <noreply@anthropic.com>
+Subject: [PATCH] kboot_gpu_m4: admit J773g (Mac mini) for the G16 GPU handoff
+
+The J773g ADT (macOS 26.6.2) passes every check publish_gpu_m4() makes:
+sgx at 0x300000000 (0x4000000), gfx-asc at 0x302600000 (0x88000),
+interrupts 994, 993, 996, 995, __TEXT;__DATA segments starting at IOVA
+0xfffffc0000000000, and the four GPU region base/size pairs. Only the
+board check rejected it.
+
+Against aurora-silicon/m1n1 aurora-wip b6b459221ede. Not built or booted.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+--- a/src/kboot_gpu_m4.c	2026-10-31 09:04:07
++++ b/src/kboot_gpu_m4.c	2026-10-31 09:04:07
+@@ -61,7 +61,10 @@
+     int gpu = fdt_path_offset(dt, "gpu");
+     if (gpu < 0)
+         return 0; /* A framebuffer-only DT needs no GPU handoff. */
+-    if (chip_id != T8132 || fdt_node_check_compatible(dt, 0, "apple,j713") ||
++    /* J773g (Mac mini) has the same GPU apertures, IRQs and firmware segments. */
++    if (chip_id != T8132 ||
++        (fdt_node_check_compatible(dt, 0, "apple,j713") &&
++         fdt_node_check_compatible(dt, 0, "apple,j773g")) ||
+         fdt_node_check_compatible(dt, gpu, "apple,agx-t8132"))
+         return -1;
+ 
+@@ -151,7 +154,7 @@
+         fdt_setprop(dt, gpu, "apple,firmware-segment-flags", flags, sizeof(flags)) ||
+         fdt_setprop_u32(dt, gpu, "apple,g16-handoff-version", 1))
+         return -1;
+-    printf("FDT: GPU: published J713 G16 memory resources without starting the GPU\n");
++    printf("FDT: GPU: published T8132 G16 memory resources without starting the GPU\n");
+     return 0;
+ }
+ 
+@@ -177,6 +180,6 @@
+     }
+     if (fdt_setprop_string(dt, gpu, "status", "disabled") && fdt_nop_node(dt, gpu))
+         return -1; /* A corrupt DT cannot safely describe the failed device. */
+-    printf("FDT: GPU: unqualified J713 handoff, disabling native GPU\n");
++    printf("FDT: GPU: unqualified T8132 handoff, disabling native GPU\n");
+     return 0;
+ }

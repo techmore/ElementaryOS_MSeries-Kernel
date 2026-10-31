@@ -1,0 +1,97 @@
+diff --git a/src/kboot_gpu_m4.c b/src/kboot_gpu_m4.c
+index 29ad4d0..246aeae 100644
+--- a/src/kboot_gpu_m4.c
++++ b/src/kboot_gpu_m4.c
+@@ -61,9 +61,24 @@ static int publish_gpu_m4(void *dt)
+     int gpu = fdt_path_offset(dt, "gpu");
+     if (gpu < 0)
+         return 0; /* A framebuffer-only DT needs no GPU handoff. */
+-    if (chip_id != T8132 || fdt_node_check_compatible(dt, 0, "apple,j713") ||
++    bool air = !fdt_node_check_compatible(dt, 0, "apple,j713");
++    bool mini = !fdt_node_check_compatible(dt, 0, "apple,j773g");
++    if (chip_id != T8132 || (!air && !mini) ||
+         fdt_node_check_compatible(dt, gpu, "apple,agx-t8132"))
+         return -1;
++    /* Mini resource publication is an explicit bring-up opt-in only. Keep
++     * the GPU disabled even when the handoff succeeds: board power, firmware
++     * identity, U-Boot import and the native driver still need qualification.
++     */
++    if (mini) {
++        int len;
++        const void *opt_in = fdt_getprop(dt, gpu, "apple,j773g-gpu-handoff-draft", &len);
++        if (!opt_in || len != 0)
++            return -1;
++        const char *status = fdt_getprop(dt, gpu, "status", &len);
++        if (!status || len != sizeof("disabled") || memcmp(status, "disabled", len))
++            return -1;
++    }
+-
++
+     /* A failed refresh must never leave a stale completed-handoff marker. */
+     int ret = fdt_delprop(dt, gpu, "apple,g16-handoff-version");
+@@ -151,7 +166,7 @@ static int publish_gpu_m4(void *dt)
+         fdt_setprop(dt, gpu, "apple,firmware-segment-flags", flags, sizeof(flags)) ||
+         fdt_setprop_u32(dt, gpu, "apple,g16-handoff-version", 1))
+         return -1;
+-    printf("FDT: GPU: published J713 G16 memory resources without starting the GPU\n");
++    printf("FDT: GPU: published T8132 G16 memory resources without starting the GPU\n");
+     return 0;
+ }
+-
++
+@@ -177,6 +192,6 @@ int dt_set_gpu_m4(void *dt)
+     }
+     if (fdt_setprop_string(dt, gpu, "status", "disabled") && fdt_nop_node(dt, gpu))
+         return -1; /* A corrupt DT cannot safely describe the failed device. */
+-    printf("FDT: GPU: unqualified J713 handoff, disabling native GPU\n");
++    printf("FDT: GPU: unqualified T8132 handoff, disabling native GPU\n");
+     return 0;
+ }
+diff --git a/tests/python/test_m4_gpu_handoff.py b/tests/python/test_m4_gpu_handoff.py
+index eb6465e..2bada40 100644
+--- a/tests/python/test_m4_gpu_handoff.py
++++ b/tests/python/test_m4_gpu_handoff.py
+@@ -55,7 +55,7 @@ int main(void)
+ {
+     char blob[32768];
+     const char *regions[] = {"uat-ttbs", "uat-pagetables", "uat-handoff", "uat-shared-l2", "gpu-fw-text", "gpu-fw-data"};
+-    for (fault = 0; fault <= 12; fault++) {
++    for (fault = 0; fault <= 16; fault++) {
+         assert(!fdt_create_empty_tree(blob, sizeof(blob)));
+         assert(!fdt_setprop_string(blob, 0, "compatible", "apple,j713"));
+         int gpu = fdt_add_subnode(blob, 0, "gpu"); assert(gpu >= 0);
+@@ -87,6 +87,16 @@ int main(void)
+             gpu = fdt_path_offset(blob, "/gpu");
+             assert(!fdt_setprop_string(blob, gpu, "compatible", "apple,unsupported-gpu"));
+         }
++        if (fault >= 13) {
++            assert(!fdt_setprop_string(blob, 0, "compatible", "apple,j773g"));
++            gpu = fdt_path_offset(blob, "/gpu");
++            assert(!fdt_setprop_string(blob, gpu, "status", fault == 16 ? "okay" : "disabled"));
++            gpu = fdt_path_offset(blob, "/gpu");
++            if (fault == 13 || fault == 16)
++                assert(!fdt_setprop_empty(blob, gpu, "apple,j773g-gpu-handoff-draft"));
++            if (fault == 15)
++                assert(!fdt_setprop_u32(blob, gpu, "apple,j773g-gpu-handoff-draft", 1));
++        }
+         int result = dt_set_gpu_m4(blob);
+         fb = fdt_path_offset(blob, "/framebuffer");
+         const char *fb_status = fdt_getprop(blob, fb, "status", NULL);
+@@ -94,12 +104,16 @@ int main(void)
+         gpu = fdt_path_offset(blob, "/gpu");
+         int len;
+         const fdt32_t *version = fdt_getprop(blob, gpu, "apple,g16-handoff-version", &len);
+-        if (fault) {
++        if (fault && fault != 13) {
+             assert(!result && !version && !fdt_num_mem_rsv(blob));
+             const char *status = fdt_getprop(blob, gpu, "status", NULL);
+             assert(status && !strcmp(status, "disabled"));
+         } else {
+             assert(!result && version && len == 4 && fdt32_to_cpu(*version) == 1);
++            if (fault == 13) {
++                const char *status = fdt_getprop(blob, gpu, "status", NULL);
++                assert(status && !strcmp(status, "disabled"));
++            }
+             assert(fdt_num_mem_rsv(blob) == 6);
+             for (unsigned i = 0; i < 6; i++) {
+                 char path[80]; snprintf(path, sizeof(path), "/reserved-memory/%s", regions[i]);

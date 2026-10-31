@@ -1,0 +1,99 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -1292,4 +1292,95 @@
+ 	};
+ };
+ 
++/*
++ * External display pipe 0 and the DisplayPort transmitter PHY that feeds the
++ * Mac mini HDMI port (J773g ADT dispext0, dcpext0, dart-dcpext0,
++ * dart-dispext0, dptx-phy). Board files enable these.
++ */
++&soc {
++	dispext0_dart: iommu@286300000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x2 0x86300000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 750 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_dispext0_fe>;
++		apple,dma-range = <0x100 0x0 0x10 0x0>;
++	};
++
++	dcpext0_dart: iommu@286340000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x2 0x86340000 0x0 0x20000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 750 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_dispext0_fe>;
++		apple,dma-range = <0x100 0x0 0x10 0x0>;
++	};
++
++	dcpext0_mbox: mailbox@286e08000 {
++		status = "disabled";
++		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x2 0x86e08000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		/* The ADT lists each pair as not-empty, empty (732, 731, 734, 733). */
++		interrupts = <AIC_IRQ 731 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 732 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 733 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 734 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty",
++				  "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++		power-domains = <&ps_dispext0_cpu>;
++	};
++
++	/*
++	 * Only referenced through apple,bw-scratch; carries no compatible.
++	 * Not named power-management@382800000: that would merge it into
++	 * the pmc node of t8132-memory.dtsi, which owns the first 64 KiB.
++	 */
++	pmgr_dcp: dcp-pmgr@382800000 {
++		reg = <0x3 0x82800000 0x0 0xbc000>;
++		reg-names = "dcp-fw-pmgr";
++		#apple,bw-scratch-cells = <3>;
++	};
++
++	dcpext0: dcp@286e00000 {
++		status = "disabled";
++		compatible = "apple,t8132-dcpext", "apple,dcpext";
++		reg = <0x2 0x86e00000 0x0 0x4000>,
++		      <0x2 0x84000000 0x0 0xc20000>,
++		      <0x2 0x86240000 0x0 0x10000>,
++		      <0x2 0x863a8000 0x0 0x4000>,
++		      <0x2 0x86800000 0x0 0x800000>;
++		reg-names = "coproc", "disp-0", "disp-1", "disp-2", "disp-3";
++		mboxes = <&dcpext0_mbox>;
++		mbox-names = "mbox";
++		iommus = <&dcpext0_dart 23>;
++		/* Offset taken from Gravity; not derivable from the ADT. */
++		apple,bw-scratch = <&pmgr_dcp 0 4 0x2c000>;
++		apple,dcp-index = <1>;
++		power-domains = <&ps_dispext0_cpu>;
++		#address-cells = <2>;
++		#size-cells = <2>;
++
++		dispext0_piodma: piodma {
++			iommus = <&dispext0_dart 16>;
++		};
++	};
++
++	dptxphy: phy@39a700000 {
++		status = "disabled";
++		compatible = "apple,t8122-dptx-phy", "apple,dptx-phy";
++		reg = <0x3 0x9a700000 0x0 0x4000>,
++		      <0x3 0x9a740000 0x0 0x10000>;
++		reg-names = "core", "dptx";
++		power-domains = <&ps_dptx_phy>;
++		#phy-cells = <0>;
++		#reset-cells = <0>;
++	};
++};
++
+ #include "t8132-memory.dtsi"

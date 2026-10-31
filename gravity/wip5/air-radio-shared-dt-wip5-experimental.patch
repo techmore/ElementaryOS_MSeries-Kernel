@@ -1,0 +1,4211 @@
+diff --git a/Documentation/ABI/testing/sysfs-driver-apple-dart b/Documentation/ABI/testing/sysfs-driver-apple-dart
+new file mode 100644
+--- /dev/null
++++ b/Documentation/ABI/testing/sysfs-driver-apple-dart
+@@ -0,0 +1,24 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++
++What:		/sys/bus/platform/devices/<unit>.iommu/j713_radio_fault_state
++Date:		October 2026
++KernelVersion:	7.2
++Contact:	Eryk Wieliczko <eryk@wieliczko.ninja>
++Description:
++		Root-readable, passive fault-register snapshot for a bound Apple
++		DART using the J713 managed radio stream profile. Absent on other
++		DARTs. A read returns hexadecimal register values, decimal failure
++		state, and the following newline-separated fields:
++
++		version, managed, failed: DART version, owned stream bitmap, and
++		whether the driver's owned-stream quarantine has been triggered.
++		error_mask, error: inherited global error interrupt mask and error
++		register. A zero error mask is the generic driver's unmasked state.
++		error_streams[N], exceptions[N]: implemented stream-error and
++		per-stream exception summary words, including foreign streams.
++		sidN status, addr: exception status and address for each owned SID.
++
++		The snapshot can race hardware updates and IRQ acknowledgements;
++		it is not an atomic hardware snapshot or a claim of DMA quiescence.
++		Reading never clears or unmasks a fault, changes stream state,
++		starts DMA, or communicates with the Bluetooth controller.
+diff --git a/Documentation/devicetree/bindings/iommu/apple,dart.yaml b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+--- a/Documentation/devicetree/bindings/iommu/apple,dart.yaml
++++ b/Documentation/devicetree/bindings/iommu/apple,dart.yaml
+@@ -41,6 +41,23 @@
+               - apple,t8140-dart
+               - apple,t8142-dart
+           - const: apple,t8110-dart
++
++  apple,managed-sids:
++    $ref: /schemas/types.yaml#/definitions/uint32-array
++    items:
++      - const: 1
++      - const: 2
++    description: >
++      J713 radio ordinary stream ownership profile. Only these inactive
++      normal streams and their exact-RID entries may be adopted by the OS.
++      Other streams and RID entries remain inherited. The documented static
++      SID16 bypass role may be initialized only from a disabled stream with
++      no valid root; an existing bypass remains unchanged. PIODMA and other
++      reserved roles are not modified. This does not authorize a controller
++      reset or takeover of active page tables. Both the radio DART and PCI
++      host describe the same two ordinary streams. Error reporting must
++      already be unmasked at admission; the OS preserves the inherited global
++      error-mask policy rather than changing it for these streams.
+ 
+   reg:
+     maxItems: 1
+diff --git a/Documentation/devicetree/bindings/pci/apple,pcie.yaml b/Documentation/devicetree/bindings/pci/apple,pcie.yaml
+--- a/Documentation/devicetree/bindings/pci/apple,pcie.yaml
++++ b/Documentation/devicetree/bindings/pci/apple,pcie.yaml
+@@ -65,6 +65,21 @@
+           - const: apple,t8112-pciec
+           - const: apple,t8103-pciec
+       - const: apple,t6000-pciec
++
++  apple,managed-sids:
++    $ref: /schemas/types.yaml#/definitions/uint32-array
++    items:
++      - const: 1
++      - const: 2
++    description: >
++      J713 radio ordinary stream ownership profile. Only these inactive
++      normal streams and their exact-RID entries may be adopted by the OS.
++      Other streams and RID entries remain inherited. The documented static
++      SID16 bypass role may be initialized only from a disabled stream with
++      no valid root; an existing bypass remains unchanged. PIODMA and other
++      reserved roles are not modified. This does not authorize a controller
++      reset or takeover of active page tables. Both the radio DART and PCI
++      host describe the same two ordinary streams.
+ 
+   reg:
+     minItems: 3
+diff --git a/Documentation/soc/apple/index.rst b/Documentation/soc/apple/index.rst
+--- a/Documentation/soc/apple/index.rst
++++ b/Documentation/soc/apple/index.rst
+@@ -7,4 +7,5 @@
+    :maxdepth: 1
+ 
+    t8132-pmp-thermal
++   t8132-nvram
+    t8140-pmp-dvfs
+diff --git a/Documentation/soc/apple/t8132-nvram.rst b/Documentation/soc/apple/t8132-nvram.rst
+new file mode 100644
+--- /dev/null
++++ b/Documentation/soc/apple/t8132-nvram.rst
+@@ -0,0 +1,38 @@
++.. SPDX-License-Identifier: GPL-2.0-only OR MIT
++
++J713 NVRAM and boot-volume selection
++===================================
++
++The J713 (MacBook Air M4) boot NOR is connected to the T8132 QSPIMC at
++0x3ad118000. Its NVRAM partition occupies flash offsets 0x700000..0x7fffff.
++The Apple QSPI driver exposes this partition through MTD for userspace tools
++such as ``asahi-nvram`` and ``asahi-bless``. The latter selects an existing
++Apple boot volume; it does not install or sign a new boot policy.
++
++The controller starts read-only. Root can enable writes after probe through
++``/sys/module/spi_apple_qspi/parameters/read_only``. Write admission requires
++the J713 board, T8132 controller, matching aperture and NVRAM partition.
++Programs and erases remain restricted to that partition, single-wire
++three-byte addressing, 256-byte pages and aligned 4 KiB erase blocks. The
++existing JEDEC identity and protection checks apply before every mutation.
++The driver does not change flash protection registers. Each mutation is
++verified by readback; a write fault latches the driver back to read-only.
++
++For a one-time macOS boot while retaining the persistent Linux boot target::
++
++    modprobe spi-apple-qspi
++    asahi-bless --get-boot
++    asahi-bless --get-boot --next
++    asahi-bless --list-volumes
++    printf N > /sys/module/spi_apple_qspi/parameters/read_only
++    asahi-bless --set-boot-macos --next --yes
++    printf Y > /sys/module/spi_apple_qspi/parameters/read_only
++    asahi-bless --get-boot
++    asahi-bless --get-boot --next
++
++Verify that the persistent target is unchanged and the one-time target is
++the intended macOS volume before rebooting. If an update fails, retain the
++running system for inspection rather than retrying or rebooting with an
++uncertain selection. Returning from macOS requires a restart or a selection
++in Apple's startup picker; Linux cannot initiate that restart while macOS
++is running.
+diff --git a/MAINTAINERS b/MAINTAINERS
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -2652,6 +2652,7 @@
+ B:	https://github.com/AsahiLinux/linux/issues
+ C:	irc://irc.oftc.net/asahi-dev
+ T:	git https://github.com/AsahiLinux/linux.git
++F:	Documentation/ABI/testing/sysfs-driver-apple-dart
+ F:	Documentation/devicetree/bindings/arm/apple.yaml
+ F:	Documentation/devicetree/bindings/arm/apple/*
+ F:	Documentation/devicetree/bindings/clock/apple,nco.yaml
+diff --git a/arch/arm64/boot/dts/apple/t8132-j713.dts b/arch/arm64/boot/dts/apple/t8132-j713.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j713.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j713.dts
+@@ -26,6 +26,7 @@
+ 		ans-mbox = &ans_mbox;
+ 		atcphy0 = &atcphy0;
+ 		atcphy1 = &atcphy1;
++		bluetooth0 = &bluetooth0;
+ 		keyboard = &keyboard;
+ 		nvram = &nvram;
+ 		pmu-primary = &pmic1;
+@@ -274,14 +275,25 @@
+ 
+ &dart_apcie0 {
+ 	status = "okay";
+-	apple,dma-range = <0x100 0x00010000 0x0 0x3fe00000>;
++	apple,managed-sids = <1 2>;
++	apple,dma-range = <0x100 0x00100000 0x0 0x3fe00000>;
+ };
+ 
+ &pcie0 {
+ 	status = "okay";
++	apple,managed-sids = <1 2>;
++	iommu-map = <0x100 &dart_apcie0 1 2>;
++	iommu-map-mask = <0xffff>;
+ 	pci@0,0 {
+ 		pwren-gpios = <&smc_gpio 0x13 GPIO_ACTIVE_HIGH>;
+ 		reset-gpios = <&pinctrl_ap 163 GPIO_ACTIVE_LOW>;
++		bluetooth0: bluetooth@0,1 {
++			compatible = "pci14e4,5f72";
++			reg = <0x10100 0x0 0x0 0x0 0x0>;
++			brcm,board-type = "apple,garden";
++			/* Per-machine address and calibration supplied by m1n1. */
++			local-bd-address = [00 00 00 00 00 00];
++		};
+ 		wifi0: wifi@0,0 {
+ 			compatible = "pci14e4,4434";
+ 			reg = <0x10000 0x0 0x0 0x0 0x0>;
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi b/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132-j773g-usb.dtsi
+@@ -76,24 +76,7 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy0: phy@403000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x03000000 0x0 0x4c000>,
+-				<0x4 0x03050000 0x0 0x8000>,
+-				<0x4 0x00000000 0x0 0x8000>,
+-				<0x4 0x02a90000 0x0 0x4000>,
+-				<0x4 0x02a84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
+-			#phy-cells = <1>;
+-			#reset-cells = <0>;
+-
+-			orientation-switch;
+-			mode-switch;
+-			power-domains = <&ps_atc0_usb>;
+-			status = "disabled";
+-		};
++
+ 
+ 		dwc3_1: usb@40a280000 {
+ 			compatible = "apple,t8132-dwc3", "apple,t8103-dwc3";
+@@ -134,24 +117,7 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy1: phy@40b000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x0b000000 0x0 0x4c000>,
+-				<0x4 0x0b050000 0x0 0x8000>,
+-				<0x4 0x08000000 0x0 0x8000>,
+-				<0x4 0x0aa90000 0x0 0x4000>,
+-				<0x4 0x0aa84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
+-			#phy-cells = <1>;
+-			#reset-cells = <0>;
+-
+-			orientation-switch;
+-			mode-switch;
+-			power-domains = <&ps_atc1_usb>;
+-			status = "disabled";
+-		};
++
+ 
+ 		dwc3_3: usb@41a280000 {
+ 			compatible = "apple,t8132-dwc3", "apple,t8103-dwc3";
+@@ -192,19 +158,13 @@
+ 			status = "disabled";
+ 		};
+ 
+-		atcphy3: phy@41b000000 {
+-			compatible = "apple,t8132-atcphy", "apple,t8122-atcphy";
+-			reg = <0x4 0x1b000000 0x0 0x4c000>,
+-				<0x4 0x1b050000 0x0 0x8000>,
+-				<0x4 0x18000000 0x0 0x8000>,
+-				<0x4 0x1aa90000 0x0 0x4000>,
+-				<0x4 0x1aa84000 0x0 0x4000>;
+-			reg-names = "core", "lpdptx", "axi2af", "usb2phy",
+-				"pipehandler";
+-
++		atcphy3: phy@41aa90000 {
++			compatible = "apple,t8132-atcphy";
++			reg = <0x4 0x1aa90000 0x0 0x4000>,
++			      <0x4 0x1aa84000 0x0 0x4000>;
++			reg-names = "usb2phy", "pipehandler";
+ 			#phy-cells = <1>;
+ 			#reset-cells = <0>;
+-
+ 			orientation-switch;
+ 			mode-switch;
+ 			power-domains = <&ps_atc3_usb>;
+@@ -331,6 +291,7 @@
+ };
+ 
+ &atcphy0 {
++	power-domains = <&ps_atc0_usb>;
+ 	ports {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+@@ -352,6 +313,7 @@
+ };
+ 
+ &atcphy1 {
++	power-domains = <&ps_atc1_usb>;
+ 	ports {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -66,18 +66,7 @@
+ 		status = "disabled";
+ 	};
+ 
+-	smc_mbox: mailbox@38c608000 {
+-		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
+-		reg = <0x3 0x8c608000 0x0 0x4000>;
+-		interrupt-parent = <&aic>;
+-		interrupts = <AIC_IRQ 561 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 562 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 563 IRQ_TYPE_LEVEL_HIGH>,
+-		             <AIC_IRQ 564 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "send-empty", "send-not-empty",
+-		                  "recv-empty", "recv-not-empty";
+-		#mbox-cells = <0>;
+-	};
++
+ 
+ 	smc: smc@38c600000 {
+ 		compatible = "apple,t8132-smc", "apple,t8103-smc";
+@@ -85,6 +74,7 @@
+ 		      <0x3 0x8de00000 0x0 0x100000>;
+ 		reg-names = "smc", "sram";
+ 		mboxes = <&smc_mbox>;
++		status = "okay";
+ 
+ 		smc_gpio: gpio {
+ 			compatible = "apple,smc-gpio";
+@@ -102,3 +92,7 @@
+ };
+ 
+ #include "t8132-j773g-usb.dtsi"
++
++&smc_mbox {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/apple/t8132-memory.dtsi b/arch/arm64/boot/dts/apple/t8132-memory.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-memory.dtsi
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/* T8132 memory/cache resources, also used by the legacy-loader adapter. */
++
++&soc {
++	mcc: memory-controller@220000000 {
++		compatible = "apple,t8132-mcc";
++		reg = <0x2 0x20000000 0x0 0x1c1c04>,
++		      <0x2 0x22000000 0x0 0x1c1c04>;
++		status = "disabled";
++	};
++
++	pmc: power-management@382800000 {
++		compatible = "apple,t8132-pmc";
++		reg = <0x3 0x82800000 0x0 0x10000>,
++		      <0x3 0x828aa000 0x0 0x3000>;
++		reg-names = "voters", "rails";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		apple,pmp = <&pmp>;
++		status = "disabled";
++
++		clpc: performance-controller@3 {
++			compatible = "apple,t8132-clpc";
++			reg = <3>;
++			apple,gpu-power-state = <&ps_gfx>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -8,6 +8,8 @@
+ #include <dt-bindings/interrupt-controller/apple-aic.h>
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include <dt-bindings/pinctrl/apple.h>
++#include <dt-bindings/phy/phy.h>
++#include <dt-bindings/spmi/spmi.h>
+ 
+ / {
+ 	compatible = "apple,t8132", "apple,arm-platform";
+@@ -66,6 +68,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_e1: cpu@1 {
+@@ -77,6 +81,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_e2: cpu@2 {
+@@ -88,6 +94,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_e3: cpu@3 {
+@@ -99,6 +107,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_e4: cpu@4 {
+@@ -110,6 +120,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_e5: cpu@5 {
+@@ -121,6 +133,8 @@
+ 			next-level-cache = <&l2_cache_0>;
+ 			i-cache-size = <0x20000>;
+ 			d-cache-size = <0x10000>;
++			operating-points-v2 = <&donan_e_opp>;
++			performance-domains = <&cpufreq_e>;
+ 		};
+ 
+ 		cpu_p0: cpu@10100 {
+@@ -132,6 +146,8 @@
+ 			next-level-cache = <&l2_cache_1>;
+ 			i-cache-size = <0x30000>;
+ 			d-cache-size = <0x20000>;
++			operating-points-v2 = <&donan_p_opp>;
++			performance-domains = <&cpufreq_p>;
+ 		};
+ 
+ 		cpu_p1: cpu@10101 {
+@@ -143,6 +159,8 @@
+ 			next-level-cache = <&l2_cache_1>;
+ 			i-cache-size = <0x30000>;
+ 			d-cache-size = <0x20000>;
++			operating-points-v2 = <&donan_p_opp>;
++			performance-domains = <&cpufreq_p>;
+ 		};
+ 
+ 		cpu_p2: cpu@10102 {
+@@ -154,6 +172,8 @@
+ 			next-level-cache = <&l2_cache_1>;
+ 			i-cache-size = <0x30000>;
+ 			d-cache-size = <0x20000>;
++			operating-points-v2 = <&donan_p_opp>;
++			performance-domains = <&cpufreq_p>;
+ 		};
+ 
+ 		cpu_p3: cpu@10103 {
+@@ -165,6 +185,8 @@
+ 			next-level-cache = <&l2_cache_1>;
+ 			i-cache-size = <0x30000>;
+ 			d-cache-size = <0x20000>;
++			operating-points-v2 = <&donan_p_opp>;
++			performance-domains = <&cpufreq_p>;
+ 		};
+ 
+ 		l2_cache_0: l2-cache-0 {
+@@ -182,6 +204,132 @@
+ 		};
+ 	};
+ 
++	donan_e_opp: opp-table-0 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-900000000 {
++			opp-hz = /bits/ 64 <900000000>;
++			opp-level = <1>;
++		};
++		opp-1080000000 {
++			opp-hz = /bits/ 64 <1080000000>;
++			opp-level = <2>;
++		};
++		opp-1476000000 {
++			opp-hz = /bits/ 64 <1476000000>;
++			opp-level = <3>;
++		};
++		opp-1860000000 {
++			opp-hz = /bits/ 64 <1860000000>;
++			opp-level = <4>;
++		};
++		opp-2172000000 {
++			opp-hz = /bits/ 64 <2172000000>;
++			opp-level = <5>;
++		};
++		opp-2496000000 {
++			opp-hz = /bits/ 64 <2496000000>;
++			opp-level = <6>;
++		};
++		opp-2808000000 {
++			opp-hz = /bits/ 64 <2808000000>;
++			opp-level = <7>;
++		};
++		opp-2892000000 {
++			opp-hz = /bits/ 64 <2892000000>;
++			opp-level = <8>;
++		};
++	};
++
++	donan_p_opp: opp-table-1 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-912000000 {
++			opp-hz = /bits/ 64 <912000000>;
++			opp-level = <1>;
++		};
++		opp-1260000000 {
++			opp-hz = /bits/ 64 <1260000000>;
++			opp-level = <2>;
++		};
++		opp-1512000000 {
++			opp-hz = /bits/ 64 <1512000000>;
++			opp-level = <3>;
++		};
++		opp-1800000000 {
++			opp-hz = /bits/ 64 <1800000000>;
++			opp-level = <4>;
++		};
++		opp-2088000000 {
++			opp-hz = /bits/ 64 <2088000000>;
++			opp-level = <5>;
++		};
++		opp-2352000000 {
++			opp-hz = /bits/ 64 <2352000000>;
++			opp-level = <6>;
++		};
++		opp-2616000000 {
++			opp-hz = /bits/ 64 <2616000000>;
++			opp-level = <7>;
++		};
++		opp-2868000000 {
++			opp-hz = /bits/ 64 <2868000000>;
++			opp-level = <8>;
++		};
++		opp-3096000000 {
++			opp-hz = /bits/ 64 <3096000000>;
++			opp-level = <9>;
++		};
++		opp-3300000000 {
++			opp-hz = /bits/ 64 <3300000000>;
++			opp-level = <10>;
++		};
++		opp-3468000000 {
++			opp-hz = /bits/ 64 <3468000000>;
++			opp-level = <11>;
++		};
++		opp-3624000000 {
++			opp-hz = /bits/ 64 <3624000000>;
++			opp-level = <12>;
++		};
++		opp-3756000000 {
++			opp-hz = /bits/ 64 <3756000000>;
++			opp-level = <13>;
++		};
++		opp-3876000000 {
++			opp-hz = /bits/ 64 <3876000000>;
++			opp-level = <14>;
++		};
++		opp-3936000000 {
++			opp-hz = /bits/ 64 <3936000000>;
++			opp-level = <15>;
++		};
++		opp-3984000000 {
++			opp-hz = /bits/ 64 <3984000000>;
++			opp-level = <16>;
++		};
++		opp-4044000000 {
++			opp-hz = /bits/ 64 <4044000000>;
++			opp-level = <17>;
++		};
++		opp-4104000000 {
++			opp-hz = /bits/ 64 <4104000000>;
++			opp-level = <18>;
++		};
++		opp-4416000000 {
++			opp-hz = /bits/ 64 <4416000000>;
++			opp-level = <19>;
++			turbo-mode;
++		};
++		opp-4464000000 {
++			opp-hz = /bits/ 64 <4464000000>;
++			opp-level = <20>;
++			turbo-mode;
++		};
++	};
++
+ 	clkref: clock-ref {
+ 		compatible = "fixed-clock";
+ 		#clock-cells = <0>;
+@@ -189,6 +337,13 @@
+ 		clock-output-names = "clkref";
+ 	};
+ 
++	qspi_clk: clock-qspi {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <200000000>;
++		clock-output-names = "qspi";
++	};
++
+ 	soc: soc {
+ 		compatible = "simple-bus";
+ 		#address-cells = <2>;
+@@ -196,6 +351,80 @@
+ 
+ 		ranges;
+ 		nonposted-mmio;
++
++		qspi: spi@3ad118000 {
++			compatible = "apple,t8132-qspi";
++			/* ADT's overlapping P and C apertures form one resource. */
++			reg = <0x3 0xad118000 0 0x4800>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1060 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&qspi_clk>;
++			power-domains = <&ps_qspi>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			status = "disabled";
++		};
++
++		cpufreq_e: performance-controller@210e20000 {
++			compatible = "apple,t8132-cluster-cpufreq", "apple,cluster-cpufreq";
++			reg = <0x2 0x10e20000 0 0x1000>;
++			#performance-domain-cells = <0>;
++			status = "disabled";
++		};
++
++		cpufreq_p: performance-controller@211e20000 {
++			compatible = "apple,t8132-cluster-cpufreq", "apple,cluster-cpufreq";
++			reg = <0x2 0x11e20000 0 0x1000>;
++			#performance-domain-cells = <0>;
++			status = "disabled";
++		};
++
++		/*
++		 * The ANS register addresses and interrupts are populated from the
++		 * live Apple device tree by m1n1.  Keeping these aliases stable lets
++		 * the same SoC description work across T8132 machines.
++		 */
++		ans_mbox: mbox@0 {
++			/* Enabled by the loader after all ADT resources are populated. */
++			status = "disabled";
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x0 0x0 0x0 0x4000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 2 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 3 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 4 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++				"recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			power-domains = <&ps_ans>;
++		};
++
++		sart: iommu@10000 {
++			/* Enabled by the loader after all ADT resources are populated. */
++			status = "disabled";
++			compatible = "apple,t8132-sart", "apple,t6000-sart";
++			reg = <0x0 0x10000 0x0 0x10000>;
++			power-domains = <&ps_ans>;
++		};
++
++		nvme: nvme@40000 {
++			/* Enabled by the loader after all ADT resources are populated. */
++			status = "disabled";
++			compatible = "apple,t8132-nvme-ans2",
++				     "apple,t8103-nvme-ans2";
++			reg = <0x0 0x40000 0x0 0x40000>,
++			      <0x0 0x80000 0x0 0x40000>,
++			      <0x0 0xc0000 0x0 0x4000>;
++			reg-names = "nvme", "nvmmu", "ans";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 5 IRQ_TYPE_LEVEL_HIGH>;
++			mboxes = <&ans_mbox>;
++			apple,sart = <&sart>;
++			power-domains = <&ps_ans>, <&ps_apcie_sys_st>;
++			power-domain-names = "ans", "apcie0";
++			resets = <&ps_ans>;
++		};
+ 
+ 		pmgr: power-management@380700000 {
+ 			compatible = "apple,t8132-pmgr", "apple,t8103-pmgr", "syscon", "simple-mfd";
+@@ -227,6 +456,44 @@
+ 			};
+ 		};
+ 
++		nub_spmi: spmi@0 {
++			compatible = "apple,t8132-spmi", "apple,t8103-spmi";
++			reg = <0x0 0x0 0x0 0x1000>; /* To be filled by loader */
++			#address-cells = <2>;
++			#size-cells = <0>;
++			status = "disabled";
++		};
++
++		smc: smc@38c600000 {
++			compatible = "apple,t8132-smc", "apple,t8103-smc";
++			reg = <0x3 0x8c600000 0x0 0x4000>,
++			      <0x3 0x8de00000 0x0 0x100000>;
++			reg-names = "smc", "sram";
++			mboxes = <&smc_mbox>;
++			status = "disabled";
++
++			smc_gpio: gpio {
++				compatible = "apple,smc-gpio";
++				gpio-controller;
++				#gpio-cells = <2>;
++			};
++		};
++
++		smc_mbox: mbox@38c608000 {
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x3 0x8c608000 0x0 0x4000>;
++
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 561 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 562 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 563 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 564 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++				"recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			status = "disabled";
++		};
++
+ 		pinctrl_nub: pinctrl@3881f0000 {
+ 			compatible = "apple,t8132-pinctrl", "apple,t8103-pinctrl";
+ 			reg = <0x3 0x881f0000 0x0 0x4000>;
+@@ -307,6 +574,75 @@
+ 			             <AIC_IRQ 429 IRQ_TYPE_LEVEL_HIGH>;
+ 		};
+ 
++		mtp: mtp@394600000 {
++			compatible = "apple,t8132-mtp", "apple,t8132-rtk-helper-asc4",
++				     "apple,mtp", "apple,rtk-helper-asc4";
++			reg = <0x3 0x94600000 0x0 0x4000>,
++			      <0x3 0x94c00000 0x0 0x100000>;
++			reg-names = "asc", "sram";
++			mboxes = <&mtp_mbox>;
++			iommus = <&mtp_dart 1>;
++			#helper-cells = <0>;
++			status = "disabled";
++		};
++
++		mtp_mbox: mbox@394608000 {
++			compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++			reg = <0x3 0x94608000 0x0 0x4000>;
++
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1113 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1114 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1115 IRQ_TYPE_LEVEL_HIGH>,
++				<AIC_IRQ 1116 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "send-empty", "send-not-empty",
++				"recv-empty", "recv-not-empty";
++			#mbox-cells = <0>;
++			status = "disabled";
++		};
++
++		mtp_dart: iommu@394800000 {
++			compatible = "apple,t8110-dart";
++			reg = <0x3 0x94800000 0x0 0xc000>;
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1091 IRQ_TYPE_LEVEL_HIGH>;
++			#iommu-cells = <1>;
++			status = "disabled";
++		};
++
++		mtp_dockchannel: fifo@394b14000 {
++			compatible = "apple,t8132-dockchannel", "apple,dockchannel";
++			reg = <0x3 0x94b14000 0x0 0x1000>;
++			reg-names = "irq";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 1093 IRQ_TYPE_LEVEL_HIGH>;
++
++			ranges = <0 0x3 0x94b28000 0x10000>;
++			nonposted-mmio;
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			status = "disabled";
++
++			mtp_hid: input@0 {
++				compatible = "apple,dockchannel-hid";
++				reg = <0x0000 0x1000>,
++				      <0x4000 0x1000>,
++				      <0x8000 0x1000>,
++				      <0xc000 0x1000>;
++				reg-names = "rmt-config", "rmt-data", "config", "data";
++				iommus = <&mtp_dart 1>;
++				interrupt-parent = <&mtp_dockchannel>;
++				interrupts = <2 IRQ_TYPE_LEVEL_HIGH>,
++					     <3 IRQ_TYPE_LEVEL_HIGH>;
++				interrupt-names = "tx", "rx";
++				apple,fifo-size = <0x800>;
++				apple,helper-cpu = <&mtp>;
++			};
++		};
++
+ 		pinctrl_ap: pinctrl@39a000000 {
+ 			compatible = "apple,t8132-pinctrl", "apple,t8103-pinctrl";
+ 			reg = <0x3 0x9a000000 0x0 0x100000>;
+@@ -439,6 +775,17 @@
+ 			status = "disabled";
+ 		};
+ 
++		/* DockChannel UART: the DebugUSB console (ADT /arm-io/dockchannel-uart). */
++		dockchannel_uart: serial@38812c000 {
++			compatible = "apple,dockchannel-uart";
++			reg = <0x3 0x8812c000 0x0 0x4000>,
++			      <0x3 0x88128000 0x0 0x4000>,
++			      <0x3 0x8810c000 0x0 0x4000>;
++			reg-names = "data", "config", "irq";
++			interrupt-parent = <&aic>;
++			interrupts = <AIC_IRQ 496 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
+ 		serial0: serial@3ad200000 {
+ 			compatible = "apple,s5l-uart";
+ 			reg = <0x3 0xad200000 0x0 0x1000>;
+@@ -465,3 +812,239 @@
+ };
+ 
+ #include "t8132-pmgr.dtsi"
++
++/* Shared controller resources; board files select the qualified devices. */
++&soc {
++	nub_spmi_a0: spmi@388908000 {
++		status = "disabled";
++		compatible = "apple,t8132-spmi", "apple,t8103-spmi";
++		reg = <0x3 0x88908000 0x0 0x4000>;
++		#address-cells = <2>;
++		#size-cells = <0>;
++		#interrupt-cells = <2>;
++		interrupt-controller;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 520 IRQ_TYPE_LEVEL_HIGH>;
++
++
++
++
++	};
++
++	pmp_dart: iommu@380300000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x3 0x80300000 0x0 0xc000>;
++		#iommu-cells = <1>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 881 IRQ_TYPE_LEVEL_HIGH>;
++		power-domains = <&ps_pmp>;
++	};
++
++	pmp_report: pmp-report@3803c0000 {
++		status = "disabled";
++		compatible = "apple,t8132-pmp-v2-report";
++		reg = <0x3 0x803c0000 0x0 0x20000>;
++		power-domains = <&ps_pms_sram>;
++	};
++
++	pmp: pmp@380500000 {
++		compatible = "apple,t8132-pmp-v2", "apple,t6000-pmp-v2";
++		reg = <0x3 0x80500000 0x0 0x80000>,
++		      <0x3 0x80e00000 0x0 0x4000>;
++		reg-names = "pmp", "asc";
++		mboxes = <&pmp_mbox>;
++		mbox-names = "mbox";
++		iommus = <&pmp_dart 0>;
++		power-domains = <&ps_pmp>;
++		/* m1n1 supplies board/DRAM parameters and tunables before enabling. */
++		status = "disabled";
++	};
++
++	pmp_mbox: mailbox@380e08000 {
++		status = "disabled";
++		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x3 0x80e08000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 877 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 878 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 879 IRQ_TYPE_LEVEL_HIGH>,
++			     <AIC_IRQ 880 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty",
++				  "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++		power-domains = <&ps_pmp>, <&ps_pms_sram>;
++	};
++
++	atcphy0: phy@402a90000 {
++		status = "disabled";
++		compatible = "apple,t8132-atcphy";
++		reg = <0x4 0x02a90000 0x0 0x4000>,
++		      <0x4 0x02a84000 0x0 0x4000>;
++		reg-names = "usb2phy", "pipehandler";
++
++		#phy-cells = <1>;
++		#reset-cells = <0>;
++		orientation-switch;
++		mode-switch;
++
++
++	};
++
++	dwc3_0_dart_0: iommu@402f00000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x02f00000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1283 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
++	dwc3_0_dart_1: iommu@402f80000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x02f80000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1283 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
++	dwc3_0: usb@402280000 {
++		status = "disabled";
++		compatible = "apple,t8132-dwc3";
++		reg = <0x4 0x02280000 0x0 0xcd00>,
++		      <0x4 0x0228cd00 0x0 0x3200>;
++		reg-names = "dwc3-core", "dwc3-apple";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1279 IRQ_TYPE_LEVEL_HIGH>;
++
++		dr_mode = "otg";
++		maximum-speed = "high-speed";
++		usb-role-switch;
++		role-switch-default-mode = "host";
++
++		iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
++		resets = <&atcphy0>;
++		phys = <&atcphy0 PHY_TYPE_USB2>;
++		phy-names = "usb2-phy";
++
++
++	};
++
++	atcphy1: phy@40aa90000 {
++		status = "disabled";
++		compatible = "apple,t8132-atcphy";
++		reg = <0x4 0x0aa90000 0x0 0x4000>,
++		      <0x4 0x0aa84000 0x0 0x4000>;
++		reg-names = "usb2phy", "pipehandler";
++
++		#phy-cells = <1>;
++		#reset-cells = <0>;
++		orientation-switch;
++		mode-switch;
++
++
++	};
++
++	dwc3_1_dart_0: iommu@40af00000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x0af00000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1345 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
++	dwc3_1_dart_1: iommu@40af80000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x0af80000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1345 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
++	dwc3_1: usb@40a280000 {
++		status = "disabled";
++		compatible = "apple,t8132-dwc3";
++		reg = <0x4 0x0a280000 0x0 0xcd00>,
++		      <0x4 0x0a28cd00 0x0 0x3200>;
++		reg-names = "dwc3-core", "dwc3-apple";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1341 IRQ_TYPE_LEVEL_HIGH>;
++
++		dr_mode = "otg";
++		maximum-speed = "high-speed";
++		usb-role-switch;
++		role-switch-default-mode = "host";
++
++		iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
++		resets = <&atcphy1>;
++		phys = <&atcphy1 PHY_TYPE_USB2>;
++		phy-names = "usb2-phy";
++
++
++	};
++
++	dart_apcie0: iommu@490000000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x90000000 0x0 0x20000>;
++		/* J713 ADT /arm-io/dart-apcie0, interrupt-parent AIC. */
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1232 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++	};
++
++	pcie0: pcie@1cb0000000 {
++		status = "disabled";
++		compatible = "apple,t8132-pcie";
++		device_type = "pci";
++
++		reg = <0x1c 0xb0000000 0x0 0x10000000>, /* config */
++		      <0x4 0x94000000 0x0 0x4000>,     /* common */
++		      <0x4 0x90028000 0x0 0x8000>,     /* port 0 */
++		      <0x4 0x97020000 0x0 0x4000>;     /* port 0 PHY glue */
++		reg-names = "config", "rc", "port0", "phy0";
++
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1231 IRQ_TYPE_LEVEL_HIGH>;
++
++		msi-controller;
++		msi-parent = <&pcie0>;
++		msi-ranges = <&aic AIC_IRQ 1506 IRQ_TYPE_EDGE_RISING 32>;
++
++		iommu-map = <0x100 &dart_apcie0 16 1>;
++		iommu-map-mask = <0xff00>;
++
++		bus-range = <0 1>;
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges = <0x43000000 0xb 0xc0000000
++			  0xb 0xc0000000 0x0 0x20000000>,
++			 <0x02000000 0x0 0x80000000
++			  0xb 0x80000000 0x0 0x40000000>;
++
++		port00: pci@0,0 {
++			device_type = "pci";
++			reg = <0x0 0x0 0x0 0x0 0x0>;
++			bus-range = <1 1>;
++
++			#address-cells = <3>;
++			#size-cells = <2>;
++			ranges;
++
++			interrupt-controller;
++			#interrupt-cells = <1>;
++			interrupt-map-mask = <0 0 0 7>;
++			interrupt-map = <0 0 0 1 &port00 0 0 0 0>,
++					<0 0 0 2 &port00 0 0 0 1>,
++					<0 0 0 3 &port00 0 0 0 2>,
++					<0 0 0 4 &port00 0 0 0 3>;
++
++
++		};
++	};
++};
++
++#include "t8132-memory.dtsi"
+diff --git a/arch/arm64/configs/j713-basic.config b/arch/arm64/configs/j713-basic.config
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/configs/j713-basic.config
+@@ -0,0 +1,207 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++# J713 (13-inch M4 MacBook Air) basic platform, using the firmware framebuffer.
++# Merge after arm64 defconfig and asahi.config, then run olddefconfig.
++# Companion m1n1/U-Boot retained-input and per-kernel DTB handoffs are required.
++
++# Limit this device-specific configuration to Apple platform support.
++CONFIG_ARCH_APPLE=y
++# CONFIG_ARCH_ACTIONS is not set
++# CONFIG_ARCH_AIROHA is not set
++# CONFIG_ARCH_SUNXI is not set
++# CONFIG_ARCH_ALPINE is not set
++# CONFIG_ARCH_ARTPEC is not set
++# CONFIG_ARCH_ASPEED is not set
++# CONFIG_ARCH_AXIADO is not set
++# CONFIG_ARCH_BCM is not set
++# CONFIG_ARCH_BCM2835 is not set
++# CONFIG_ARCH_BCM_IPROC is not set
++# CONFIG_ARCH_BCMBCA is not set
++# CONFIG_ARCH_BRCMSTB is not set
++# CONFIG_ARCH_BERLIN is not set
++# CONFIG_ARCH_BITMAIN is not set
++# CONFIG_ARCH_BLAIZE is not set
++# CONFIG_ARCH_BST is not set
++# CONFIG_ARCH_CIX is not set
++# CONFIG_ARCH_EXYNOS is not set
++# CONFIG_ARCH_K3 is not set
++# CONFIG_ARCH_LG1K is not set
++# CONFIG_ARCH_HISI is not set
++# CONFIG_ARCH_KEEMBAY is not set
++# CONFIG_ARCH_MEDIATEK is not set
++# CONFIG_ARCH_MESON is not set
++# CONFIG_ARCH_MICROCHIP is not set
++# CONFIG_ARCH_LAN969X is not set
++# CONFIG_ARCH_SPARX5 is not set
++# CONFIG_ARCH_MMP is not set
++# CONFIG_ARCH_MVEBU is not set
++# CONFIG_ARCH_NXP is not set
++# CONFIG_ARCH_LAYERSCAPE is not set
++# CONFIG_ARCH_MXC is not set
++# CONFIG_ARCH_S32 is not set
++# CONFIG_ARCH_MA35 is not set
++# CONFIG_ARCH_NPCM is not set
++# CONFIG_ARCH_PENSANDO is not set
++# CONFIG_ARCH_QCOM is not set
++# CONFIG_ARCH_REALTEK is not set
++# CONFIG_ARCH_RENESAS is not set
++# CONFIG_ARCH_ROCKCHIP is not set
++# CONFIG_ARCH_SEATTLE is not set
++# CONFIG_ARCH_INTEL_SOCFPGA is not set
++# CONFIG_ARCH_SOPHGO is not set
++# CONFIG_ARCH_STM32 is not set
++# CONFIG_ARCH_SYNQUACER is not set
++# CONFIG_ARCH_TEGRA is not set
++# CONFIG_ARCH_TESLA_FSD is not set
++# CONFIG_ARCH_SPRD is not set
++# CONFIG_ARCH_THUNDER is not set
++# CONFIG_ARCH_THUNDER2 is not set
++# CONFIG_ARCH_UNIPHIER is not set
++# CONFIG_ARCH_VEXPRESS is not set
++# CONFIG_ARCH_VISCONTI is not set
++# CONFIG_ARCH_XGENE is not set
++# CONFIG_ARCH_ZYNQMP is not set
++CONFIG_NR_CPUS=16
++# Keep virtualization disabled as in the previous basic configuration.
++# CONFIG_KVM is not set
++CONFIG_ARM64_VA_BITS_48=y
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_IKCONFIG=y
++CONFIG_IKCONFIG_PROC=y
++CONFIG_OF_DYNAMIC=y
++
++# Keep the boot storage, retained input and platform owners available early.
++CONFIG_BLK_DEV_NVME=y
++CONFIG_NVME_APPLE=y
++# The managed radio retains DMA state and its built-in kexec guard until reset.
++CONFIG_APPLE_DART=y
++CONFIG_PCIE_APPLE=y
++CONFIG_APPLE_SART=y
++CONFIG_BTRFS_FS=y
++CONFIG_BTRFS_FS_POSIX_ACL=y
++CONFIG_VFAT_FS=y
++CONFIG_TMPFS=y
++CONFIG_TMPFS_POSIX_ACL=y
++CONFIG_TMPFS_XATTR=y
++CONFIG_RD_XZ=y
++CONFIG_APPLE_DOCKCHANNEL=y
++CONFIG_APPLE_RTKIT_HELPER=y
++CONFIG_HID_DOCKCHANNEL=y
++CONFIG_HID_APPLE=y
++CONFIG_HID_MAGICMOUSE=y
++# CONFIG_HID_APPLE_MTP_HAPTIC is not set
++CONFIG_SPMI_APPLE=y
++CONFIG_NVMEM_APPLE_SPMI=y
++CONFIG_MFD_MACSMC=y
++CONFIG_GPIO_MACSMC=y
++CONFIG_POWER_RESET_MACSMC=y
++CONFIG_MACSMC_POWER=y
++CONFIG_SENSORS_MACSMC_HWMON=y
++CONFIG_I2C_APPLE=y
++CONFIG_PINCTRL_APPLE_GPIO=y
++CONFIG_APPLE_WATCHDOG=y
++
++# Retain the qualified memory floors and CPU thermal ownership policy.
++CONFIG_ARM_APPLE_SOC_CPUFREQ=y
++CONFIG_APPLE_PMP=y
++CONFIG_APPLE_PMP_REPORT=y
++CONFIG_APPLE_PMP_THERMAL=y
++CONFIG_APPLE_MCC=y
++CONFIG_APPLE_PMC=y
++CONFIG_APPLE_CLPC=y
++CONFIG_APPLE_T8132_PLATFORM_HANDOFF=y
++# CONFIG_SENSORS_APPLE_PMP_J613 is not set
++
++# USB2 Type-C routing and the J713 radio.
++CONFIG_PHY_APPLE_ATC=y
++CONFIG_USB_DWC3_APPLE=y
++CONFIG_TYPEC=y
++CONFIG_TYPEC_SN201202X=y
++CONFIG_MUX_APPLE_DPXBAR=y
++CONFIG_FW_LOADER_COMPRESS=y
++CONFIG_FW_LOADER_COMPRESS_ZSTD=y
++CONFIG_BRCMFMAC=m
++CONFIG_BRCMFMAC_PCIE=y
++CONFIG_SPI_APPLE_QSPI=m
++
++# Retain policy routing and packet filters used by the installed network stack.
++CONFIG_IP_ADVANCED_ROUTER=y
++CONFIG_IP_MULTIPLE_TABLES=y
++CONFIG_IPV6_MULTIPLE_TABLES=y
++CONFIG_NF_CONNTRACK=m
++CONFIG_NF_CONNTRACK_EVENTS=y
++CONFIG_NF_TABLES=m
++CONFIG_NF_TABLES_INET=y
++CONFIG_NFT_CT=m
++CONFIG_NFT_LOG=m
++CONFIG_NFT_LIMIT=m
++CONFIG_NFT_MASQ=m
++CONFIG_NFT_REDIR=m
++CONFIG_NFT_NAT=m
++CONFIG_NFT_REJECT=m
++CONFIG_NFT_COMPAT=m
++CONFIG_NETFILTER_XT_MARK=m
++CONFIG_NETFILTER_XT_TARGET_CONNMARK=m
++CONFIG_NETFILTER_XT_TARGET_LOG=m
++CONFIG_NETFILTER_XT_NAT=m
++CONFIG_NETFILTER_XT_TARGET_MASQUERADE=m
++CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=m
++CONFIG_NETFILTER_XT_MATCH_CONNMARK=m
++CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
++CONFIG_NETFILTER_XT_MATCH_HL=m
++CONFIG_NETFILTER_XT_MATCH_IPVS=m
++CONFIG_NETFILTER_XT_MATCH_LIMIT=m
++CONFIG_NETFILTER_XT_MATCH_MULTIPORT=m
++CONFIG_NETFILTER_XT_MATCH_PKTTYPE=m
++CONFIG_NETFILTER_XT_MATCH_RECENT=m
++
++# Preserve the userspace and peripheral requirements of the working system.
++CONFIG_PSI=y
++CONFIG_IP_NF_TARGET_REJECT=m
++CONFIG_IP6_NF_MATCH_RT=m
++CONFIG_IP6_NF_TARGET_REJECT=m
++CONFIG_BT_RFCOMM=y
++CONFIG_BT_BNEP=y
++CONFIG_SYSFB_SIMPLEFB=y
++CONFIG_ZRAM=m
++CONFIG_ZRAM_BACKEND_LZ4=y
++CONFIG_ZRAM_BACKEND_ZSTD=y
++CONFIG_ZRAM_BACKEND_LZO=y
++CONFIG_DM_CRYPT=m
++CONFIG_DM_INTEGRITY=m
++CONFIG_INPUT_JOYDEV=m
++CONFIG_INPUT_JOYSTICK=y
++CONFIG_JOYSTICK_XPAD=m
++CONFIG_INPUT_UINPUT=m
++CONFIG_HIDRAW=y
++CONFIG_UHID=m
++CONFIG_HID_LOGITECH=m
++CONFIG_HID_LOGITECH_DJ=m
++CONFIG_HID_MICROSOFT=m
++CONFIG_HID_NINTENDO=m
++CONFIG_HID_PLAYSTATION=m
++CONFIG_HID_SONY=m
++CONFIG_HID_STEAM=m
++CONFIG_HID_WACOM=m
++CONFIG_USB_ANNOUNCE_NEW_DEVICES=y
++CONFIG_USB_PRINTER=m
++CONFIG_USB_UAS=m
++CONFIG_USB_SERIAL_CH341=m
++CONFIG_USB_SERIAL_PL2303=m
++CONFIG_KEY_DH_OPERATIONS=y
++CONFIG_SECURITY_YAMA=y
++CONFIG_SECURITY_LANDLOCK=y
++CONFIG_FORTIFY_SOURCE=y
++CONFIG_HARDENED_USERCOPY=y
++CONFIG_CRYPTO_USER_API_HASH=y
++CONFIG_CRYPTO_USER_API_SKCIPHER=y
++CONFIG_PKCS8_PRIVATE_KEY_PARSER=y
++CONFIG_FONTS=y
++CONFIG_FONT_TER16x32=y
++
++# Basic bring-up uses the inherited display; native graphics are a later series.
++CONFIG_DRM_SIMPLEDRM=y
++# CONFIG_DRM_ASAHI is not set
++# CONFIG_DRM_APPLE is not set
++# CONFIG_DRM_ADP is not set
++# CONFIG_DRM_ACCEL_ANE is not set
++# CONFIG_APPLE_SEP is not set
+diff --git a/drivers/bluetooth/hci_bcm4377.c b/drivers/bluetooth/hci_bcm4377.c
+--- a/drivers/bluetooth/hci_bcm4377.c
++++ b/drivers/bluetooth/hci_bcm4377.c
+@@ -6,15 +6,18 @@
+  */
+ 
+ #include <linux/async.h>
++#include <linux/atomic.h>
+ #include <linux/bitfield.h>
+ #include <linux/completion.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/dmi.h>
+ #include <linux/firmware.h>
+ #include <linux/interrupt.h>
++#include <linux/iommu.h>
+ #include <linux/module.h>
+ #include <linux/msi.h>
+ #include <linux/of.h>
++#include <linux/wait.h>
+ #include <linux/pci.h>
+ #include <linux/printk.h>
+ #include <linux/property.h>
+@@ -45,8 +48,9 @@
+  * (possibly to avoid 64 bit arithmetic). The window size cannot exceed
+  * 0xffffffff but is always aligned down to the previous 0x200 byte boundary
+  * which effectively limits the window to [start, start+0xfffffe00].
+- * We just limit the DMA window to [0, 0xfffffe00] to make sure we don't
+- * run into this limitation.
++ * Use the original zero-based window by default. On BCM4388, a forced
++ * high DMA aperture can supply a bounded window instead; both the boot and
++ * RTI windows must then use that same base and size.
+  */
+ #define BCM4377_DMA_MASK 0xfffffe00
+ 
+@@ -86,6 +90,8 @@
+ 
+ #define BCM4377_BAR2_CONTEXT_ADDR_LO 0x20048c
+ #define BCM4377_BAR2_CONTEXT_ADDR_HI 0x200450
++/* BCM4388 exposes capabilities at the old context-high location. */
++#define BCM4388_BAR2_CONTEXT_ADDR_HI 0x200490
+ 
+ #define BCM4377_BAR2_RTI_STATUS	     0x20045c
+ #define BCM4377_BAR2_RTI_WINDOW_LO   0x200494
+@@ -300,7 +306,7 @@
+  * shared memory structures. A pointer to this structure is configured inside a
+  * MMIO register.
+  *
+- * version: Protocol version, must be 2.
++ * version: Protocol version, must be 1.
+  * size: Size of this structure, must be 0x68.
+  * enabled_caps: Enabled capabilities. Unknown bitfield but should be 2.
+  * peripheral_info_addr: DMA address for a 0x20 buffer to which the device will
+@@ -494,6 +500,7 @@
+  * has_bar0_core2_window2: Set to true if this chip requires the second core's
+  *                         second window to be configured
+  * bar2_offset: Offset to the start of the variables in BAR2
++ * bar2_context_addr_hi: High-window context-address register before bar2_offset
+  * clear_pciecfg_subsystem_ctrl_bit19: Set to true if bit 19 in the
+  *                                     vendor-specific subsystem control
+  *                                     register has to be cleared
+@@ -518,6 +525,7 @@
+ 	u32 bar0_window2;
+ 	u32 bar0_core2_window2;
+ 	u32 bar2_offset;
++	u32 bar2_context_addr_hi;
+ 
+ 	unsigned long has_bar0_core2_window2 : 1;
+ 	unsigned long clear_pciecfg_subsystem_ctrl_bit19 : 1;
+@@ -553,7 +561,10 @@
+  * stepping: Chip stepping read from OTP; used for firmware selection
+  * vendor: Antenna vendor read from OTP; used for firmware selection
+  * board_type: Board type from FDT or DMI match; used for firmware selection
+- * event: Event for changed bootstage or rti_status; used for booting firmware
++ * event: Wait queue for changed bootstage or rti_status
++ * irq_count: Interrupt notifications observed during this binding
++ * dma_window_base: First address accepted by the firmware DMA window
++ * dma_window_size: Size of the shared boot and RTI DMA window
+  * ctx: "Converged IPC" context
+  * ctx_dma: "Converged IPC" context DMA address
+  * ring_state: Shared memory buffer containing ring head and tail indexes
+@@ -574,6 +585,9 @@
+ 
+ 	u32 bootstage;
+ 	u32 rti_status;
++
++	dma_addr_t dma_window_base;
++	u32 dma_window_size;
+ 
+ 	const struct bcm4377_hw *hw;
+ 
+@@ -604,7 +618,8 @@
+ 	struct work_struct resume_work;
+ 	bdaddr_t bdaddr;
+ 
+-	struct completion event;
++	wait_queue_head_t event;
++	atomic_t irq_count;
+ 
+ 	/* Set once a recovery reprobe has been queued for this binding. */
+ 	unsigned long reset_pending;
+@@ -863,24 +878,67 @@
+ 	}
+ }
+ 
++static void bcm4377_update_state(struct bcm4377_data *bcm4377,
++				 u32 bootstage, u32 rti_status)
++{
++	u32 old_bootstage = READ_ONCE(bcm4377->bootstage);
++	u32 old_rti_status = READ_ONCE(bcm4377->rti_status);
++
++	if (bootstage != old_bootstage || rti_status != old_rti_status) {
++		dev_dbg(&bcm4377->pdev->dev,
++			"bootstage = %d -> %d, rti state = %d -> %d\n",
++			old_bootstage, bootstage, old_rti_status, rti_status);
++		WRITE_ONCE(bcm4377->bootstage, bootstage);
++		WRITE_ONCE(bcm4377->rti_status, rti_status);
++		wake_up_all(&bcm4377->event);
++	}
++}
++
++static int bcm4377_wait_for_state(struct bcm4377_data *bcm4377, bool rti,
++				  u32 state, unsigned long timeout)
++{
++	long ret;
++	u32 observed;
++
++	ret = wait_event_interruptible_timeout(bcm4377->event,
++					       (rti ? READ_ONCE(bcm4377->rti_status) :
++						READ_ONCE(bcm4377->bootstage)) >= state, timeout);
++	if (ret < 0)
++		return ret;
++	if (!ret)
++		return -ETIMEDOUT;
++	observed = rti ? READ_ONCE(bcm4377->rti_status) : READ_ONCE(bcm4377->bootstage);
++	if (observed != state)
++		return rti ? -ENODEV : -ENXIO;
++	return 0;
++}
++
++static void bcm4377_report_state_failure(struct bcm4377_data *bcm4377,
++					 const char *phase, u32 expected,
++					 int error, u32 irq_before)
++{
++	u32 bootstage, rti_status, irq_count;
++
++	/* Read the same passive status registers as the interrupt handler. */
++	bootstage = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_BOOTSTAGE);
++	rti_status = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_STATUS);
++	irq_count = atomic_read(&bcm4377->irq_count);
++	dev_err(&bcm4377->pdev->dev,
++		"%s expected %u: %d; cached boot %u RTI %u, registers boot %#x RTI %#x, IRQs %u (+%u)\n",
++		phase, expected, error, READ_ONCE(bcm4377->bootstage),
++		READ_ONCE(bcm4377->rti_status), bootstage, rti_status,
++		irq_count, irq_count - irq_before);
++}
++
+ static irqreturn_t bcm4377_irq(int irq, void *data)
+ {
+ 	struct bcm4377_data *bcm4377 = data;
+ 	u32 bootstage, rti_status;
+ 
++	atomic_inc(&bcm4377->irq_count);
+ 	bootstage = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_BOOTSTAGE);
+ 	rti_status = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_STATUS);
+-
+-	if (bootstage != bcm4377->bootstage ||
+-	    rti_status != bcm4377->rti_status) {
+-		dev_dbg(&bcm4377->pdev->dev,
+-			"bootstage = %d -> %d, rti state = %d -> %d\n",
+-			bcm4377->bootstage, bootstage, bcm4377->rti_status,
+-			rti_status);
+-		complete(&bcm4377->event);
+-		bcm4377->bootstage = bootstage;
+-		bcm4377->rti_status = rti_status;
+-	}
++	bcm4377_update_state(bcm4377, bootstage, rti_status);
+ 
+ 	if (rti_status > 2)
+ 		dev_err(&bcm4377->pdev->dev, "RTI status is %d\n", rti_status);
+@@ -1254,11 +1312,15 @@
+ 		name0, name1);
+ 
+ 	ret = firmware_request_nowarn(&fw, name0, &bcm4377->pdev->dev);
+-	if (!ret)
++	if (!ret) {
++		dev_dbg(&bcm4377->pdev->dev, "loaded %s (%zu bytes)\n", name0, fw->size);
+ 		return fw;
++	}
+ 	ret = firmware_request_nowarn(&fw, name1, &bcm4377->pdev->dev);
+-	if (!ret)
++	if (!ret) {
++		dev_dbg(&bcm4377->pdev->dev, "loaded %s (%zu bytes)\n", name1, fw->size);
+ 		return fw;
++	}
+ 
+ 	dev_err(&bcm4377->pdev->dev,
+ 		"Unable to load firmware; tried '%s' and '%s'\n", name0, name1);
+@@ -1342,6 +1404,13 @@
+ 	int ret;
+ 	int irq;
+ 
++	/* The shared high-window radio has no qualified function-reset boundary. */
++	if (bcm4377->dma_window_base) {
++		dev_err_once(&bcm4377->pdev->dev,
++			     "controller recovery requires a platform reboot\n");
++		return -EIO;
++	}
++
+ 	/* Keep retrying a full reset if any recovery stage fails. */
+ 	bcm4377->needs_reset = true;
+ 	dev_info(&bcm4377->pdev->dev, "performing hardware reset recovery\n");
+@@ -1371,9 +1440,8 @@
+ 		goto out_irq;
+ 	}
+ 
+-	bcm4377->bootstage = 0;
+-	bcm4377->rti_status = 0;
+-	reinit_completion(&bcm4377->event);
++	WRITE_ONCE(bcm4377->bootstage, 0);
++	WRITE_ONCE(bcm4377->rti_status, 0);
+ 
+ 	memset(bcm4377->ring_state, 0, sizeof(*bcm4377->ring_state));
+ 	bcm4377->control_h2d_ring.generation = 0;
+@@ -2256,7 +2324,7 @@
+ 	void *bfr;
+ 	dma_addr_t fw_dma;
+ 	int ret = 0;
+-	u32 bootstage, rti_status;
++	u32 bootstage, rti_status, irq_before;
+ 
+ 	bootstage = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_BOOTSTAGE);
+ 	rti_status = ioread32(bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_STATUS);
+@@ -2288,9 +2356,11 @@
+ 
+ 	memcpy(bfr, fw->data, fw->size);
+ 
+-	iowrite32(0, bcm4377->bar0 + BCM4377_BAR0_HOST_WINDOW_LO);
+-	iowrite32(0, bcm4377->bar0 + BCM4377_BAR0_HOST_WINDOW_HI);
+-	iowrite32(BCM4377_DMA_MASK,
++	iowrite32(lower_32_bits(bcm4377->dma_window_base),
++		  bcm4377->bar0 + BCM4377_BAR0_HOST_WINDOW_LO);
++	iowrite32(upper_32_bits(bcm4377->dma_window_base),
++		  bcm4377->bar0 + BCM4377_BAR0_HOST_WINDOW_HI);
++	iowrite32(bcm4377->dma_window_size,
+ 		  bcm4377->bar0 + BCM4377_BAR0_HOST_WINDOW_SIZE);
+ 
+ 	iowrite32(lower_32_bits(fw_dma),
+@@ -2299,28 +2369,19 @@
+ 		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_FW_HI);
+ 	iowrite32(fw->size,
+ 		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_FW_SIZE);
++	irq_before = atomic_read(&bcm4377->irq_count);
+ 	iowrite32(0, bcm4377->bar0 + BCM4377_BAR0_FW_DOORBELL);
+ 
+ 	dev_dbg(&bcm4377->pdev->dev, "waiting for firmware to boot\n");
+ 
+-	ret = wait_for_completion_interruptible_timeout(&bcm4377->event,
+-							BCM4377_BOOT_TIMEOUT);
+-	if (ret == 0) {
+-		ret = -ETIMEDOUT;
++	ret = bcm4377_wait_for_state(bcm4377, false, 2, BCM4377_BOOT_TIMEOUT);
++	if (ret) {
++		bcm4377_report_state_failure(bcm4377, "firmware boot", 2, ret, irq_before);
+ 		goto out_dma_free;
+-	} else if (ret < 0) {
+-		goto out_dma_free;
+-	}
+-
+-	if (bcm4377->bootstage != 2) {
+-		dev_err(&bcm4377->pdev->dev, "boostage %d != 2\n",
+-			bcm4377->bootstage);
+-		ret = -ENXIO;
+-		goto out_dma_free;
+ 	}
+ 
+ 	dev_dbg(&bcm4377->pdev->dev, "firmware has booted (stage = %x)\n",
+-		bcm4377->bootstage);
++		 READ_ONCE(bcm4377->bootstage));
+ 	ret = 0;
+ 
+ out_dma_free:
+@@ -2332,59 +2393,46 @@
+ 
+ static int bcm4377_setup_rti(struct bcm4377_data *bcm4377)
+ {
++	u32 irq_before;
++	u32 context_addr_hi = bcm4377->dma_window_base ?
++		bcm4377->hw->bar2_context_addr_hi : BCM4377_BAR2_CONTEXT_ADDR_HI;
+ 	int ret;
+ 
+ 	dev_dbg(&bcm4377->pdev->dev, "starting RTI\n");
++	irq_before = atomic_read(&bcm4377->irq_count);
+ 	iowrite32(1, bcm4377->bar0 + BCM4377_BAR0_RTI_CONTROL);
+ 
+-	ret = wait_for_completion_interruptible_timeout(&bcm4377->event,
+-							BCM4377_TIMEOUT);
+-	if (ret == 0) {
+-		dev_err(&bcm4377->pdev->dev,
+-			"timed out while waiting for RTI to transition to state 1");
+-		return -ETIMEDOUT;
+-	} else if (ret < 0) {
+-		return ret;
+-	}
+-
+-	if (bcm4377->rti_status != 1) {
+-		dev_err(&bcm4377->pdev->dev, "RTI did not ack state 1 (%d)\n",
+-			bcm4377->rti_status);
+-		return -ENODEV;
++	ret = bcm4377_wait_for_state(bcm4377, true, 1, BCM4377_TIMEOUT);
++	if (ret) {
++		bcm4377_report_state_failure(bcm4377, "RTI", 1, ret, irq_before);
++		return ret;
+ 	}
+ 	dev_dbg(&bcm4377->pdev->dev, "RTI is in state 1\n");
+ 
+-	/* allow access to the entire IOVA space again */
+-	iowrite32(0, bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_WINDOW_LO);
+-	iowrite32(0, bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_WINDOW_HI);
+-	iowrite32(BCM4377_DMA_MASK,
++	/* Reuse the boot window for all context and ring DMA addresses. */
++	iowrite32(lower_32_bits(bcm4377->dma_window_base),
++		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_WINDOW_LO);
++	iowrite32(upper_32_bits(bcm4377->dma_window_base),
++		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_WINDOW_HI);
++	iowrite32(bcm4377->dma_window_size,
+ 		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_RTI_WINDOW_SIZE);
+ 
+ 	/* setup "Converged IPC" context */
+ 	iowrite32(lower_32_bits(bcm4377->ctx_dma),
+ 		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_CONTEXT_ADDR_LO);
+ 	iowrite32(upper_32_bits(bcm4377->ctx_dma),
+-		  bcm4377->bar2 + bcm4377->hw->bar2_offset + BCM4377_BAR2_CONTEXT_ADDR_HI);
++		  bcm4377->bar2 + bcm4377->hw->bar2_offset + context_addr_hi);
++	irq_before = atomic_read(&bcm4377->irq_count);
+ 	iowrite32(2, bcm4377->bar0 + BCM4377_BAR0_RTI_CONTROL);
+ 
+-	ret = wait_for_completion_interruptible_timeout(&bcm4377->event,
+-							BCM4377_TIMEOUT);
+-	if (ret == 0) {
+-		dev_err(&bcm4377->pdev->dev,
+-			"timed out while waiting for RTI to transition to state 2");
+-		return -ETIMEDOUT;
+-	} else if (ret < 0) {
+-		return ret;
+-	}
+-
+-	if (bcm4377->rti_status != 2) {
+-		dev_err(&bcm4377->pdev->dev, "RTI did not ack state 2 (%d)\n",
+-			bcm4377->rti_status);
+-		return -ENODEV;
++	ret = bcm4377_wait_for_state(bcm4377, true, 2, BCM4377_TIMEOUT);
++	if (ret) {
++		bcm4377_report_state_failure(bcm4377, "RTI", 2, ret, irq_before);
++		return ret;
+ 	}
+ 
+ 	dev_dbg(&bcm4377->pdev->dev,
+-		"RTI is in state 2; control ring is ready\n");
++		 "RTI is in state 2; control ring is ready\n");
+ 	bcm4377->control_ack_ring.enabled = true;
+ 
+ 	return 0;
+@@ -2744,6 +2792,14 @@
+ 		return;
+ 	if (test_and_set_bit(0, &bcm4377->reset_pending))
+ 		return;
++	/*
++	 * The shared high-window radio has no qualified DMA-stop boundary.
++	 * Rebinding could fault its retained domain and quarantine Wi-Fi too.
++	 */
++	if (bcm4377->dma_window_base) {
++		bt_dev_err(hdev, "controller recovery requires a platform reboot");
++		return;
++	}
+ 
+ 	rw = kzalloc_obj(*rw);
+ 	if (!rw) {
+@@ -2770,23 +2826,64 @@
+ 	cancel_delayed_work_sync(&bcm4377->setup_retry_work);
+ }
+ 
++/*
++ * The ring ABI and both firmware-window bases carry full 64-bit addresses,
++ * but every allocation must fit in one window smaller than 4 GiB. A forced
++ * DMA-IOMMU aperture provides that lower bound as well as the DMA mask's
++ * upper bound. Identity DMA cannot guarantee a bounded allocation window.
++ */
++static int bcm4377_setup_dma(struct bcm4377_data *bcm4377)
++{
++	struct device *dev = &bcm4377->pdev->dev;
++	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
++	u64 base, end, size, mask = BCM4377_DMA_MASK;
++	int ret;
++
++	bcm4377->dma_window_base = 0;
++	bcm4377->dma_window_size = BCM4377_DMA_MASK;
++
++	if (bcm4377->hw->id == 0x4388 && domain &&
++	    iommu_is_dma_domain(domain) && domain->geometry.force_aperture &&
++	    domain->geometry.aperture_start > BCM4377_DMA_MASK) {
++		base = domain->geometry.aperture_start;
++		end = domain->geometry.aperture_end;
++		if (end < base || end - base >= BCM4377_DMA_MASK ||
++		    !IS_ALIGNED(base, 0x200) || !IS_ALIGNED(end + 1, 0x200)) {
++			dev_err(dev, "unsupported DMA window %#llx-%#llx\n", base, end);
++			return -ERANGE;
++		}
++
++		size = end - base + 1;
++		bcm4377->dma_window_base = base;
++		bcm4377->dma_window_size = size;
++		mask = DMA_BIT_MASK(fls64(end));
++	}
++
++	ret = dma_set_mask_and_coherent(dev, mask);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to configure DMA window\n");
++	dev_dbg(dev, "firmware DMA window %pad+%#x\n",
++		 &bcm4377->dma_window_base, bcm4377->dma_window_size);
++	return 0;
++}
++
+ static int bcm4377_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ {
+ 	struct bcm4377_data *bcm4377;
+ 	struct hci_dev *hdev;
+ 	int ret, irq;
+ 
+-	ret = dma_set_mask_and_coherent(&pdev->dev, BCM4377_DMA_MASK);
+-	if (ret)
+-		return ret;
+-
+ 	bcm4377 = devm_kzalloc(&pdev->dev, sizeof(*bcm4377), GFP_KERNEL);
+ 	if (!bcm4377)
+ 		return -ENOMEM;
+ 
+ 	bcm4377->pdev = pdev;
+ 	bcm4377->hw = &bcm4377_hw_variants[id->driver_data];
+-	init_completion(&bcm4377->event);
++	ret = bcm4377_setup_dma(bcm4377);
++	if (ret)
++		return ret;
++	init_waitqueue_head(&bcm4377->event);
++	atomic_set(&bcm4377->irq_count, 0);
+ 	INIT_DELAYED_WORK(&bcm4377->setup_retry_work, bcm4377_setup_retry_work);
+ 	spin_lock_init(&bcm4377->resume_lock);
+ 	INIT_WORK(&bcm4377->resume_work, bcm4377_resume_recovery_work);
+@@ -2849,6 +2946,9 @@
+ 		dev_err(&pdev->dev, "Reading OTP failed with %d\n", ret);
+ 		return ret;
+ 	}
++
++	dev_dbg(&pdev->dev, "BCM%04x%s OTP vendor %s, board %s\n",
++		 bcm4377->hw->id, bcm4377->stepping, bcm4377->vendor, bcm4377->board_type);
+ 
+ 	/*
+ 	 * Legacy interrupts result in an IRQ storm because we don't know where
+@@ -2910,11 +3010,11 @@
+ 
+ 	ret = bcm4377_boot(bcm4377);
+ 	if (ret)
+-		return ret;
++		return dev_err_probe(&pdev->dev, ret, "firmware boot handshake failed\n");
+ 
+ 	ret = bcm4377_setup_rti(bcm4377);
+ 	if (ret)
+-		return ret;
++		return dev_err_probe(&pdev->dev, ret, "RTI handshake failed\n");
+ 
+ 	ret = hci_register_dev(hdev);
+ 	if (ret)
+@@ -3031,6 +3131,7 @@
+ static const struct bcm4377_hw bcm4377_hw_variants[] = {
+ 	[BCM4377] = {
+ 		.id = 0x4377,
++		.bar2_context_addr_hi = BCM4377_BAR2_CONTEXT_ADDR_HI,
+ 		.otp_offset = 0x4120,
+ 		.bar0_window1 = 0x1800b000,
+ 		.bar0_window2 = 0x1810c000,
+@@ -3041,6 +3142,7 @@
+ 
+ 	[BCM4378] = {
+ 		.id = 0x4378,
++		.bar2_context_addr_hi = BCM4377_BAR2_CONTEXT_ADDR_HI,
+ 		.otp_offset = 0x4120,
+ 		.bar0_window1 = 0x18002000,
+ 		.bar0_window2 = 0x1810a000,
+@@ -3055,6 +3157,7 @@
+ 
+ 	[BCM4387] = {
+ 		.id = 0x4387,
++		.bar2_context_addr_hi = BCM4377_BAR2_CONTEXT_ADDR_HI,
+ 		.otp_offset = 0x413c,
+ 		.bar0_window1 = 0x18002000,
+ 		.bar0_window2 = 0x18109000,
+@@ -3072,6 +3175,7 @@
+ 		.id = 0x4388,
+ 		.otp_offset = 0x415c,
+ 		.bar2_offset = 0x200000,
++		.bar2_context_addr_hi = BCM4388_BAR2_CONTEXT_ADDR_HI,
+ 		.bar0_window1 = 0x18002000,
+ 		.bar0_window2 = 0x18109000,
+ 		.bar0_core2_window2 = 0x18106000,
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -24,6 +24,7 @@
+ #include <linux/io-pgtable.h>
+ #include <linux/iommu.h>
+ #include <linux/iopoll.h>
++#include <linux/kexec.h>
+ #include <linux/minmax.h>
+ #include <linux/mm.h>
+ #include <linux/module.h>
+@@ -39,6 +40,7 @@
+ #include <linux/slab.h>
+ #include <linux/soc/apple/tunable.h>
+ #include <linux/swab.h>
++#include <linux/sysfs.h>
+ #include <linux/types.h>
+ 
+ #include "dma-iommu.h"
+@@ -301,7 +303,13 @@
+ 	bool reset_incomplete;
+ 	struct apple_tunable *tunables;
+ 	u16 version;
++	/* Hardware-visible radio domains survive device removal until reset. */
++	bool retained;
+ 	bool retained_mtp;
++	u16 managed_sids;
++	bool managed_failed;
++	/* Serialize owned TCR publication against IRQ quarantine. */
++	spinlock_t managed_lock;
+ 
+ 	DECLARE_BITMAP(remapped, DART_MAX_STREAMS);
+ 	u8 remap_target[DART_MAX_STREAMS];
+@@ -336,6 +344,115 @@
+ 	 */
+ 	int locked_retire_err[DART_MAX_STREAMS];
+ };
++
++#ifndef MODULE
++static struct kexec_blocker apple_dart_radio_kexec = {
++	.users = ATOMIC_INIT(0),
++	.reason = "Apple radio DMA has no qualified takeover/reset boundary",
++};
++#endif
++
++static int apple_dart_retain_radio(struct apple_dart *dart)
++{
++#ifndef MODULE
++	int ret = kexec_block(&apple_dart_radio_kexec);
++
++	if (ret)
++		return ret;
++	get_device(dart->dev);
++	WRITE_ONCE(dart->retained, true);
++	return 0;
++#else
++	return -EOPNOTSUPP;
++#endif
++}
++
++static void apple_dart_release(void *data)
++{
++	struct apple_dart *dart = data;
++
++	if (!READ_ONCE(dart->retained))
++		kfree(dart);
++}
++
++/*
++ * devres still removes IRQs, sysfs and registrations on unexpected removal.
++ * State and mappings reachable from pinned radio domains must survive it.
++ * Before publication these actions perform ordinary probe rollback.
++ */
++struct apple_dart_retained_resource {
++	struct apple_dart *dart;
++	void (*release)(void *ptr, resource_size_t size);
++	void *ptr;
++	resource_size_t size;
++};
++
++static void apple_dart_release_retained_resource(void *data)
++{
++	struct apple_dart_retained_resource *r = data;
++
++	if (!READ_ONCE(r->dart->retained))
++		r->release(r->ptr, r->size);
++	kfree(r);
++}
++
++static int apple_dart_manage_retained_resource(struct apple_dart *dart,
++		void *ptr, resource_size_t size,
++		void (*release)(void *, resource_size_t))
++{
++	struct apple_dart_retained_resource *r = kmalloc(sizeof(*r), GFP_KERNEL);
++
++	if (!r) {
++		release(ptr, size);
++		return -ENOMEM;
++	}
++	*r = (struct apple_dart_retained_resource) {
++		.dart = dart, .release = release, .ptr = ptr, .size = size,
++	};
++	return devm_add_action_or_reset(dart->dev,
++					apple_dart_release_retained_resource, r);
++}
++
++static void apple_dart_release_retained_region(void *ptr, resource_size_t size)
++{
++	struct resource *res = ptr;
++
++	release_mem_region(res->start, resource_size(res));
++}
++
++static int apple_dart_retained_request_region(struct apple_dart *dart,
++			resource_size_t start, resource_size_t size, const char *name)
++{
++	struct resource *res = request_mem_region(start, size, name);
++
++	if (!res)
++		return -EBUSY;
++	return apple_dart_manage_retained_resource(dart, res, size,
++						apple_dart_release_retained_region);
++}
++
++static void apple_dart_unmap_retained_mmio(void *ptr, resource_size_t size)
++{
++	iounmap((__force void __iomem *)ptr);
++}
++
++static void __iomem *apple_dart_retained_ioremap(struct apple_dart *dart,
++						struct resource *res)
++{
++	void __iomem *ptr;
++	int ret;
++
++	ret = apple_dart_retained_request_region(dart, res->start,
++						resource_size(res), dev_name(dart->dev));
++	if (ret)
++		return IOMEM_ERR_PTR(ret);
++	ptr = ioremap(res->start, resource_size(res));
++	if (!ptr || apple_dart_manage_retained_resource(dart, (__force void *)ptr,
++				resource_size(res), apple_dart_unmap_retained_mmio))
++		return IOMEM_ERR_PTR(-ENOMEM);
++	return ptr;
++}
++
+ 
+ /*
+  * PCIe-C is a cable-powered aperture and can report a failed transaction as
+@@ -478,6 +595,7 @@
+ 
+ static struct platform_driver apple_dart_driver;
+ static const struct iommu_ops apple_dart_iommu_ops;
++static bool apple_dart_fault_pending(struct apple_dart *dart);
+ 
+ static struct apple_dart_domain *to_dart_domain(struct iommu_domain *dom)
+ {
+@@ -494,7 +612,8 @@
+  */
+ static bool apple_dart_remaps_streams(struct apple_dart *dart)
+ {
+-	return dart->hw->enable_remap && !dart->tunneled && !dart->per_stream;
++	return dart->hw->enable_remap && !dart->tunneled &&
++	       !dart->per_stream && !dart->managed_sids;
+ }
+ 
+ static void
+@@ -1367,6 +1486,8 @@
+ 
+ 	KUNIT_STATIC_STUB_REDIRECT(apple_dart_t8110_v2_unlock, dart);
+ 
++	if (dart->managed_sids)
++		return -EPERM;
+ 	if (!(readl(dart->regs + DART_T8110_DIAG_LOCK) & DART_T8110_DIAG_LOCK_ON_ERR))
+ 		return 0;
+ 
+@@ -1475,11 +1596,216 @@
+ 	return ret;
+ }
+ 
++static bool apple_dart_managed_static_bypass(u32 tcr)
++{
++	/* T8132 does not retain the DAPF bypass request in the readable TCR. */
++	return (tcr & ~DART_T8110_TCR_BYPASS_DAPF) == DART_T8110_TCR_BYPASS_DART;
++}
++
++static ssize_t j713_radio_fault_state_show(struct device *dev,
++					 struct device_attribute *attr, char *buf)
++{
++	struct apple_dart *dart = dev_get_drvdata(dev);
++	unsigned long flags;
++	ssize_t len = 0;
++	unsigned int sid, word;
++
++	if (!device_is_bound(dev) || !dart || !READ_ONCE(dart->iommu.ready) ||
++	    !dart->managed_sids)
++		return -ENODEV;
++
++	/*
++	 * A live, passive snapshot can race hardware updates and IRQ acknowledgements.
++	 * Never acknowledge a latch, unmask errors, or change an owned/foreign stream.
++	 */
++	spin_lock_irqsave(&dart->managed_lock, flags);
++	len += sysfs_emit_at(buf, len, "version=%#x managed=%#x failed=%u\n",
++			     dart->version, dart->managed_sids, dart->managed_failed);
++	len += sysfs_emit_at(buf, len, "error_mask=%#x error=%#x\n",
++			     apple_dart_readl(dart, DART_T8110_ERROR_MASK),
++			     apple_dart_readl(dart, DART_T8110_ERROR));
++	for (word = 0; word < BITS_TO_U32(dart->num_streams); word++) {
++		u32 streams = apple_dart_readl(dart, DART_T8110_ERROR_STREAMS + 4 * word);
++		u32 exceptions = apple_dart_readl(dart, DART_T8110_EXCEPTION(word));
++
++		len += sysfs_emit_at(buf, len, "error_streams[%u]=%#x exceptions[%u]=%#x\n",
++				     word, streams, word, exceptions);
++	}
++	for (sid = 1; sid < 16; sid++) {
++		u32 status;
++		u64 addr;
++
++		if (!(dart->managed_sids & BIT(sid)))
++			continue;
++		status = apple_dart_readl(dart, DART_T8110_ERR_SID_STATUS(sid));
++		addr = apple_dart_readl(dart, DART_T8110_EXCEPTION_ADDR_LO(sid)) |
++		       (u64)apple_dart_readl(dart, DART_T8110_EXCEPTION_ADDR_HI(sid)) << 32;
++		len += sysfs_emit_at(buf, len, "sid%u status=%#x addr=%#llx\n", sid, status, addr);
++	}
++	spin_unlock_irqrestore(&dart->managed_lock, flags);
++	return len;
++}
++static DEVICE_ATTR_ADMIN_RO(j713_radio_fault_state);
++
++static struct attribute *apple_dart_managed_attrs[] = {
++	&dev_attr_j713_radio_fault_state.attr,
++	NULL,
++};
++
++static const struct attribute_group apple_dart_managed_group = {
++	.attrs = apple_dart_managed_attrs,
++};
++
++/* Ordinary-stream admission does not authorize a controller-wide reset. */
++static int apple_dart_managed_admit(struct apple_dart *dart, bool *init_bypass)
++{
++	unsigned int sid;
++	int idx;
++	bool initialize = false;
++	u32 reserved_tcr, protect, protect_lock, enabled, command, error, error_mask;
++
++	if (!dart->managed_sids) {
++		*init_bypass = false;
++		return 0;
++	}
++	if (dart->hw->type != DART_T8110 || dart->locked || dart->num_streams < 19 ||
++	    dart->version < 0x0202)
++		return -EINVAL;
++	protect = apple_dart_readl(dart, DART_T8110_PROTECT);
++	protect_lock = apple_dart_readl(dart, DART_T8110_PROTECT_LOCK);
++	enabled = apple_dart_readl(dart, DART_T8110_ENABLE_STREAMS);
++	command = apple_dart_readl(dart, DART_T8110_TLB_CMD);
++	error = apple_dart_readl(dart, DART_T8110_ERROR);
++	error_mask = apple_dart_readl(dart, DART_T8110_ERROR_MASK);
++	dev_dbg(dart->dev,
++		 "managed radio: PROTECT %#x LOCK %#x ENABLE %#x TLB %#x ERROR %#x MASK %#x\n",
++		 protect, protect_lock, enabled, command, error, error_mask);
++	/* Preserve global policy; owned-stream quarantine requires unmasked errors. */
++	if (error_mask) {
++		dev_err(dart->dev, "managed radio requires inherited unmasked errors (mask %#x)\n",
++			error_mask);
++		return -EBUSY;
++	}
++	/* LOCK freezes protection policy; ENABLE is not an allocation receipt. */
++	if ((protect & DART_T8110_PROTECT_TTBR_TCR) ||
++	    (command & DART_T8110_TLB_CMD_BUSY) ||
++	    (error & DART_T8110_ERROR_FLAG) || apple_dart_fault_pending(dart))
++		return -EBUSY;
++	for (idx = 0; idx < BITS_TO_U32(dart->num_streams); idx++) {
++		u32 errors = apple_dart_readl(dart, DART_T8110_ERROR_STREAMS + 4 * idx);
++
++		if (errors) {
++			dev_err(dart->dev, "inherited error-stream word%d %#x\n", idx, errors);
++			return -EBUSY;
++		}
++	}
++	/* A requester can reach an ordinary target through another stream. */
++	for (sid = 0; sid < (unsigned int)dart->num_streams; sid++) {
++		u32 tcr = apple_dart_readl(dart, DART_TCR(dart, sid));
++		u32 target = FIELD_GET(DART_T8110_TCR_REMAP, tcr);
++
++		if ((tcr & DART_T8110_TCR_REMAP_ENABLE) &&
++		    (dart->managed_sids & BIT(target))) {
++			dev_err(dart->dev, "inherited SID%u remaps into ordinary SID%u\n",
++				sid, target);
++			return -EBUSY;
++		}
++	}
++	/* ADT assigns SID16 a static bypass role, independently of radio data. */
++	reserved_tcr = apple_dart_readl(dart, DART_TCR(dart, 16));
++	if (!apple_dart_managed_static_bypass(reserved_tcr)) {
++		if (reserved_tcr != dart->hw->tcr_disabled || !dart->supports_bypass)
++			return -EBUSY;
++		for (idx = 0; idx < dart->hw->ttbr_count; idx++)
++			if (apple_dart_readl(dart, DART_TTBR(dart, 16, idx)) &
++			    dart->hw->ttbr_valid)
++				return -EBUSY;
++		initialize = true;
++	}
++	for (sid = 1; sid < 16; sid++) {
++		u32 tcr;
++
++		if (!(dart->managed_sids & BIT(sid)))
++			continue;
++		tcr = apple_dart_readl(dart, DART_TCR(dart, sid));
++		if (tcr != dart->hw->tcr_disabled && tcr != DART_T8110_TCR_TRANSLATE_ENABLE) {
++			dev_err(dart->dev, "ordinary SID%u has an inherited active mode\n", sid);
++			return -EBUSY;
++		}
++		for (idx = 0; idx < dart->hw->ttbr_count; idx++)
++			if (apple_dart_readl(dart, DART_TTBR(dart, sid, idx)) &
++			    dart->hw->ttbr_valid) {
++				dev_err(dart->dev, "ordinary SID%u still has a valid root\n", sid);
++				return -EBUSY;
++			}
++	}
++	*init_bypass = initialize;
++	return 0;
++}
++
++/* The host may start its cold link only before any owned root is published. */
++int apple_dart_radio_check_idle(struct device *dev)
++{
++	struct apple_dart *dart;
++	unsigned long flags;
++	bool init_bypass = false;
++	int ret;
++
++	device_lock(dev);
++	if (dev->driver != &apple_dart_driver.driver || !device_is_bound(dev)) {
++		ret = -EPROBE_DEFER;
++		goto out_unlock;
++	}
++	dart = dev_get_drvdata(dev);
++	if (!dart || !READ_ONCE(dart->iommu.ready)) {
++		ret = -EPROBE_DEFER;
++		goto out_unlock;
++	}
++	if (dart->managed_sids != (BIT(1) | BIT(2))) {
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++	spin_lock_irqsave(&dart->managed_lock, flags);
++	ret = dart->managed_failed || apple_dart_fault_pending(dart) ? -EIO :
++		apple_dart_managed_admit(dart, &init_bypass);
++	if (!ret && init_bypass)
++		ret = -EBUSY;
++	spin_unlock_irqrestore(&dart->managed_lock, flags);
++out_unlock:
++	device_unlock(dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(apple_dart_radio_check_idle);
++
++static void apple_dart_managed_quarantine_locked(struct apple_dart *dart)
++{
++	struct apple_dart_stream_map stream = { .dart = dart };
++	unsigned int sid;
++
++	lockdep_assert_held(&dart->managed_lock);
++	WRITE_ONCE(dart->managed_failed, true);
++	for (sid = 1; sid < 16; sid++)
++		if (dart->managed_sids & BIT(sid))
++			__set_bit(sid, stream.sidmap);
++	apple_dart_hw_disable_dma(&stream);
++}
++
++static void apple_dart_managed_quarantine(struct apple_dart *dart)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&dart->managed_lock, flags);
++	apple_dart_managed_quarantine_locked(dart);
++	spin_unlock_irqrestore(&dart->managed_lock, flags);
++}
++
+ static int apple_dart_hw_reset(struct apple_dart *dart)
+ {
+ 	struct apple_dart_stream_map stream_map;
+ 	int i;
+ 
++	if (dart->managed_sids)
++		return -EBUSY;
+ 	stream_map.dart = dart;
+ 	bitmap_zero(stream_map.sidmap, DART_MAX_STREAMS);
+ 	bitmap_set(stream_map.sidmap, 0, dart->num_streams);
+@@ -1542,6 +1868,8 @@
+ 								    start, end);
+ 		else
+ 			ret = stream.dart->hw->invalidate_tlb(&stream);
++		if (ret && stream.dart->managed_sids)
++			apple_dart_managed_quarantine(stream.dart);
+ 		pm_runtime_put(stream.dart->dev);
+ 		err = err ?: ret;
+ 	}
+@@ -1753,6 +2081,9 @@
+ 
+ 	if (!ops)
+ 		return -ENODEV;
++	if (dart_domain->stream_maps[0].dart &&
++	    READ_ONCE(dart_domain->stream_maps[0].dart->managed_failed))
++		return -EIO;
+ 
+ 	dva = (iova + dart_domain->dma_offset) & dart_domain->mask;
+ 	ret = apple_dart_check_fw_map(dart_domain, dva, paddr, pgsize * pgcount,
+@@ -1778,7 +2109,7 @@
+ 				gather);
+ }
+ 
+-static void
++static int
+ apple_dart_setup_translation(struct apple_dart_domain *domain,
+ 			     struct apple_dart_stream_map *stream_map)
+ {
+@@ -1787,10 +2118,16 @@
+ 	struct io_pgtable_cfg *pgtbl_cfg =
+ 		&io_pgtable_ops_to_pgtable(domain->pgtbl_ops)->cfg;
+ 
+-	/* enable all streams globally since TCR is used to control isolation */
+-	for (i = 0; i < BITS_TO_U32(dart->num_streams); i++)
+-		apple_dart_writel(dart, U32_MAX,
+-				   dart->hw->enable_streams + 4 * i);
++	if (dart->managed_sids) {
++		/* Admission owns only ordinary SIDs 1/2, both in the first word. */
++		apple_dart_writel(dart, stream_map->sidmap[0] & dart->managed_sids,
++				  dart->hw->enable_streams);
++	} else {
++		/* Other profiles use TCR to control isolation. */
++		for (i = 0; i < BITS_TO_U32(dart->num_streams); i++)
++			apple_dart_writel(dart, U32_MAX,
++					  dart->hw->enable_streams + 4 * i);
++	}
+ 
+ 	for (i = 0; i < pgtbl_cfg->apple_dart_cfg.n_ttbrs; ++i) {
+ 		u64 ttbr = virt_to_phys(pgtbl_cfg->apple_dart_cfg.ttbr[i]);
+@@ -1801,7 +2138,7 @@
+ 
+ 	apple_dart_hw_enable_translation(stream_map,
+ 					 pgtbl_cfg->apple_dart_cfg.n_levels);
+-	stream_map->dart->hw->invalidate_tlb(stream_map);
++	return dart->hw->invalidate_tlb(stream_map);
+ }
+ 
+ /* Record the DVA window of @domain for invalidates of @stream_map's streams. */
+@@ -2023,6 +2360,7 @@
+ 	struct apple_dart_stream_map *stream_map;
+ 	struct apple_dart_master_cfg *cfg = dev_iommu_priv_get(dev);
+ 	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
++	bool streams_added = false;
+ 
+ 	for_each_stream_map(i, cfg, stream_map)
+ 		WARN_ON(pm_runtime_get_sync(stream_map->dart->dev) < 0);
+@@ -2034,9 +2372,24 @@
+ 	ret = apple_dart_domain_add_streams(dart_domain, cfg);
+ 	if (ret)
+ 		goto err;
++	streams_added = true;
+ 
+ 	for_each_stream_map(i, cfg, stream_map) {
+-		if (!stream_map->dart->locked)
++		if (stream_map->dart->managed_sids) {
++			struct apple_dart *dart = stream_map->dart;
++			unsigned long flags;
++
++			spin_lock_irqsave(&dart->managed_lock, flags);
++			if (dart->managed_failed)
++				ret = -EIO;
++			else
++				ret = apple_dart_setup_translation(dart_domain, stream_map);
++			if (ret)
++				apple_dart_managed_quarantine_locked(dart);
++			spin_unlock_irqrestore(&dart->managed_lock, flags);
++			if (ret)
++				goto err;
++		} else if (!stream_map->dart->locked)
+ 			apple_dart_setup_translation(dart_domain, stream_map);
+ 		else {
+ 			ret = apple_dart_setup_translation_locked(dart_domain, stream_map);
+@@ -2046,6 +2399,8 @@
+ 	}
+ 
+ err:
++	if (ret && streams_added && cfg->stream_maps[0].dart->managed_sids)
++		apple_dart_mod_streams(dart_domain->stream_maps, cfg->stream_maps, false);
+ 	for_each_stream_map(i, cfg, stream_map)
+ 		pm_runtime_put(stream_map->dart->dev);
+ 	return ret;
+@@ -2059,7 +2414,7 @@
+ 	struct apple_dart_stream_map *stream_map;
+ 	int i;
+ 
+-	if (!cfg->supports_bypass)
++	if (!cfg->supports_bypass || cfg->stream_maps[0].dart->managed_sids)
+ 		return -EINVAL;
+ 
+ 	if (cfg->locked)
+@@ -2203,6 +2558,8 @@
+ 	int i, j, idx, ret;
+ 
+ 	for_each_stream_map(i, dart_domain, map) {
++		if (map->dart->managed_sids)
++			return;
+ 		if (!map->dart->locked)
+ 			continue;
+ 		stream.dart = map->dart;
+@@ -2308,6 +2665,9 @@
+ 		return i;
+ 
+ 	sid = args->args[0];
++	if (dart->managed_sids &&
++	    (sid <= 0 || sid >= 16 || !(dart->managed_sids & BIT(sid))))
++		return -EINVAL;
+ 
+ 	if (!cfg) {
+ 		cfg = kzalloc_obj(*cfg);
+@@ -2340,7 +2700,7 @@
+ 			return -EINVAL;
+ 	}
+ 
+-	cfg->supports_bypass &= dart->supports_bypass;
++	cfg->supports_bypass &= dart->supports_bypass && !dart->managed_sids;
+ 	cfg->locked |= dart->locked;
+ 
+ 	for (i = 0; i < MAX_DARTS_PER_DEVICE; ++i) {
+@@ -2504,6 +2864,8 @@
+ {
+ 	struct apple_dart_master_cfg *cfg = dev_iommu_priv_get(dev);
+ 
++	if (cfg->stream_maps[0].dart->managed_sids)
++		return IOMMU_DOMAIN_DMA;
+ 	if (cfg->stream_maps[0].dart->retained_mtp)
+ 		return IOMMU_DOMAIN_IDENTITY;
+ 	if (dev_is_pci(dev) && of_machine_is_compatible("apple,j713") &&
+@@ -2810,6 +3172,8 @@
+ 
+ 		if (!pending)
+ 			continue;
++		if (dart->managed_sids)
++			apple_dart_managed_quarantine(dart);
+ 
+ 		for_each_set_bit(bit, &bits, 32) {
+ 			unsigned int sid = i * 32 + bit;
+@@ -2852,6 +3216,8 @@
+ 	if (dart->version >= 0x0203) {
+ 		block_error = readl(dart->regs + DART_T8110_BLOCK_ERROR);
+ 		if (apple_dart_t8110_v2_block_pending(dart->version, block_error)) {
++			if (dart->managed_sids)
++				apple_dart_managed_quarantine(dart);
+ 			dev_err_ratelimited(dart->dev,
+ 					    "block exception: status:0x%08x\n",
+ 					    block_error);
+@@ -2860,10 +3226,26 @@
+ 			ret = IRQ_HANDLED;
+ 		}
+ 	}
+-	if (ret == IRQ_HANDLED)
++	/* Managed radio streams remain quarantined after a fault. */
++	if (ret == IRQ_HANDLED && !dart->managed_sids)
+ 		apple_dart_t8110_v2_unlock(dart);
+ 
+ 	return ret;
++}
++
++/* Read-only admission: do not clear a pending inherited fault before ownership. */
++static bool apple_dart_fault_pending(struct apple_dart *dart)
++{
++	if (dart->version >= 0x0202) {
++		for (unsigned int i = 0; i < DIV_ROUND_UP(dart->num_streams, 32); i++)
++			if (readl(dart->regs + DART_T8110_EXCEPTION(i)))
++				return true;
++		return dart->version >= 0x0203 &&
++			apple_dart_t8110_v2_block_pending(dart->version,
++				readl(dart->regs + DART_T8110_BLOCK_ERROR));
++	}
++	return (readl(dart->regs + DART_T8110_ERROR) & DART_T8110_ERROR_FLAG) ||
++		readl(dart->regs + DART_T8110_ERROR_STREAMS);
+ }
+ 
+ static irqreturn_t apple_dart_t8110_irq(int irq, void *dev)
+@@ -2972,15 +3354,32 @@
+ 		of_device_is_compatible(dev->of_node, "apple,t8132-dart") &&
+ 		res->start == 0x490000000ULL;
+ 
+-	dart = devm_kzalloc(dev, sizeof(*dart), GFP_KERNEL);
++	dart = kzalloc(sizeof(*dart), GFP_KERNEL);
+ 	if (!dart)
+ 		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, apple_dart_release, dart);
++	if (ret)
++		return ret;
+ 
+ 	dart->dev = dev;
+ 	dart->hw = of_device_get_match_data(dev);
+ 	dart->tunneled = tunneled;
+ 	dart->per_stream = of_device_is_compatible(dev->of_node, "apple,t8140-dart") ||
+ 			   of_device_is_compatible(dev->of_node, "apple,t8142-dart");
++	if (of_property_present(dev->of_node, "apple,managed-sids")) {
++		u32 ids[2];
++
++		if (!IS_BUILTIN(CONFIG_APPLE_DART))
++			return dev_err_probe(dev, -EOPNOTSUPP,
++					     "managed radio requires built-in DART support\n");
++		if (!j713_radio ||
++		    of_property_count_u32_elems(dev->of_node, "apple,managed-sids") != 2 ||
++		    of_property_read_u32_array(dev->of_node, "apple,managed-sids", ids, 2) ||
++		    ids[0] != 1 || ids[1] != 2)
++			return -EINVAL;
++		dart->managed_sids = BIT(1) | BIT(2);
++	}
++	spin_lock_init(&dart->managed_lock);
+ 	if (tunneled) {
+ 		pd_np = of_parse_phandle(dev->of_node, "power-domains", 0);
+ 		if (pd_np) {
+@@ -3004,6 +3403,8 @@
+ 	if (tunneled)
+ 		dart->regs = apple_dart_platform_ioremap_np_resource(pdev, 0,
+ 							      &res);
++	else if (dart->managed_sids)
++		dart->regs = apple_dart_retained_ioremap(dart, res);
+ 	else
+ 		dart->regs = devm_platform_get_and_ioremap_resource(pdev, 0,
+ 							     &res);
+@@ -3047,10 +3448,15 @@
+ 			return -ENODEV;
+ 	}
+ 
++	if (dart->managed_sids && dart->irq < 0)
++		return dev_err_probe(dev, -ENODEV, "managed radio requires a fault IRQ\n");
++
+ 	ret = devm_clk_bulk_get_all(dev, &dart->clks);
+ 	if (ret < 0)
+ 		return ret;
+ 	dart->num_clks = ret;
++	if (dart->managed_sids && dart->num_clks)
++		return -EINVAL;
+ 
+ 	ret = clk_bulk_prepare_enable(dart->num_clks, dart->clks);
+ 	if (ret)
+@@ -3228,7 +3634,34 @@
+ 		dart->retained_mtp = true;
+ 		dev_info(dev, "Retaining the live J713 MTP bypass\n");
+ 	}
+-	if (!dart->locked && !dart->retained_mtp) {
++	if (dart->managed_sids) {
++		bool init_bypass = false;
++
++		ret = apple_dart_fault_pending(dart) ? -EBUSY :
++			apple_dart_managed_admit(dart, &init_bypass);
++		if (ret)
++			goto err_clk_disable;
++		/* Acquire the takeover guard before the first managed register write. */
++		ret = apple_dart_retain_radio(dart);
++		if (ret)
++			goto err_clk_disable;
++		if (init_bypass) {
++			struct apple_dart_stream_map stream = { .dart = dart };
++			u32 bypass_tcr;
++
++			__set_bit(16, stream.sidmap);
++			apple_dart_hw_enable_bypass(&stream);
++			bypass_tcr = apple_dart_readl(dart, DART_TCR(dart, 16));
++			if (!apple_dart_managed_static_bypass(bypass_tcr)) {
++				ret = dev_err_probe(dev, -EIO,
++						    "static SID16 bypass readback failed\n");
++				goto err_clk_disable;
++			}
++			apple_dart_writel(dart, BIT(16), dart->hw->enable_streams);
++		}
++		/* ENABLE is write-one-to-set; no foreign stream changes state. */
++		apple_dart_writel(dart, dart->managed_sids, dart->hw->enable_streams);
++	} else if (!dart->locked && !dart->retained_mtp) {
+ 		ret = apple_dart_hw_reset(dart);
+ 		if (ret)
+ 			goto err_clk_disable;
+@@ -3248,12 +3681,18 @@
+ 				     dev_name(&pdev->dev));
+ 	if (ret)
+ 		goto err_free_irq;
++	if (dart->managed_sids) {
++		ret = devm_device_add_group(dev, &apple_dart_managed_group);
++		if (ret)
++			goto err_sysfs_remove;
++	}
+ 
+ 	ret = iommu_device_register(&dart->iommu, &apple_dart_iommu_ops, dev);
+ 	if (ret)
+ 		goto err_sysfs_remove;
+ 
+-	if (!dart->retained_mtp)
++	/* Retain supplier references; generic suspend/resume is not applicable. */
++	if (!dart->retained_mtp && !dart->managed_sids)
+ 		pm_runtime_put(dev);
+ 
+ 	dev_dbg(
+@@ -3264,12 +3703,20 @@
+ 	return 0;
+ 
+ err_sysfs_remove:
++	/* Failed registration may already have published a radio domain. */
++	if (dart->retained)
++		apple_dart_managed_quarantine(dart);
+ 	iommu_device_sysfs_remove(&dart->iommu);
+ err_free_irq:
+ 	if (dart->irq >= 0)
+ 		free_irq(dart->irq, dart);
+ err_clk_disable:
+-	pm_runtime_put(dev);
++	if (dart->retained && !READ_ONCE(dart->managed_failed))
++		apple_dart_managed_quarantine(dart);
++	if (dart->retained)
++		pm_runtime_put_noidle(dev);
++	else
++		pm_runtime_put(dev);
+ 	clk_bulk_disable_unprepare(dart->num_clks, dart->clks);
+ 
+ 	return ret;
+@@ -3377,6 +3824,15 @@
+ {
+ 	struct apple_dart *dart = platform_get_drvdata(pdev);
+ 
++	if (dart->managed_sids) {
++		apple_dart_managed_quarantine(dart);
++		if (dart->irq >= 0)
++			free_irq(dart->irq, dart);
++		iommu_device_unregister(&dart->iommu);
++		iommu_device_sysfs_remove(&dart->iommu);
++		return;
++	}
++
+ 	/*
+ 	 * Cable removal gates the port clock before this device is removed.
+ 	 * A command issued then never completes. The next probe resets the
+@@ -3392,6 +3848,14 @@
+ 	iommu_device_sysfs_remove(&dart->iommu);
+ 
+ 	clk_bulk_disable_unprepare(dart->num_clks, dart->clks);
++}
++
++static void apple_dart_shutdown(struct platform_device *pdev)
++{
++	struct apple_dart *dart = platform_get_drvdata(pdev);
++
++	if (dart->managed_sids)
++		apple_dart_managed_quarantine(dart);
+ }
+ 
+ static const struct apple_dart_hw apple_dart_hw_t8103 = {
+@@ -3510,6 +3974,9 @@
+ 	dart->tunnel_state_restored = false;
+ 	if (READ_ONCE(dart->commands_gated))
+ 		return 0;
++	/* This radio profile has no qualified suspend/takeover boundary. */
++	if (dart->managed_sids)
++		return -EBUSY;
+ 	/* The tunneled DART has no state to save when its domain stays on. */
+ 	if (dart->power_retained || dart->retained_mtp)
+ 		return 0;
+@@ -3595,6 +4062,9 @@
+ 	struct apple_dart *dart = dev_get_drvdata(dev);
+ 	unsigned int sid, idx;
+ 	int ret;
++
++	if (dart->managed_sids)
++		return -EBUSY;
+ 
+ 	/* PCIe-C restored these mappings before starting its downstream link. */
+ 	if (dart->tunnel_state_restored) {
+@@ -3676,6 +4146,7 @@
+ 	},
+ 	.probe	= apple_dart_probe,
+ 	.remove = apple_dart_remove,
++	.shutdown = apple_dart_shutdown,
+ };
+ 
+ module_platform_driver(apple_dart_driver);
+diff --git a/drivers/pci/controller/pcie-apple.c b/drivers/pci/controller/pcie-apple.c
+--- a/drivers/pci/controller/pcie-apple.c
++++ b/drivers/pci/controller/pcie-apple.c
+@@ -339,6 +339,7 @@
+ 	bool			link_kept;
+ 	bool			resume_failed; /* cleared only by teardown and reprobe */
+ 	struct reset_control	*reset;
++	u16			managed_sids;
+ 	bool			neo_config_ready;
+ 	u8			neo_secondary_bus;
+ 	struct device		*piodma_supplier;
+@@ -374,6 +375,9 @@
+ 	bool			link_failed;
+ 	bool			irq_disabled;
+ };
++
++static int apple_pcie_managed_admit(struct apple_pcie_port *port);
++static int apple_pcie_radio_check_cold(struct apple_pcie_port *port);
+ 
+ static void rmw_set(u32 set, void __iomem *addr)
+ {
+@@ -1385,7 +1389,8 @@
+ {
+ 	apple_pcie_port_disable_irq(port);
+ 
+-	if (port->base)
++	/* Busy managed admission has not acquired or programmed this IRQ block. */
++	if (port->base && (!port->pcie->managed_sids || port->domain))
+ 		apple_pcie_port_writel(port, ~0, PORT_INTMSK);
+ 
+ 	if (port->pcie->hw->tunneled && (port->started || port->needs_stop))
+@@ -1627,6 +1632,11 @@
+ 		ret = PTR_ERR(port->base);
+ 		port->base = NULL;
+ 		goto err_teardown;
++	}
++	if (pcie->managed_sids) {
++		ret = apple_pcie_managed_admit(port);
++		if (ret)
++			goto err_teardown;
+ 	}
+ 	if (pcie->hw->tunneled) {
+ 		port->tunable = devm_apple_tunable_parse(pcie->dev, np,
+@@ -1708,6 +1718,11 @@
+ 		/* U-Boot may already have brought up a conventional root port. */
+ 		link_stat = apple_pcie_port_readl(port, PORT_LINKSTS);
+ 		if (!(link_stat & PORT_LINKSTS_UP)) {
++			if (pcie->managed_sids) {
++				ret = apple_pcie_radio_check_cold(port);
++				if (ret)
++					goto err_teardown;
++			}
+ 			ret = apple_pcie_setup_link(pcie, port, np);
+ 			if (ret)
+ 				goto err_teardown;
+@@ -1731,6 +1746,10 @@
+ 	if (ret)
+ 		goto err_teardown;
+ 
++	if (pcie->managed_sids) {
++		goto rid2sid_ready;
++	}
++
+ 	/* Reset all RID/SID mappings, and check for RAZ/WI registers */
+ 	for (i = 0; i < pcie->hw->max_rid2sid; i++) {
+ 		if (apple_pcie_rid2sid_write(port, i, 0xbad1d) != 0xbad1d)
+@@ -1741,7 +1760,7 @@
+ 	dev_dbg(pcie->dev, "%pOF: %d RID/SID mapping entries\n", np, i);
+ 
+ 	port->sid_map_sz = i;
+-
++rid2sid_ready:
+ 	list_add_tail(&port->entry, &pcie->ports);
+ 	init_completion(&pcie->event);
+ 
+@@ -1783,6 +1802,10 @@
+ 		if (left)
+ 			dev_info(pcie->dev, "%pOF link up after %ldms\n", np,
+ 				 (timeout - left) * 1000 / HZ);
++		else if (pcie->managed_sids) {
++			ret = -ETIMEDOUT;
++			goto err_teardown;
++		}
+ 	}
+ 	if (pcie->hw->tunneled &&
+ 	    (apple_pcie_port_readl(port, PORT_LINKSTS) & PORT_LINKSTS_UP))
+@@ -2002,6 +2025,112 @@
+ 	return NULL;
+ }
+ 
++/* Native T8132 normal SIDs are nonzero, four-bit, and indexed by SID. */
++static int apple_pcie_managed_sid_mask(const u32 *ids, unsigned int count, u16 *mask)
++{
++	u16 selected = 0;
++	unsigned int i;
++
++	if (!count || count > 15)
++		return -EINVAL;
++	for (i = 0; i < count; i++) {
++		if (!ids[i] || ids[i] >= 16 || (selected & BIT(ids[i])))
++			return -EINVAL;
++		selected |= BIT(ids[i]);
++	}
++	*mask = selected;
++	return 0;
++}
++
++static int apple_pcie_managed_word(u16 managed, u32 rid, u32 sid, u32 *word)
++{
++	if (!rid || rid > 0xffff || !sid || sid >= 16 || !(managed & BIT(sid)))
++		return -EINVAL;
++	*word = PORT_RID2SID_VALID | (sid << PORT_RID2SID_SID_SHIFT) | rid;
++	return 0;
++}
++
++static int apple_pcie_managed_admit(struct apple_pcie_port *port)
++{
++	u32 entries[16];
++	unsigned int sid, other;
++
++	for (sid = 0; sid < ARRAY_SIZE(entries); sid++)
++		entries[sid] = apple_pcie_port_readl(port, port_rid2sid_offset(port, sid));
++
++	/* Index zero is invalid in the native ordinary-RID contract. */
++	if (entries[0] & PORT_RID2SID_VALID) {
++		dev_err(port->pcie->dev, "inherited RID entry0 is still valid\n");
++		return -EBUSY;
++	}
++	for (sid = 1; sid < ARRAY_SIZE(entries); sid++) {
++		u32 target = (entries[sid] >> PORT_RID2SID_SID_SHIFT) & 0xf;
++		u32 rid = entries[sid] & 0xffff;
++
++		if (!(entries[sid] & PORT_RID2SID_VALID))
++			continue;
++		if (target != sid || (port->pcie->managed_sids & BIT(sid)) ||
++		    (port->pcie->managed_sids & BIT(target)) || rid == 0x100 || rid == 0x101) {
++			dev_err(port->pcie->dev, "inherited RID[%u] %#x conflicts with ordinary ownership\n",
++				sid, entries[sid]);
++			return -EBUSY;
++		}
++		for (other = 1; other < sid; other++)
++			if ((entries[other] & PORT_RID2SID_VALID) &&
++			    (entries[other] & 0xffff) == rid)
++				return -EBUSY;
++	}
++	/* No writes: every existing foreign or reserved entry stays untouched. */
++	port->sid_map_sz = 16;
++	return 0;
++}
++
++static int apple_pcie_radio_check_cold(struct apple_pcie_port *port)
++{
++	struct device_node *np = port->pcie->dev->of_node;
++	struct of_phandle_args wifi = {}, bt = {};
++	struct platform_device *provider;
++	u32 status, link;
++	unsigned int sid;
++	int ret;
++
++	status = apple_pcie_port_readl(port, PORT_STATUS);
++	link = apple_pcie_port_readl(port, PORT_LINKSTS);
++	if (!(status & PORT_STATUS_READY) ||
++	    (link & (PORT_LINKSTS_UP | PORT_LINKSTS_BUSY)))
++		return -EBUSY;
++	/* A cold endpoint reset is legal only before any ordinary RID is owned. */
++	for (sid = 0; sid < 16; sid++)
++		if (apple_pcie_port_readl(port, port_rid2sid_offset(port, sid)) &
++		    PORT_RID2SID_VALID)
++			return -EBUSY;
++
++	/* J713's two exact functions must name the same managed provider. */
++	ret = of_map_iommu_id(np, 0x100, &wifi);
++	if (ret)
++		return ret;
++	ret = of_map_iommu_id(np, 0x101, &bt);
++	if (ret)
++		goto out_wifi;
++	if (wifi.np != bt.np || wifi.args_count != 1 || bt.args_count != 1 ||
++	    wifi.args[0] != 1 || bt.args[0] != 2) {
++		ret = -EINVAL;
++		goto out_nodes;
++	}
++	provider = of_find_device_by_node(wifi.np);
++	if (!provider) {
++		ret = -EPROBE_DEFER;
++		goto out_nodes;
++	}
++	ret = apple_dart_radio_check_idle(&provider->dev);
++	put_device(&provider->dev);
++out_nodes:
++	of_node_put(bt.np);
++out_wifi:
++	of_node_put(wifi.np);
++	return ret;
++}
++
+ static int apple_pcie_enable_device(struct pci_host_bridge *bridge, struct pci_dev *pdev)
+ {
+ 	struct apple_pcie *pcie = pci_host_bridge_priv(bridge);
+@@ -2051,8 +2180,10 @@
+ 	sid = iommu_spec.args[0];
+ 	mutex_lock(&port->pcie->lock);
+ 
+-	if (port->pcie->hw->sid_indexed_rid2sid) {
+-		if (sid >= port->sid_map_sz)
++	if (port->pcie->managed_sids || port->pcie->hw->sid_indexed_rid2sid) {
++		if (sid >= port->sid_map_sz ||
++		    (pcie->managed_sids && (!rid || !sid || sid >= 16 ||
++					  !(pcie->managed_sids & BIT(sid)))))
+ 			idx = -EINVAL;
+ 		else if (test_and_set_bit(sid, port->sid_map))
+ 			idx = -EBUSY;
+@@ -2063,10 +2194,33 @@
+ 		if (idx < 0)
+ 			idx = -ENOSPC;
+ 	}
++	if (idx >= 0 && pcie->managed_sids) {
++		unsigned int other;
++
++		for (other = 0; other < 16; other++) {
++			u32 entry = apple_pcie_port_readl(port, port_rid2sid_offset(port, other));
++
++			if ((entry & PORT_RID2SID_VALID) &&
++			    (other == sid || (entry & 0xffff) == rid)) {
++				bitmap_release_region(port->sid_map, idx, 0);
++				idx = -EBUSY;
++				break;
++			}
++		}
++	}
+ 	if (idx >= 0) {
+-		val = PORT_RID2SID_VALID | (sid << PORT_RID2SID_SID_SHIFT) | rid;
++		if (pcie->managed_sids) {
++			err = apple_pcie_managed_word(pcie->managed_sids, rid, sid, &val);
++			if (err) {
++				bitmap_release_region(port->sid_map, idx, 0);
++				mutex_unlock(&port->pcie->lock);
++				return err;
++			}
++		} else {
++			val = PORT_RID2SID_VALID | (sid << PORT_RID2SID_SID_SHIFT) | rid;
++		}
+ 		readback = apple_pcie_rid2sid_write(port, idx, val);
+-		if (pcie->hw->sid_indexed_rid2sid && readback != val) {
++		if ((pcie->managed_sids || pcie->hw->sid_indexed_rid2sid) && readback != val) {
+ 			dev_err(&pdev->dev, "RID-to-SID readback %#x expected %#x\n",
+ 				readback, val);
+ 			/* Reserve the failed slot; do not enable or recycle it. */
+@@ -2101,7 +2255,12 @@
+ 		val = apple_pcie_port_readl(port,
+ 					    port_rid2sid_offset(port, idx));
+ 		if ((val & 0xffff) == rid) {
+-			apple_pcie_rid2sid_write(port, idx, 0);
++			val = apple_pcie_rid2sid_write(port, idx, 0);
++			if (port->pcie->managed_sids && val) {
++				dev_err(&pdev->dev,
++					"RID invalidation failed; retaining SID slot %d\n", idx);
++				break;
++			}
+ 			bitmap_release_region(port->sid_map, idx, 0);
+ 			dev_dbg(&pdev->dev, "Released %x (%d)\n", val, idx);
+ 			break;
+@@ -2697,16 +2856,31 @@
+ 	pcie = pci_host_bridge_priv(bridge);
+ 	pcie->dev = dev;
+ 	pcie->hw = hw;
++	if (of_property_present(dev->of_node, "apple,managed-sids")) {
++		u32 ids[15];
++		int count = of_property_count_u32_elems(dev->of_node, "apple,managed-sids");
++
++		if (!of_device_is_compatible(dev->of_node, "apple,t8132-pcie") ||
++		    !of_machine_is_compatible("apple,j713") || count <= 0 || count > 15)
++			return -EINVAL;
++		ret = of_property_read_u32_array(dev->of_node, "apple,managed-sids", ids, count);
++		if (!ret && (count != 2 || ids[0] != 1 || ids[1] != 2))
++			ret = -EINVAL;
++		if (!ret)
++			ret = apple_pcie_managed_sid_mask(ids, count, &pcie->managed_sids);
++		if (ret)
++			return ret;
++	}
+ 	pcie->piodma_supplier = piodma_supplier;
+ 	/* Only this retained-DMA radio hierarchy forbids user reset/removal. */
+-	if (piodma_supplier) {
++	if (piodma_supplier || pcie->managed_sids) {
+ 		bridge->no_user_remove = true;
+ 		bridge->reset_sensitive = true;
+ 		bridge->native_pcie_hotplug = false;
+ 		bridge->native_shpc_hotplug = false;
+ 		bridge->native_aer = false;
+ 		bridge->native_dpc = false;
+-		dev_info_once(dev, "Neo radio host: native AER/DPC recovery disabled for retained-DMA bootstrap\n");
++		dev_info_once(dev, "radio host: automatic AER/DPC recovery disabled for retained DMA\n");
+ 	}
+ 	if (hw->root_bus_only && !piodma_supplier)
+ 		dev_info(dev, "root-port probe only; downstream config is blocked\n");
+@@ -3414,6 +3588,8 @@
+ {
+ 	struct apple_pcie *pcie = apple_pcie_lookup(dev);
+ 
++	if (pcie->managed_sids)
++		return -EBUSY;
+ 	if (!pcie->hw->tunneled)
+ 		return 0;
+ 	pcie->reset_on_resume = false;
+diff --git a/drivers/spi/spi-apple-qspi.c b/drivers/spi/spi-apple-qspi.c
+--- a/drivers/spi/spi-apple-qspi.c
++++ b/drivers/spi/spi-apple-qspi.c
+@@ -125,7 +125,7 @@
+ 	.get = apple_qspi_get_read_only,
+ };
+ module_param_cb(read_only, &apple_qspi_read_only_ops, &read_only, 0644);
+-MODULE_PARM_DESC(read_only, "Default true; root runtime opt-in for bounded J613 NVRAM writes (T8122/T8132 only)");
++MODULE_PARM_DESC(read_only, "Default true; root runtime opt-in for bounded J613/J713 NVRAM writes");
+ 
+ static bool apple_qspi_opcode_is_read(u8 opcode)
+ {
+@@ -149,7 +149,7 @@
+ }
+ 
+ struct apple_qspi {
+-	/* T8122/T8132 use the serialized J613 policy. */
++	/* T8122/T8132 use the serialized, verified NVRAM policy. */
+ 	bool nvram_policy;
+ 	/* T8140 admits programs and erases only inside nvram. */
+ 	bool nvram_window;
+@@ -843,7 +843,20 @@
+ 	.exec_op = apple_qspi_mem_exec_op,
+ };
+ 
+-/* Require the pinned partition, aperture and single physical chip select. */
++/* Keep write qualification tied to the board and its controller aperture. */
++static bool apple_qspi_nvram_write_board(struct device_node *node,
++					 resource_size_t base)
++{
++	if (of_device_is_compatible(node, "apple,t8122-qspi"))
++		return of_machine_is_compatible("apple,j613") &&
++			base == 0x2a1118000ULL;
++	if (of_device_is_compatible(node, "apple,t8132-qspi"))
++		return of_machine_is_compatible("apple,j713") &&
++			base == 0x3ad118000ULL;
++	return false;
++}
++
++/* Require the pinned partition and single physical chip select. */
+ static bool apple_qspi_nvram_layout(struct device_node *node)
+ {
+ 	struct device_node *flash, *parts, *part;
+@@ -953,8 +966,8 @@
+ 		apple_qspi_nvram_window(dev, qspi);
+ 	qspi->nvram_policy = of_device_is_compatible(dev->of_node, "apple,t8122-qspi") ||
+ 			     of_device_is_compatible(dev->of_node, "apple,t8132-qspi");
+-	qspi->nvram_write_candidate = of_device_is_compatible(dev->of_node, "apple,t8122-qspi");
+-	if (qspi->nvram_write_candidate && !of_machine_is_compatible("apple,j613"))
++	if (of_device_is_compatible(dev->of_node, "apple,t8122-qspi") &&
++	    !of_machine_is_compatible("apple,j613"))
+ 		return -ENODEV;
+ 	init_completion(&qspi->done);
+ 	spin_lock_init(&qspi->lock);
+@@ -964,7 +977,8 @@
+ 		return dev_err_probe(dev, -EINVAL,
+ 				     "QSPIMC aperture is too small\n");
+ 
+-	qspi->nvram_write_candidate &= res->start == 0x2a1118000ULL &&
++	qspi->nvram_write_candidate = apple_qspi_nvram_write_board(dev->of_node,
++								   res->start) &&
+ 		apple_qspi_nvram_layout(dev->of_node);
+ 	qspi->base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(qspi->base))
+diff --git a/include/linux/soc/apple/dart.h b/include/linux/soc/apple/dart.h
+--- a/include/linux/soc/apple/dart.h
++++ b/include/linux/soc/apple/dart.h
+@@ -16,11 +16,14 @@
+ int apple_dart_resume_commands(struct device *dev);
+ int apple_dart_save_tunnel_state(struct device *dev);
+ int apple_dart_restore_tunnel_state(struct device *dev);
++/* Registered J713 managed radio provider, with no owned valid root or fault. */
++int apple_dart_radio_check_idle(struct device *dev);
+ #else
+ static inline int apple_dart_quiesce_commands(struct device *dev) { return 0; }
+ static inline int apple_dart_resume_commands(struct device *dev) { return 0; }
+ static inline int apple_dart_save_tunnel_state(struct device *dev) { return -EOPNOTSUPP; }
+ static inline int apple_dart_restore_tunnel_state(struct device *dev) { return -EOPNOTSUPP; }
++static inline int apple_dart_radio_check_idle(struct device *dev) { return -EOPNOTSUPP; }
+ #endif
+ 
+ #endif
+diff --git a/tools/asahi/qspi-nvram-tests.py b/tools/asahi/qspi-nvram-tests.py
+--- a/tools/asahi/qspi-nvram-tests.py
++++ b/tools/asahi/qspi-nvram-tests.py
+@@ -31,6 +31,11 @@
+ #include <stdio.h>
+ #include <errno.h>
+ typedef uint8_t u8; typedef uint32_t u32; typedef uint64_t u64;
++typedef uint64_t resource_size_t;
++struct device_node { const char *compatible; };
++static const char *machine;
++static bool of_device_is_compatible(struct device_node *node,const char *compat){return !strcmp(node->compatible,compat);}
++static bool of_machine_is_compatible(const char *compat){return !strcmp(machine,compat);}
+ #define EOPNOTSUPP 95
+ #define GFP_KERNEL 0
+ #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+@@ -131,6 +136,18 @@
+ static bool sent(unsigned int o){for(unsigned int i=0;i<wire_count;i++)if(wire[i]==o)return true;return false;}
+ static void denied(struct spi_mem_op o){wire_count=0;assert(apple_qspi_exec_op(&mem,&o)<0);assert(!wire_count);}
+ int main(void){
++ const char *boards[]={"apple,j613","apple,j713","apple,j714"};
++ const char *controllers[]={"apple,t8122-qspi","apple,t8132-qspi","apple,t8140-qspi"};
++ const u64 bases[]={0x2a1118000ULL,0x3ad118000ULL,0x385110000ULL,0xad118000ULL,0x3ad118004ULL};
++ for(unsigned int b=0;b<ARRAY_SIZE(boards);b++){
++  machine=boards[b];
++  for(unsigned int c=0;c<ARRAY_SIZE(controllers);c++){
++   struct device_node node={controllers[c]};
++   for(unsigned int a=0;a<ARRAY_SIZE(bases);a++)
++    assert(apple_qspi_nvram_write_board(&node,bases[a])==((b==0&&c==0&&a==0)||(b==1&&c==1&&a==1)));
++  }
++ }
++ puts("PASS J613/J713 board, controller and full-width aperture qualification (45 combinations)");
+  u8 data[256];memset(data,0x55,sizeof(data));reset();
+  struct spi_mem_op wren=SPI_MEM_OP(SPI_MEM_OP_CMD(0x06,1),SPI_MEM_OP_NO_ADDR,SPI_MEM_OP_NO_DUMMY,SPI_MEM_OP_NO_DATA);
+  /* T8140 uses a separate nvram window while the J613 gate stays read-only.
+@@ -228,6 +245,7 @@
+     source = (ROOT / 'drivers/spi/spi-apple-qspi.c').read_text()
+     policy = (ROOT / 'drivers/spi/spi-apple-qspi-policy.h').read_text()
+     signatures = ['static int apple_qspi_set_read_only(', 'static int apple_qspi_get_read_only(',
++                  'static bool apple_qspi_nvram_write_board(',
+                   'static bool apple_qspi_opcode_is_read(', 'static int apple_qspi_width_mode(',
+                   'static int apple_qspi_shape_op(', 'static bool apple_qspi_supports_op(',
+                   'static int apple_qspi_read_register(', 'static int apple_qspi_command(',
+@@ -243,6 +261,8 @@
+         if current.returncode:
+             raise SystemExit(current.stderr)
+         for name, old, new in [
++            ('j713-board', 'of_machine_is_compatible("apple,j713")', 'true'),
++            ('j713-aperture', 'base == 0x3ad118000ULL', 'base != 0'),
+             ('t8140-window', 'start <= first && last <= end', 'start <= first'),
+             ('range', 'addr >= APPLE_QSPI_NVRAM_START', 'addr >= 1'),
+             ('read-only', 'read_only || !qspi->nvram_write_candidate || qspi->write_fault',
+diff --git a/tools/testing/selftests/drivers/apple/Makefile b/tools/testing/selftests/drivers/apple/Makefile
+--- a/tools/testing/selftests/drivers/apple/Makefile
++++ b/tools/testing/selftests/drivers/apple/Makefile
+@@ -4,8 +4,10 @@
+ # pmgr-inherited.py checks admission and lifecycle against host register mocks.
+ # dwc3-initial-role.py checks initial host-role admission before core reset.
+ # sn201202x-transport.py checks the production SPMI selection and payload path.
++# bcm4377 tests exercise DMA ownership, context addresses and firmware handshakes.
+ TEST_PROGS := macsmc-j713.py atc-t8132-usb3.py pmgr-inherited.py dwc3-initial-role.py \
+-	      sn201202x-transport.py
++	      sn201202x-transport.py bcm4377-dma-window.py bcm4377-radio-sids.py \
++	      bcm4377-state-wait.py bcm4377-rti-address.py
+ TEST_FILES := j813-peripherals.sh
+ 
+ include ../../lib.mk
+diff --git a/tools/testing/selftests/drivers/apple/bcm4377-dma-window.py b/tools/testing/selftests/drivers/apple/bcm4377-dma-window.py
+new file mode 100755
+--- /dev/null
++++ b/tools/testing/selftests/drivers/apple/bcm4377-dma-window.py
+@@ -0,0 +1,143 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Compile and exercise the production BCM4377 DMA-window admission helper.
++
++This CPU test checks arithmetic and preservation of the old zero-based
++contract. Real firmware DMA and simultaneous Wi-Fi require a reboot test.
++"""
++import argparse
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def definition(source, name):
++    start = source.index(name)
++    start = source.rfind('\n', 0, start) + 1
++    brace = source.index('{', start)
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[5])
++    parser.add_argument('--cc', default='cc')
++    args = parser.parse_args()
++    source = (args.source / 'drivers/bluetooth/hci_bcm4377.c').read_text()
++    common = r'''
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++typedef unsigned long long u64;
++typedef uint32_t u32;
++typedef u64 dma_addr_t;
++#define BCM4377_DMA_MASK 0xfffffe00ULL
++#define IS_ALIGNED(x, a) (!((x) & ((a) - 1)))
++#define DMA_BIT_MASK(n) (~0ULL >> (64 - (n)))
++#define fls64(n) (64 - __builtin_clzll(n))
++struct device { int unused; };
++struct pci_dev { struct device dev; };
++struct iommu_domain {
++    struct { u64 aperture_start, aperture_end; bool force_aperture; } geometry;
++    bool dma;
++};
++struct bcm4377_hw { unsigned int id; };
++struct bcm4377_data {
++    struct pci_dev *pdev;
++    const struct bcm4377_hw *hw;
++    dma_addr_t dma_window_base;
++    u32 dma_window_size;
++};
++static struct iommu_domain *test_domain;
++static int mask_result, mask_calls;
++static u64 last_mask;
++static struct iommu_domain *iommu_get_domain_for_dev(struct device *dev)
++{ (void)dev; return test_domain; }
++static bool iommu_is_dma_domain(struct iommu_domain *d) { return d->dma; }
++static int dma_set_mask_and_coherent(struct device *dev, u64 mask)
++{ (void)dev; mask_calls++; last_mask = mask; return mask_result; }
++#define dev_err(...) ((void)0)
++#define dev_dbg(...) ((void)0)
++#define dev_info(...) ((void)0)
++#define dev_err_probe(dev, ret, ...) (ret)
++'''
++    tests = r'''
++int main(void)
++{
++    struct pci_dev pci = {0};
++    struct bcm4377_hw hw = { .id = 0x4388 };
++    struct bcm4377_data b = { .pdev = &pci, .hw = &hw };
++    struct iommu_domain d = {
++        .dma = true,
++        .geometry = { 0x10000100000ULL, 0x1003fefffffULL, true },
++    };
++    assert(bcm4377_setup_dma(&b) == 0); /* no IOMMU: original contract */
++    assert(b.dma_window_base == 0 && b.dma_window_size == BCM4377_DMA_MASK);
++    assert(last_mask == BCM4377_DMA_MASK);
++    test_domain = &d;
++    assert(bcm4377_setup_dma(&b) == 0); /* real J713 ADT aperture */
++    assert(b.dma_window_base == 0x10000100000ULL && b.dma_window_size == 0x3fe00000);
++    assert(last_mask == DMA_BIT_MASK(41));
++    u64 top = b.dma_window_base + b.dma_window_size - 1;
++    assert(top == d.geometry.aperture_end && top <= last_mask);
++    mask_result = -EIO;
++    assert(bcm4377_setup_dma(&b) == -EIO); /* retain DMA API failure */
++    mask_result = 0;
++    d.dma = false;
++    assert(bcm4377_setup_dma(&b) == 0 && b.dma_window_base == 0);
++    d.dma = true;
++    d.geometry.force_aperture = false;
++    assert(bcm4377_setup_dma(&b) == 0 && b.dma_window_base == 0);
++    d.geometry.force_aperture = true;
++    hw.id = 0x4387;
++    assert(bcm4377_setup_dma(&b) == 0 && b.dma_window_base == 0);
++    hw.id = 0x4388;
++    d.geometry.aperture_start = 0;
++    d.geometry.aperture_end = 0xffffffffULL;
++    assert(bcm4377_setup_dma(&b) == 0 && b.dma_window_base == 0);
++    assert(last_mask == BCM4377_DMA_MASK);
++    const u64 base = 0x10000100000ULL;
++    const struct { u64 base, end; int rc; } cases[] = {
++        { 0x10000010000ULL, 0x1003fe0ffffULL, 0 }, /* inherited DT aperture */
++        { base, base + 0x1ff, 0 },
++        { base, base + BCM4377_DMA_MASK - 1, 0 },
++        { base, base - 1, -ERANGE },
++        { base, base, -ERANGE },
++        { base + 1, base + 0x3ff, -ERANGE },
++        { base, base + 0x200, -ERANGE },
++        { base, base + BCM4377_DMA_MASK, -ERANGE },
++        { base, base + 0xffffffffULL, -ERANGE },
++        { base, ~0ULL, -ERANGE },
++    };
++    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
++        d.geometry.aperture_start = cases[i].base;
++        d.geometry.aperture_end = cases[i].end;
++        int before = mask_calls;
++        assert(bcm4377_setup_dma(&b) == cases[i].rc);
++        if (cases[i].rc)
++            assert(mask_calls == before); /* no mask changes on invalid input */
++        else {
++            assert(b.dma_window_base == cases[i].base);
++            assert((u64)b.dma_window_size == cases[i].end - cases[i].base + 1);
++        }
++    }
++    puts("BCM4377 DMA window: 17 admission/error groups passed");
++    return 0;
++}
++'''
++    with tempfile.TemporaryDirectory(prefix='bcm4377-window-') as temp:
++        c = Path(temp) / 'window.c'
++        exe = Path(temp) / 'window'
++        c.write_text(common + definition(source, 'static int bcm4377_setup_dma(') + tests)
++        subprocess.run([args.cc, '-std=c11', '-Wall', '-Wextra', '-Werror', str(c), '-o', str(exe)], check=True)
++        subprocess.run([str(exe)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/testing/selftests/drivers/apple/bcm4377-radio-sids.py b/tools/testing/selftests/drivers/apple/bcm4377-radio-sids.py
+new file mode 100755
+--- /dev/null
++++ b/tools/testing/selftests/drivers/apple/bcm4377-radio-sids.py
+@@ -0,0 +1,609 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Exercise actual radio SID admission, publication, failure and group code.
++
++These CPU tests do not qualify high-address firmware DMA or radio operation.
++"""
++from pathlib import Path
++import subprocess
++import resource
++import tempfile
++
++
++def definition(source, name):
++    start = source.index(name)
++    start = source.rfind('\n', 0, start) + 1
++    brace = source.index('{', start)
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end]
++
++
++def main():
++    root = Path(__file__).resolve().parents[5]
++    pci = (root / 'drivers/pci/controller/pcie-apple.c').read_text()
++    dart = (root / 'drivers/iommu/apple-dart.c').read_text()
++    code = r'''
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++typedef uint16_t u16;
++typedef uint8_t u8;
++typedef uint32_t u32;
++typedef uint64_t u64;
++typedef u64 phys_addr_t;
++typedef unsigned long atomic_long_t;
++#define BIT(n) (1UL << (n))
++#define WRITE_ONCE(x,v) ((x) = (v))
++#define READ_ONCE(x) (x)
++#define dev_err(...) ((void)0)
++#define dev_err_probe(dev, error, ...) (error)
++#define dev_err_ratelimited(...) ((void)0)
++#define dev_dbg(dev,...) do { (void)(dev); if (false) fprintf(stderr,__VA_ARGS__); } while (0)
++#define dev_info(dev,...) do { (void)(dev); if (false) fprintf(stderr,__VA_ARGS__); } while (0)
++#define WARN_ON(x) assert(!(x))
++#define BITS_TO_LONGS(n) (((n) + 63) / 64)
++#define DART_MAX_STREAMS 256
++#define MAX_DARTS_PER_DEVICE 2
++#define U32_MAX UINT32_MAX
++#define DART_T8110 2
++#define DART_T8110_DIAG_LOCK 0x700
++#define DART_T8110_DIAG_LOCK_ON_ERR 1
++#define DART_T8110_TLB_CMD_OP_FLUSH_UNLOCK 0x200
++#define DART_T8110_TCR_BYPASS_DAPF BIT(2)
++#define DART_T8110_TCR_BYPASS_DART BIT(1)
++#define DART_T8110_TCR_TRANSLATE_ENABLE BIT(0)
++#define DART_T8110_TCR_REMAP 0xf00
++#define DART_T8110_TCR_REMAP_ENABLE BIT(7)
++#define DART_T8110_PROTECT 0x200
++#define DART_T8110_PROTECT_LOCK 0x208
++#define DART_T8110_PROTECT_TTBR_TCR BIT(0)
++#define DART_T8110_ENABLE_STREAMS 0xc00
++#define DART_T8110_TLB_CMD 0x80
++#define DART_T8110_TLB_CMD_BUSY BIT(31)
++#define DART_T8110_ERROR 0x100
++#define DART_T8110_ERROR_MASK 0x104
++#define DART_T8110_ERROR_FLAG BIT(31)
++#define DART_T8110_ERROR_STREAMS 0x1c0
++#define FIELD_GET(mask,v) (((v)&(mask)) >> __builtin_ctzl(mask))
++#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
++#define EPROBE_DEFER 517
++#define KUNIT_STATIC_STUB_REDIRECT(...) do {} while (0)
++#define BITS_TO_U32(n) (((n) + 31) / 32)
++#define bitmap_zero(p,n) memset((p),0,BITS_TO_LONGS(n)*sizeof(unsigned long))
++#define bitmap_set(p,s,n) do { for (int b=(s); b<(int)((s)+(n)); b++) __set_bit(b,p); } while(0)
++#define PORT_RID2SID_VALID BIT(31)
++#define PORT_RID2SID_SID_SHIFT 16
++#define DART_TCR(d,s) (0x1000 + 4 * (s))
++#define DART_TTBR(d,s,i) (0x1400 + 4 * (s) + 0 * (i))
++#define for_each_set_bit(n,p,max) for ((n)=0; (n)<(int)(max); (n)++) if ((p)[(n)/64] & BIT((n)%64))
++#define __set_bit(n,p) ((p)[(n)/64] |= BIT((n)%64))
++#define for_each_set_bit_from(n,p,max) for (; (n)<(int)(max); (n)++) if ((p)[(n)/64] & BIT((n)%64))
++#define lockdep_assert_held(lock) assert(*(lock))
++#define spin_lock_irqsave(lock,flags) do { assert(!*(lock)); *(lock)=true; (flags)=0; } while (0)
++#define spin_unlock_irqrestore(lock,flags) do { assert(*(lock)); *(lock)=false; (void)(flags); } while (0)
++struct apple_dart;
++struct apple_dart_stream_map;
++struct apple_dart_hw {
++    int type;
++    u32 tcr_disabled, tcr_bypass, ttbr_valid, enable_streams;
++    int ttbr_count;
++    u32 tcr_enabled, tcr_4level, ttbr_shift, ttbr_addr_field_shift;
++    void (*enable_remap)(struct apple_dart *, int, int);
++    int (*invalidate_tlb)(struct apple_dart_stream_map *);
++};
++struct apple_dart {
++    const struct apple_dart_hw *hw;
++    u16 managed_sids, version;
++    bool locked, managed_failed, managed_lock, retained, retained_mtp, supports_bypass;
++    bool four_level, per_stream, tunneled, fw_mirror, fw_handoff;
++    bool pending;
++    struct { bool ready; } iommu;
++    void *dev;
++    unsigned pgsize;
++    int num_streams;
++    u32 regs[0x5000/4];
++};
++struct apple_dart_stream_map { struct apple_dart *dart; unsigned long sidmap[4]; };
++struct apple_dart_atomic_stream_map { struct apple_dart *dart; atomic_long_t sidmap[4]; };
++static u32 apple_dart_readl(struct apple_dart *d, unsigned o) { return d->regs[o/4]; }
++static unsigned enable_writes, all_writes, guard_calls, device_pins, noidle_puts;
++static bool drop_bypass_write;
++static int guard_result, apple_dart_radio_kexec;
++static int kexec_block(void *guard)
++{ assert(guard==&apple_dart_radio_kexec); guard_calls++; return guard_result; }
++static void get_device(void *dev) { assert(dev); device_pins++; }
++static u32 last_enable;
++static void apple_dart_writel(struct apple_dart *d, u32 v, unsigned o)
++{
++    all_writes++;
++    if (drop_bypass_write && o==DART_TCR(d,16)) return;
++    if (o >= d->hw->enable_streams && o < d->hw->enable_streams + 32) {
++        d->regs[o/4] |= v; enable_writes++; last_enable=v;
++    } else d->regs[o/4]=v;
++}
++static void writel(u32 v, void *p) { (void)v; (void)p; abort(); }
++static int find_first_bit(const unsigned long *p, int max)
++{ int sid; for_each_set_bit(sid,p,max) return sid; return max; }
++static u64 virt_to_phys(void *p) { return (uintptr_t)p; }
++static int tlb_result;
++static int test_invalidate_tlb(struct apple_dart_stream_map *m)
++{ assert(m->sidmap[0] && !(m->sidmap[0] & ~m->dart->managed_sids)); return tlb_result; }
++struct io_pgtable_cfg {
++    struct { int n_ttbrs, n_levels; void *ttbr[1]; } apple_dart_cfg;
++};
++struct io_pgtable { struct io_pgtable_cfg cfg; };
++#define io_pgtable_ops_to_pgtable(p) (p)
++struct iommu_domain { int unused; };
++struct apple_dart_domain {
++    struct iommu_domain domain;
++    struct io_pgtable *pgtbl_ops;
++    struct apple_dart_atomic_stream_map stream_maps[2];
++    void *dcp;
++    u64 dma_offset;
++};
++static struct apple_dart_domain *to_dart_domain(struct iommu_domain *p)
++{ return (struct apple_dart_domain *)p; }
++#define IOMMU_DOMAIN_DMA 3
++#define IOMMU_DOMAIN_IDENTITY 4
++#define PAGE_SIZE 16384
++struct device_node { int unused; };
++struct device_driver { int unused; };
++static struct { struct device_driver driver; } apple_dart_driver;
++struct device {
++    bool pci, bound, locked;
++    struct device_driver *driver;
++    struct device_node *of_node;
++    void *data;
++};
++static void device_lock(struct device *d) { assert(!d->locked); d->locked=true; }
++static void device_unlock(struct device *d) { assert(d->locked); d->locked=false; }
++static bool device_is_bound(struct device *d) { return d->bound; }
++static void *dev_get_drvdata(struct device *d) { return d->data; }
++static bool apple_dart_fault_pending(struct apple_dart *d) { return d->pending; }
++struct apple_dart_master_cfg { struct apple_dart_stream_map stream_maps[2]; bool supports_bypass, locked; };
++static struct apple_dart_master_cfg *active_cfg;
++static bool board_j713=true;
++static void *dev_iommu_priv_get(struct device *d) { (void)d; return active_cfg; }
++static bool dev_is_pci(struct device *d) { return d->pci; }
++static bool of_machine_is_compatible(const char *s) { assert(!strcmp(s,"apple,j713")); return board_j713; }
++static u32 readl(const void *p) { (void)p; abort(); }
++static int apple_dart_t8110_hw_tlb_command_range(struct apple_dart_stream_map *p,
++        int op, bool range, unsigned long a, unsigned long b)
++{ (void)p; (void)op; (void)range; (void)a; (void)b; abort(); }
++static void apple_dart_hw_clear_all_ttbrs(struct apple_dart_stream_map *p) { (void)p; abort(); }
++static void apple_dart_hw_apply_remaps(struct apple_dart *p) { (void)p; abort(); }
++static int apple_dart_hw_finish_reset(struct apple_dart *p) { (void)p; abort(); }
++static void atomic_long_or(unsigned long v, atomic_long_t *p) { *p |= v; }
++static void atomic_long_and(unsigned long v, atomic_long_t *p) { *p &= v; }
++static unsigned long atomic_long_read(atomic_long_t *p) { return *p; }
++static bool bitmap_empty(unsigned long *p, int max)
++{ for (int i=0; i<BITS_TO_LONGS(max); i++) if (p[i]) return false; return true; }
++static int pm_refs;
++static int pm_runtime_get_sync(void *d) { (void)d; pm_refs++; return 0; }
++static int pm_runtime_resume_and_get(void *d) { return pm_runtime_get_sync(d); }
++static void pm_runtime_put(void *d) { (void)d; assert(pm_refs>0); pm_refs--; }
++static void pm_runtime_put_noidle(void *d) { noidle_puts++;pm_runtime_put(d); }
++static int finalize_result;
++static int apple_dart_finalize_domain(struct apple_dart_domain *d, struct apple_dart_master_cfg *c)
++{ (void)d; (void)c; return finalize_result; }
++static int apple_dart_setup_translation_locked(struct apple_dart_domain *d, struct apple_dart_stream_map *m)
++{ (void)d; (void)m; abort(); }
++static int apple_dart_hw_sync_locked(struct io_pgtable_cfg *c, struct apple_dart_stream_map *m, bool b)
++{ (void)c; (void)m; (void)b; abort(); }
++static int apple_dart_fw_invalidate(struct apple_dart_stream_map *m, u64 a, u64 b)
++{ (void)m; (void)a; (void)b; abort(); }
++#define DART_T8110_TLB_CMD_OP_FLUSH_SID 1
++#define for_each_stream_map(i,base,m) for ((i)=0,(m)=&(base)->stream_maps[0]; \
++    (i)<MAX_DARTS_PER_DEVICE && (m)->dart; (m)=&(base)->stream_maps[++(i)])
++struct apple_pcie_hw { bool tunneled; };
++struct apple_pcie { u16 managed_sids; struct apple_pcie_hw *hw; struct device *dev; };
++struct list_head { bool linked; };
++struct apple_pcie_port {
++    struct apple_pcie *pcie;
++    int sid_map_sz;
++    u32 entries[16];
++    void *base, *domain, *np;
++    bool started, needs_stop;
++    unsigned irq;
++    u32 status, link;
++    struct list_head entry;
++};
++#define PORT_INTMSK 0x100
++#define PORT_STATUS 0x804
++#define PORT_STATUS_READY BIT(0)
++#define PORT_LINKSTS 0x208
++#define PORT_LINKSTS_UP BIT(0)
++#define PORT_LINKSTS_BUSY BIT(2)
++static unsigned pci_irq_writes, pci_tunnel_stops;
++static void apple_pcie_port_disable_irq(struct apple_pcie_port *p) { (void)p; }
++static void apple_pcie_port_writel(struct apple_pcie_port *p, u32 v, unsigned o)
++{ (void)p; assert(v==U32_MAX && o==PORT_INTMSK); pci_irq_writes++; }
++static void apple_pcie_tunnel_stop(struct apple_pcie_port *p) { (void)p; pci_tunnel_stops++; }
++static void apple_pcie_port_unregister_irqs(struct apple_pcie_port *p) { (void)p; }
++static void irq_set_chained_handler(unsigned i, void *f) { (void)i; (void)f; }
++static void synchronize_rcu(void) {}
++static void irq_dispose_mapping(unsigned i) { (void)i; }
++static void irq_domain_remove(void *d) { (void)d; }
++static bool list_empty(struct list_head *p) { return !p->linked; }
++static void list_del_init(struct list_head *p) { p->linked=false; }
++struct of_phandle_args { struct device_node *np; int args_count; u32 args[1]; };
++struct platform_device { struct device dev; };
++static struct device_node radio_node, other_node;
++static struct platform_device radio_provider;
++static bool provider_present=true, mismatched_map;
++static int provider_refs, node_refs, map_result[2];
++static void of_node_put(void *n) { if (n==&radio_node || n==&other_node) node_refs--; }
++static int of_map_iommu_id(struct device_node *n, unsigned rid, struct of_phandle_args *a)
++{
++    (void)n; assert(rid==0x100 || rid==0x101); unsigned fn=rid-0x100;
++    if (map_result[fn]) return map_result[fn];
++    a->np=fn && mismatched_map ? &other_node : &radio_node;
++    a->args_count=1; a->args[0]=fn+1; node_refs++; return 0;
++}
++static struct platform_device *of_find_device_by_node(struct device_node *n)
++{ assert(n==&radio_node); if (!provider_present) return NULL; provider_refs++; return &radio_provider; }
++static void put_device(struct device *d) { assert(d==&radio_provider.dev && provider_refs>0); provider_refs--; }
++static unsigned port_rid2sid_offset(struct apple_pcie_port *p, unsigned sid)
++{ (void)p; return sid; }
++static u32 apple_pcie_port_readl(struct apple_pcie_port *p, unsigned o)
++{
++    if (o==PORT_STATUS) return p->status;
++    if (o==PORT_LINKSTS) return p->link;
++    assert(o<16); return p->entries[o];
++}
++'''
++    for name in ('static int apple_pcie_managed_sid_mask(',
++                 'static int apple_pcie_managed_word(',
++                 'static int apple_pcie_managed_admit('):
++        # Skip the forward declaration when extracting the admission definition.
++        source = pci[pci.index('/* Native T8132 normal SIDs'):]
++        code += definition(source, name) + '\n'
++    code += definition(pci, 'static void apple_pcie_port_teardown(') + '\n'
++    for name in ('static bool apple_dart_remaps_streams(',
++                 'apple_dart_hw_enable_translation(',
++                 'static void apple_dart_hw_set_ttbr(',
++                 'static void apple_dart_hw_clear_ttbr(',
++                 'apple_dart_hw_enable_bypass(',
++                 'static void apple_dart_hw_disable_dma(',
++                 'static bool apple_dart_managed_static_bypass(',
++                 'static int apple_dart_managed_admit(',
++                 'int apple_dart_radio_check_idle(',
++                 'static void apple_dart_managed_quarantine_locked(',
++                 'static void apple_dart_managed_quarantine(',
++                 'static int apple_dart_hw_reset(',
++                 'static int apple_dart_t8110_v2_unlock(',
++                 'static int apple_dart_def_domain_type(',
++                 'apple_dart_mod_streams(',
++                 'static int apple_dart_domain_add_streams(',
++                 'apple_dart_setup_translation(',
++                 'static int apple_dart_attach_dev_paging(',
++                 'static int apple_dart_domain_flush_tlb_range('):
++        # This definition has its static int return type on a preceding line.
++        body = definition(dart, name)
++        if name in ('apple_dart_hw_enable_bypass(', 'apple_dart_hw_enable_translation('):
++            body = 'static void\n' + body
++        if name in ('apple_dart_mod_streams(', 'apple_dart_setup_translation('):
++            body = 'static int\n' + body
++        code += body + '\n'
++    code += definition(pci, 'static int apple_pcie_radio_check_cold(struct apple_pcie_port *port)\n{') + '\n'
++    code += definition(dart, 'static int apple_dart_retain_radio(') + '\n'
++    probe = definition(dart, 'static int apple_dart_probe(struct platform_device *pdev)\n{')
++    start = probe.index('\tif (dart->managed_sids) {', probe.index('Retaining the live J713 MTP bypass'))
++    end = probe.index('\n\t} else if (!dart->locked', start)
++    cleanup = probe[probe.index('err_clk_disable:'):probe.index('\n\tclk_bulk_disable_unprepare', probe.index('err_clk_disable:'))]
++    code += 'static int test_probe_start(struct apple_dart *dart) { int ret; void *dev=dart->dev;\n' + probe[start:end] + '\n\t}\nreturn 0;\n' + cleanup + '\nreturn ret; }\n'
++    code += r'''
++static void test_probe_guard(const struct apple_dart_hw *hw)
++{
++    for (unsigned warm=0; warm<2; warm++) {
++        struct apple_dart d={.hw=hw,.managed_sids=BIT(1)|BIT(2),.version=0x202,
++                            .num_streams=19,.supports_bypass=true,.dev=(void *)1};
++        d.regs[DART_TCR(&d,16)/4]=warm?6:0;
++        u32 before[ARRAY_SIZE(d.regs)];memcpy(before,d.regs,sizeof(before));
++        all_writes=guard_calls=device_pins=0;guard_result=-EBUSY;pm_refs=1;
++        assert(test_probe_start(&d)==-EBUSY);
++        assert(guard_calls==1 && !device_pins && !d.retained && !all_writes && !pm_refs);
++        assert(!memcmp(before,d.regs,sizeof(before)));
++        all_writes=guard_calls=0;guard_result=0;pm_refs=1;
++        assert(!test_probe_start(&d) && d.retained && guard_calls==1 && device_pins==1);
++        assert(all_writes && pm_refs==1 && d.regs[DART_TCR(&d,16)/4]==6);
++        assert((d.regs[hw->enable_streams/4]&6)==6);
++        for(unsigned sid=0;sid<19;sid++)
++            assert(!d.regs[DART_TTBR(&d,sid,0)/4]);
++        pm_refs=0;
++    }
++    struct apple_dart failed={.hw=hw,.managed_sids=BIT(1)|BIT(2),.version=0x202,
++                             .num_streams=19,.supports_bypass=true,.dev=(void *)1};
++    failed.regs[DART_TCR(&failed,1)/4]=failed.regs[DART_TCR(&failed,2)/4]=1;
++    guard_result=0;guard_calls=device_pins=noidle_puts=0;pm_refs=1;
++    drop_bypass_write=true;
++    assert(test_probe_start(&failed)==-EIO);
++    assert(failed.retained && failed.managed_failed && device_pins==1 && guard_calls==1);
++    assert(!failed.regs[DART_TCR(&failed,1)/4] && !failed.regs[DART_TCR(&failed,2)/4]);
++    assert(noidle_puts==1 && !pm_refs);
++    drop_bypass_write=false;
++    guard_result=0;
++}
++'''
++    code += r'''
++int main(void)
++{
++    u32 ids[] = {1,2}, word=0;
++    u16 mask=0;
++    assert(apple_pcie_managed_sid_mask(ids,2,&mask)==0 && mask==(BIT(1)|BIT(2)));
++    assert(apple_pcie_managed_word(mask,0x100,1,&word)==0 && word==0x80010100);
++    assert(apple_pcie_managed_word(mask,0x101,2,&word)==0 && word==0x80020101);
++    for (unsigned sid=0; sid<20; sid++)
++        if (sid!=1 && sid!=2) assert(apple_pcie_managed_word(mask,0x100,sid,&word)==-EINVAL);
++    assert(apple_pcie_managed_word(mask,0,1,&word)==-EINVAL);
++    assert(apple_pcie_managed_word(mask,0x10000,1,&word)==-EINVAL);
++    ids[1]=1; assert(apple_pcie_managed_sid_mask(ids,2,&mask)==-EINVAL);
++    ids[1]=16; assert(apple_pcie_managed_sid_mask(ids,2,&mask)==-EINVAL);
++    struct apple_pcie_hw pci_hw={0};
++    struct apple_pcie pci={.managed_sids=BIT(1)|BIT(2),.hw=&pci_hw};
++    struct apple_pcie_port port={.pcie=&pci};
++    port.entries[3]=0x80030300; /* foreign association */
++    u32 entries[16]; memcpy(entries,port.entries,sizeof(entries));
++    assert(apple_pcie_managed_admit(&port)==0 && port.sid_map_sz==16);
++    assert(!memcmp(entries,port.entries,sizeof(entries)));
++    for (unsigned sid=0; sid<3; sid++) {
++        port.entries[sid]=0x80000100;
++        assert(apple_pcie_managed_admit(&port)==-EBUSY);
++        port.entries[sid]=0;
++    }
++    port.base=&port; port.np=&port; port.entries[1]=0x80010100;
++    assert(apple_pcie_managed_admit(&port)==-EBUSY);
++    apple_pcie_port_teardown(&port);
++    assert(!pci_irq_writes && !pci_tunnel_stops && !port.np);
++    port.domain=&port; port.irq=1;
++    apple_pcie_port_teardown(&port);
++    assert(pci_irq_writes==1 && !port.domain && !port.irq);
++    const struct apple_dart_hw hw={.type=DART_T8110,.tcr_disabled=0,.tcr_bypass=6,
++        .ttbr_count=1,.ttbr_valid=BIT(0),.enable_streams=0xc00,.tcr_enabled=1,
++        .tcr_4level=BIT(3),.ttbr_shift=14,.ttbr_addr_field_shift=2,.invalidate_tlb=test_invalidate_tlb};
++    test_probe_guard(&hw);
++    struct apple_dart d={.hw=&hw,.managed_sids=BIT(1)|BIT(2),.version=0x202,.num_streams=19,.supports_bypass=true};
++    bool init_bypass=false;
++    /* Firmware reserved roles and another ordinary owner are live. */
++    d.regs[DART_TCR(&d,16)/4]=6;
++    d.regs[DART_TCR(&d,17)/4]=1; d.regs[DART_TTBR(&d,17,0)/4]=0xf001;
++    d.regs[DART_TCR(&d,18)/4]=6;
++    d.regs[DART_TCR(&d,3)/4]=1; d.regs[DART_TTBR(&d,3,0)/4]=0x123401;
++    u32 before[sizeof(d.regs)/4]; memcpy(before,d.regs,sizeof(before));
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0);
++    assert(apple_dart_hw_reset(&d)==-EBUSY);
++    assert(apple_dart_t8110_v2_unlock(&d)==-EPERM);
++    assert(!memcmp(before,d.regs,sizeof(before)));
++    /* Masked fault reporting cannot silently defeat owned-stream quarantine. */
++    const u32 inherited_masks[]={BIT(0),BIT(31),U32_MAX};
++    for (unsigned i=0; i<ARRAY_SIZE(inherited_masks); i++) {
++        u32 masked[ARRAY_SIZE(d.regs)];
++        d.regs[DART_T8110_ERROR_MASK/4]=inherited_masks[i];
++        memcpy(masked,d.regs,sizeof(masked));
++        assert(apple_dart_managed_admit(&d,&init_bypass)==-EBUSY);
++        assert(!memcmp(masked,d.regs,sizeof(masked)));
++    }
++    d.managed_sids=0;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0); /* legacy profile unchanged */
++    d.managed_sids=BIT(1)|BIT(2); d.regs[DART_T8110_ERROR_MASK/4]=0;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0);
++    assert(!memcmp(before,d.regs,sizeof(before)));
++    /* DAPF is a request bit: either readable bypass form is inherited. */
++    d.regs[DART_TCR(&d,16)/4]=2;
++    d.regs[DART_TTBR(&d,16,0)/4]=0xabcd001;
++    init_bypass=true;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0 && !init_bypass);
++    assert(d.regs[DART_TCR(&d,16)/4]==2);
++    assert(d.regs[DART_TTBR(&d,16,0)/4]==0xabcd001);
++    for (unsigned tcr=0; tcr<0x100; tcr++)
++        assert(apple_dart_managed_static_bypass(tcr)==(tcr==2 || tcr==6));
++    d.regs[DART_TCR(&d,16)/4]=6;
++    d.regs[DART_TTBR(&d,16,0)/4]=0;
++    for (unsigned sid=1; sid<=2; sid++) {
++        d.regs[DART_TCR(&d,sid)/4]=6;
++        assert(apple_dart_managed_admit(&d,&init_bypass)==-EBUSY);
++        d.regs[DART_TCR(&d,sid)/4]=0;
++        d.regs[DART_TTBR(&d,sid,0)/4]=hw.ttbr_valid|0x1000;
++        assert(apple_dart_managed_admit(&d,&init_bypass)==-EBUSY);
++        d.regs[DART_TTBR(&d,sid,0)/4]=0;
++    }
++    d.regs[DART_TCR(&d,16)/4]=1;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==-EBUSY);
++    d.regs[DART_TCR(&d,16)/4]=0;
++    d.regs[DART_TTBR(&d,16,0)/4]=hw.ttbr_valid|0x1000;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==-EBUSY);
++    d.regs[DART_TTBR(&d,16,0)/4]=0;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0 && init_bypass);
++    struct apple_dart_stream_map bypass={.dart=&d,.sidmap={BIT(16)}};
++    apple_dart_hw_enable_bypass(&bypass);
++    assert(d.regs[DART_TCR(&d,16)/4]==6);
++    assert(!memcmp(before,d.regs,sizeof(before)));
++    init_bypass=true;
++    assert(apple_dart_managed_admit(&d,&init_bypass)==0 && !init_bypass);
++    d.locked=true; assert(apple_dart_managed_admit(&d,&init_bypass)==-EINVAL); d.locked=false;
++    d.regs[DART_TCR(&d,1)/4]=1; d.regs[DART_TCR(&d,2)/4]=1;
++    apple_dart_managed_quarantine(&d);
++    assert(d.managed_failed && !d.managed_lock);
++    assert(!memcmp(before,d.regs,sizeof(before))); /* only owned TCRs disabled; no unlock */
++    struct device dev={.pci=true};
++    struct apple_dart_master_cfg cfg={.stream_maps={{.dart=&d}},.supports_bypass=true};
++    active_cfg=&cfg;
++    assert(apple_dart_def_domain_type(&dev)==IOMMU_DOMAIN_DMA);
++    d.managed_sids=0;
++    assert(apple_dart_def_domain_type(&dev)==IOMMU_DOMAIN_IDENTITY); /* legacy J713 */
++    board_j713=false;
++    assert(apple_dart_def_domain_type(&dev)==0); /* other machines retain default */
++    d.managed_sids=BIT(1)|BIT(2);
++    struct apple_dart_atomic_stream_map domain[2]={{.dart=&d}};
++    struct apple_dart_stream_map wifi[2]={{.dart=&d,.sidmap={BIT(1)}}};
++    struct apple_dart_stream_map bt[2]={{.dart=&d,.sidmap={BIT(2)}}};
++    assert(apple_dart_mod_streams(domain,wifi,true)==0);
++    assert(apple_dart_mod_streams(domain,bt,true)==0);
++    assert(domain[0].sidmap[0]==(BIT(1)|BIT(2)));
++    assert(apple_dart_mod_streams(domain,bt,false)==0);
++    assert(domain[0].sidmap[0]==BIT(1)); /* WiFi remains while BT detaches */
++    d.managed_failed=false; d.num_streams=64;
++    struct io_pgtable pg={.cfg.apple_dart_cfg={.n_ttbrs=1,.n_levels=3,.ttbr={(void *)0x4000}}};
++    struct apple_dart_domain attach={.pgtbl_ops=&pg,.stream_maps={{.dart=&d}}};
++    d.regs[hw.enable_streams/4]=BIT(3)|BIT(16)|BIT(18);
++    d.regs[(hw.enable_streams+4)/4]=BIT(6); /* a foreign SID above 31 */
++    memcpy(before,d.regs,sizeof(before));
++    cfg.stream_maps[0].sidmap[0]=BIT(1); active_cfg=&cfg;
++    enable_writes=0;
++    assert(apple_dart_attach_dev_paging(&attach.domain,&dev,NULL)==0);
++    assert(enable_writes==1 && last_enable==BIT(1) && !pm_refs);
++    assert(attach.stream_maps[0].sidmap[0]==BIT(1));
++    assert(d.regs[DART_TCR(&d,1)/4]==1 && d.regs[DART_TCR(&d,2)/4]==0);
++    cfg.stream_maps[0].sidmap[0]=BIT(2);
++    assert(apple_dart_attach_dev_paging(&attach.domain,&dev,NULL)==0);
++    assert(enable_writes==2 && last_enable==BIT(2) && !pm_refs);
++    assert(attach.stream_maps[0].sidmap[0]==(BIT(1)|BIT(2)));
++    for (unsigned sid=3; sid<64; sid++) {
++        assert(d.regs[DART_TCR(&d,sid)/4]==before[DART_TCR(&d,sid)/4]);
++        assert(d.regs[DART_TTBR(&d,sid,0)/4]==before[DART_TTBR(&d,sid,0)/4]);
++    }
++    assert(d.regs[hw.enable_streams/4]==(before[hw.enable_streams/4]|BIT(1)|BIT(2)));
++    assert(d.regs[(hw.enable_streams+4)/4]==before[(hw.enable_streams+4)/4]);
++    /* Failed second-function publication must not erase WiFi membership. */
++    attach.stream_maps[0].sidmap[0]=BIT(1);
++    tlb_result=-ETIMEDOUT;
++    assert(apple_dart_attach_dev_paging(&attach.domain,&dev,NULL)==-ETIMEDOUT);
++    assert(d.managed_failed && !d.managed_lock && !pm_refs);
++    assert(attach.stream_maps[0].sidmap[0]==BIT(1));
++    assert(!d.regs[DART_TCR(&d,1)/4] && !d.regs[DART_TCR(&d,2)/4]);
++    unsigned writes=enable_writes;
++    assert(apple_dart_attach_dev_paging(&attach.domain,&dev,NULL)==-EIO);
++    assert(enable_writes==writes && attach.stream_maps[0].sidmap[0]==BIT(1));
++    /* Later map/unmap synchronization also fails closed on a TLB timeout. */
++    d.managed_failed=false;
++    d.regs[DART_TCR(&d,1)/4]=1; d.regs[DART_TCR(&d,2)/4]=1;
++    assert(apple_dart_domain_flush_tlb_range(&attach,false,0,0)==-ETIMEDOUT);
++    assert(d.managed_failed && !d.managed_lock && !pm_refs);
++    assert(!d.regs[DART_TCR(&d,1)/4] && !d.regs[DART_TCR(&d,2)/4]);
++    for (unsigned sid=3; sid<64; sid++) {
++        assert(d.regs[DART_TCR(&d,sid)/4]==before[DART_TCR(&d,sid)/4]);
++        assert(d.regs[DART_TTBR(&d,sid,0)/4]==before[DART_TTBR(&d,sid,0)/4]);
++    }
++    assert(d.regs[(hw.enable_streams+4)/4]==before[(hw.enable_streams+4)/4]);
++    /* Actual candidate6 idle state, with stale address bits but VALID clear. */
++    d.num_streams=19; d.managed_failed=false; d.iommu.ready=true;
++    d.regs[DART_TCR(&d,1)/4]=1; d.regs[DART_TTBR(&d,1,0)/4]=0x0764c8f8;
++    d.regs[DART_TCR(&d,2)/4]=1; d.regs[DART_TTBR(&d,2,0)/4]=0x00a62d20;
++    radio_provider.dev=(struct device){.bound=true,.driver=&apple_dart_driver.driver,.data=&d};
++    pci.dev=&dev; memset(port.entries,0,sizeof(port.entries));
++    port.status=0xd; port.link=0xab000200;
++    memcpy(before,d.regs,sizeof(before));
++    assert(apple_pcie_radio_check_cold(&port)==0);
++    assert(!memcmp(before,d.regs,sizeof(before)) && !node_refs && !provider_refs);
++    assert(!radio_provider.dev.locked && !d.managed_lock);
++    /* Lock freezes protection policy; an unlocked writable state stays usable. */
++    d.regs[DART_T8110_PROTECT_LOCK/4]=1;
++    assert(apple_pcie_radio_check_cold(&port)==0);
++    d.regs[DART_T8110_PROTECT_LOCK/4]=0;
++    const unsigned controls[]={DART_T8110_PROTECT,DART_T8110_TLB_CMD,
++        DART_T8110_ERROR,DART_T8110_ERROR_STREAMS,DART_T8110_ERROR_MASK};
++    const u32 control_bits[]={BIT(0),BIT(31),BIT(31),BIT(1),BIT(0)};
++    for (unsigned i=0; i<ARRAY_SIZE(controls); i++) {
++        d.regs[controls[i]/4]=control_bits[i];
++        assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++        d.regs[controls[i]/4]=0;
++    }
++    for (unsigned source=0; source<19; source++) {
++        u32 old=d.regs[DART_TCR(&d,source)/4];
++        for (unsigned target=1; target<=2; target++) {
++            d.regs[DART_TCR(&d,source)/4]=BIT(7)|(target<<8);
++            assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++        }
++        d.regs[DART_TCR(&d,source)/4]=old;
++    }
++    port.entries[3]=0x80010100; /* an old incorrectly indexed candidate SID */
++    assert(apple_pcie_managed_admit(&port)==-EBUSY);
++    port.entries[3]=0x80030100; /* candidate RID on a different SID */
++    assert(apple_pcie_managed_admit(&port)==-EBUSY);
++    port.entries[3]=0x80040300; /* inconsistent foreign index/SID */
++    assert(apple_pcie_managed_admit(&port)==-EBUSY);
++    port.entries[3]=0x80030300; port.entries[4]=0x80040300;
++    assert(apple_pcie_managed_admit(&port)==-EBUSY); /* duplicate RID */
++    port.entries[4]=0;
++    assert(apple_pcie_managed_admit(&port)==0); /* unrelated consistent owner preserved */
++    port.entries[3]=0;
++    for (unsigned sid=1; sid<=2; sid++) {
++        d.regs[DART_TTBR(&d,sid,0)/4]|=hw.ttbr_valid;
++        assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++        d.regs[DART_TTBR(&d,sid,0)/4]&=~hw.ttbr_valid;
++        d.regs[DART_TCR(&d,sid)/4]=6;
++        assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++        d.regs[DART_TCR(&d,sid)/4]=0;
++        assert(apple_pcie_radio_check_cold(&port)==0);
++        d.regs[DART_TCR(&d,sid)/4]=1;
++    }
++    const u32 foreign_modes[]={2,4,6,0x11,0x80,0x100,0x180};
++    for (unsigned i=0; i<sizeof(foreign_modes)/sizeof(foreign_modes[0]); i++) {
++        d.regs[DART_TCR(&d,1)/4]=foreign_modes[i];
++        assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++    }
++    d.regs[DART_TCR(&d,1)/4]=1;
++    for (unsigned sid=0; sid<16; sid++) {
++        port.entries[sid]=PORT_RID2SID_VALID|0x300;
++        assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++        port.entries[sid]=0;
++    }
++    port.link|=PORT_LINKSTS_UP; assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++    port.link&=~PORT_LINKSTS_UP;
++    port.link|=PORT_LINKSTS_BUSY; assert(apple_pcie_radio_check_cold(&port)==-EBUSY);
++    port.link&=~PORT_LINKSTS_BUSY;
++    port.status=0; assert(apple_pcie_radio_check_cold(&port)==-EBUSY); port.status=0xd;
++    d.managed_failed=true; assert(apple_pcie_radio_check_cold(&port)==-EIO); d.managed_failed=false;
++    d.pending=true; assert(apple_pcie_radio_check_cold(&port)==-EIO); d.pending=false;
++    d.iommu.ready=false; assert(apple_pcie_radio_check_cold(&port)==-EPROBE_DEFER); d.iommu.ready=true;
++    radio_provider.dev.bound=false; assert(apple_pcie_radio_check_cold(&port)==-EPROBE_DEFER); radio_provider.dev.bound=true;
++    radio_provider.dev.driver=NULL; assert(apple_pcie_radio_check_cold(&port)==-EPROBE_DEFER);
++    radio_provider.dev.driver=&apple_dart_driver.driver;
++    provider_present=false; assert(apple_pcie_radio_check_cold(&port)==-EPROBE_DEFER); provider_present=true;
++    mismatched_map=true; assert(apple_pcie_radio_check_cold(&port)==-EINVAL); mismatched_map=false;
++    map_result[1]=-ENODEV; assert(apple_pcie_radio_check_cold(&port)==-ENODEV); map_result[1]=0;
++    assert(!memcmp(before,d.regs,sizeof(before)) && !node_refs && !provider_refs);
++    assert(!radio_provider.dev.locked && !d.managed_lock);
++    puts("radio normal SIDs: admission, scoped publication, foreign preservation, TLB failure rollback, quarantine, group merge and checked cold start PASS");
++}
++'''
++    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
++    with tempfile.TemporaryDirectory(prefix='radio-sids-') as tmp:
++        c=Path(tmp)/'sids.c'; exe=Path(tmp)/'sids'
++        assert code.count('if (error_mask)') == 1
++        for control in ["production", "ignored-error-mask", "late-kexec-guard", "missing-failure-quarantine"]:
++            tested = code
++            if control == "ignored-error-mask":
++                tested = code.replace('if (error_mask)', 'if (false && error_mask)')
++            elif control == "late-kexec-guard":
++                block = "\t\tret = apple_dart_retain_radio(dart);\n\t\tif (ret)\n\t\t\tgoto err_clk_disable;\n"
++                assert tested.count(block) == 1
++                tested = tested.replace(block, '')
++                enable = "\t\tapple_dart_writel(dart, dart->managed_sids, dart->hw->enable_streams);"
++                assert tested.count(enable) == 1
++                tested = tested.replace(enable, enable + "\n" + block)
++            elif control == "missing-failure-quarantine":
++                block = "\tif (dart->retained && !READ_ONCE(dart->managed_failed))\n\t\tapple_dart_managed_quarantine(dart);\n"
++                assert tested.count(block) == 1
++                tested = tested.replace(block, '')
++            c.write_text(tested)
++            subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',
++                            '-Wno-unused-parameter',str(c),'-o',str(exe)],check=True)
++            result = subprocess.run([str(exe)], capture_output=True, text=True)
++            if control != "production":
++                assert result.returncode and 'Assertion' in result.stderr, result
++                print('Managed radio ' + control + ' negative control: detected at runtime')
++            else:
++                assert result.returncode == 0, result.stderr
++                print(result.stdout.strip())
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/testing/selftests/drivers/apple/bcm4377-rti-address.py b/tools/testing/selftests/drivers/apple/bcm4377-rti-address.py
+new file mode 100755
+--- /dev/null
++++ b/tools/testing/selftests/drivers/apple/bcm4377-rti-address.py
+@@ -0,0 +1,178 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Exercise production RTI publication with actual chip register profiles."""
++from pathlib import Path
++import re
++import resource
++import subprocess
++import tempfile
++
++
++def definition(source, name):
++    start = source.index(name)
++    start = source.rfind('\n', 0, start) + 1
++    brace = source.index('{', start)
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end]
++
++
++def program(source):
++    names = ['BCM4377_BAR0_RTI_CONTROL', 'BCM4377_BAR2_RTI_WINDOW_LO',
++             'BCM4377_BAR2_RTI_WINDOW_HI', 'BCM4377_BAR2_RTI_WINDOW_SIZE',
++             'BCM4377_BAR2_CONTEXT_ADDR_LO', 'BCM4377_BAR2_CONTEXT_ADDR_HI',
++             'BCM4388_BAR2_CONTEXT_ADDR_HI']
++    defines = '\n'.join(re.search(r'^#define\s+' + name + r'\s+[^\n]+', source,
++                                  re.M).group() for name in names)
++    profiles = []
++    for chip in [4377, 4378, 4387, 4388]:
++        entry = definition(source, f'\t[BCM{chip}] = {{')
++        offset = re.search(r'\.bar2_offset\s*=\s*(\w+)', entry)
++        high = re.search(r'\.bar2_context_addr_hi\s*=\s*(\w+)', entry)
++        profiles.append('{%s,%s}' % (offset.group(1) if offset else '0',
++                                    high.group(1) if high else '0'))
++    code = r'''
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef uint32_t u32;
++typedef uint64_t u64;
++typedef struct { unsigned value; } atomic_t;
++struct bcm4377_hw { u32 bar2_offset, bar2_context_addr_hi; };
++struct bcm4377_data {
++    void *bar0, *bar2;
++    const struct bcm4377_hw *hw;
++    u64 ctx_dma, dma_window_base;
++    u32 dma_window_size;
++    atomic_t irq_count;
++    struct { bool enabled; } control_ack_ring;
++};
++struct write_event { uintptr_t addr; u32 value; };
++static struct write_event writes[16];
++static unsigned n_writes, fail_phase, failures, waits;
++static u32 capabilities;
++#define BCM4377_TIMEOUT 1000
++#define lower_32_bits(v) ((u32)(v))
++#define upper_32_bits(v) ((u32)((u64)(v)>>32))
++#define dev_dbg(...) ((void)0)
++#define dev_info(...) ((void)0)
++static unsigned atomic_read(const atomic_t *v) { return v->value; }
++static void iowrite32(u32 value, void *address)
++{
++    assert(n_writes<16);
++    writes[n_writes++]=(struct write_event){(uintptr_t)address,value};
++    if ((uintptr_t)address==0x20400450) capabilities=value;
++}
++static int bcm4377_wait_for_state(struct bcm4377_data *b, bool rti,
++                                 u32 state, unsigned long timeout)
++{
++    assert(rti && timeout==1000);
++    assert(writes[n_writes-1].addr==0x10000144);
++    assert(writes[n_writes-1].value==state);
++    waits++;
++    if (state==fail_phase) return -ETIMEDOUT;
++    b->irq_count.value++;
++    return 0;
++}
++static void bcm4377_report_state_failure(struct bcm4377_data *b,
++                                         const char *phase, u32 expected,
++                                         int error, u32 irq_before)
++{
++    assert(b && !strcmp(phase,"RTI") && expected==fail_phase);
++    assert(error==-ETIMEDOUT && irq_before==expected-1);
++    failures++;
++}
++'''
++    code += defines + '\n'
++    code += 'static const struct bcm4377_hw profiles[]={' + ','.join(profiles) + '};\n'
++    code += definition(source, 'static int bcm4377_setup_rti(struct bcm4377_data *bcm4377)\n{') + '\n'
++    code += r'''
++static void check_write(unsigned index, uintptr_t addr, u32 value)
++{
++    assert(index<n_writes);
++    assert(writes[index].addr==addr && writes[index].value==value);
++}
++static void test(unsigned profile, u64 context, bool high_window, unsigned failure)
++{
++    struct bcm4377_data b={
++        .bar0=(void *)0x10000000,.bar2=(void *)0x20000000,
++        .hw=&profiles[profile],.ctx_dma=context,
++        .dma_window_base=high_window?0x10000100000ULL:0,
++        .dma_window_size=high_window?0x3fe00000:0xffffffff,
++    };
++    /* Source-backed BCM4388 effective ABI; legacy profiles stay unchanged. */
++    uintptr_t base=profile==3 ? 0x20400000 : 0x20200000;
++    uintptr_t high=profile==3 ? (high_window?0x20400490:0x20400450) : 0x20200450;
++    n_writes=failures=waits=0; fail_phase=failure; capabilities=0x0a;
++    int ret=bcm4377_setup_rti(&b);
++    check_write(0,0x10000144,1);
++    if (failure==1) {
++        assert(ret==-ETIMEDOUT && n_writes==1 && waits==1 && failures==1);
++        assert(!b.control_ack_ring.enabled);
++        return;
++    }
++    assert(n_writes==7 && waits==2);
++    check_write(1,base+0x494,high_window?0x00100000:0);
++    check_write(2,base+0x498,high_window?0x100:0);
++    check_write(3,base+0x49c,high_window?0x3fe00000:0xffffffff);
++    check_write(4,base+0x48c,(u32)context);
++    check_write(5,high,(u32)(context>>32));
++    check_write(6,0x10000144,2); /* publish both pointer halves before request2 */
++    if (profile==3) assert(capabilities==(high_window?0x0a:(u32)(context>>32)));
++    if (failure==2)
++        assert(ret==-ETIMEDOUT && failures==1 && !b.control_ack_ring.enabled);
++    else
++        assert(!ret && !failures && b.control_ack_ring.enabled);
++}
++int main(void)
++{
++    for (unsigned profile=0; profile<4; profile++) {
++        test(profile,0x12345678,false,0);
++        test(profile,0x12345678,false,1);
++        test(profile,0x12345678,false,2);
++    }
++    test(3,0x12345678,true,0);
++    test(3,0x100001a0000ULL,true,0);
++    test(3,0x100001a0000ULL,true,1);
++    test(3,0x100001a0000ULL,true,2);
++    puts("BCM4377 RTI addresses: all chip profiles, full-width publication, capability preservation and phase failures PASS");
++}
++'''
++    return code
++
++
++def main():
++    root = Path(__file__).resolve().parents[5]
++    source = (root / 'drivers/bluetooth/hci_bcm4377.c').read_text()
++    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
++    with tempfile.TemporaryDirectory(prefix='bcm4377-rti-address-') as tmp:
++        c, exe = Path(tmp) / 'rti.c', Path(tmp) / 'rti'
++        for control in ["production", "old-high-register", "unscoped-register"]:
++            tested = source
++            if control == "old-high-register":
++                tested = source.replace('.bar2_context_addr_hi = BCM4388_BAR2_CONTEXT_ADDR_HI',
++                                        '.bar2_context_addr_hi = BCM4377_BAR2_CONTEXT_ADDR_HI')
++            elif control == "unscoped-register":
++                tested = source.replace('bcm4377->dma_window_base ?\n\t\tbcm4377->hw->bar2_context_addr_hi : BCM4377_BAR2_CONTEXT_ADDR_HI',
++                                        'bcm4377->hw->bar2_context_addr_hi')
++            if control != "production":
++                assert tested != source
++            c.write_text(program(tested))
++            subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                            str(c), '-o', str(exe)], check=True)
++            result = subprocess.run([str(exe)], capture_output=True, text=True)
++            if control != "production":
++                assert result.returncode and 'Assertion' in result.stderr, result
++                print('BCM4388 ' + control + ' negative control: detected at runtime')
++            else:
++                assert result.returncode == 0, result.stderr
++                print(result.stdout.strip())
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/testing/selftests/drivers/apple/bcm4377-state-wait.py b/tools/testing/selftests/drivers/apple/bcm4377-state-wait.py
+new file mode 100755
+--- /dev/null
++++ b/tools/testing/selftests/drivers/apple/bcm4377-state-wait.py
+@@ -0,0 +1,252 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Exercise production firmware-state publication and phase-specific waits.
++
++The CPU scheduler model injects IRQ updates, unrelated/spurious wakeups,
++terminal states, signals and a fixed deadline. It does not qualify hardware.
++"""
++from pathlib import Path
++import resource
++import subprocess
++import tempfile
++
++
++def recovery_program(source):
++    prefix = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
++struct pci_dev { unsigned refs; };
++struct work_struct { unsigned unused; };
++struct bcm4377_hw { bool disable_aspm; };
++struct ring_state { unsigned value; };
++struct bcm4377_data {
++    unsigned long reset_pending, dma_window_base;struct pci_dev *pdev;
++    const struct bcm4377_hw *hw;bool needs_reset;unsigned bootstage,rti_status;
++    struct ring_state *ring_state;
++    struct { unsigned generation,n_entries;unsigned long msgids[1];unsigned *events; } control_h2d_ring;
++    struct { bool enabled; } control_ack_ring;
++};
++struct hci_dev { struct bcm4377_data *data; bool setup; };
++struct bcm4377_reset_work { struct work_struct work; struct pci_dev *pdev; };
++static unsigned allocations, queued, errors, pci_resets, irq_disables, irq_enables, boots;
++static int reset_error;
++static bool fail_alloc;
++static void *allocated, *bcm4377_reset_wq = (void *)1;
++#define HCI_SETUP 1
++#define hci_get_drvdata(hdev) ((hdev)->data)
++#define hci_dev_test_flag(hdev,flag) ((void)(flag),(hdev)->setup)
++#define test_and_set_bit(bit,p) ({ unsigned long mask=1UL<<(bit); bool old=*(p)&mask; *(p)|=mask; old; })
++#define clear_bit(bit,p) ((void)(bit),(*(p))=0)
++#define bt_dev_err(...) do { errors++; } while (0)
++static void *allocate(unsigned size) { allocations++;return allocated=fail_alloc?NULL:calloc(1,size); }
++#define kzalloc_obj(value) allocate(sizeof(value))
++static struct pci_dev *pci_dev_get(struct pci_dev *p) { p->refs++;return p; }
++static void bcm4377_reset_work(struct work_struct *w) { (void)w;abort(); }
++#define INIT_WORK(w,fn) do { (void)(w);(void)(fn); } while (0)
++static void queue_work(void *q,struct work_struct *w) { assert(q==bcm4377_reset_wq && w);queued++; }
++#define dev_info(...) ((void)0)
++#define dev_err(...) ((void)0)
++#define dev_err_once(...) do { errors++; } while (0)
++#define WRITE_ONCE(x,v) ((x)=(v))
++#define bitmap_zero(p,n) do { assert((n)<=8*sizeof(*(p)));memset(p,0,sizeof(*(p))); } while (0)
++static int pci_irq_vector(struct pci_dev *p,unsigned index) { assert(p && !index);return 1; }
++static void disable_irq(int irq) { assert(irq==1);irq_disables++; }
++static void enable_irq(int irq) { assert(irq==1);irq_enables++; }
++static void bcm4377_disable_aspm(struct bcm4377_data *b) { (void)b; }
++static int pci_reset_function(struct pci_dev *p) { assert(p);pci_resets++;return reset_error; }
++static void msleep(unsigned ms) { assert(ms==100); }
++static void pci_set_master(struct pci_dev *p) { assert(p); }
++static int bcm4377_init_cfg(struct bcm4377_data *b) { (void)b;return 0; }
++static int bcm4377_boot(struct bcm4377_data *b) { (void)b;boots++;return 0; }
++static int bcm4377_setup_rti(struct bcm4377_data *b) { (void)b;return 0; }
++'''
++    body = definition(source, 'static void bcm4377_hci_reset(struct hci_dev *hdev)\n{')
++    body += definition(source, 'static int bcm4377_pci_reset(struct bcm4377_data *bcm4377)\n{')
++    tests = r'''
++int main(void)
++{
++    struct pci_dev pci={0};struct bcm4377_data b={.pdev=&pci};
++    struct hci_dev h={.data=&b};
++    b.dma_window_base=0x10000100000UL;
++    bcm4377_hci_reset(&h);
++    assert(!allocations && !queued && !pci.refs && errors==1 && b.reset_pending);
++    bcm4377_hci_reset(&h);
++    assert(!allocations && !queued && !pci.refs && errors==1);
++    b.dma_window_base=b.reset_pending=0;errors=0;
++    bcm4377_hci_reset(&h);
++    assert(allocations==1 && queued==1 && pci.refs==1 && errors==1);
++    free(allocated);allocated=NULL;
++    b.reset_pending=0;h.setup=true;
++    bcm4377_hci_reset(&h);assert(allocations==1 && queued==1);
++    h.setup=false;fail_alloc=true;
++    bcm4377_hci_reset(&h);assert(!b.reset_pending && allocations==2 && queued==1);
++    struct bcm4377_hw hw={0};struct ring_state ring={.value=99};
++    b.hw=&hw;b.ring_state=&ring;b.needs_reset=true;b.dma_window_base=0x10000100000UL;
++    errors=0;
++    assert(bcm4377_pci_reset(&b)==-EIO);
++    assert(errors==1 && !pci_resets && !irq_disables && !irq_enables && !boots);
++    assert(b.needs_reset && ring.value==99);
++    b.dma_window_base=0;b.control_h2d_ring.n_entries=4;
++    assert(!bcm4377_pci_reset(&b) && pci_resets==1 && irq_disables==1 && irq_enables==1);
++    assert(!b.needs_reset && !ring.value && boots==1);
++    reset_error=-EIO;
++    assert(bcm4377_pci_reset(&b)==-EIO && b.needs_reset);
++    assert(pci_resets==2 && irq_disables==2 && irq_enables==2 && boots==1);
++    return 0;
++}
++'''
++    return prefix + body + tests
++
++
++def definition(source, name):
++    start = source.index(name)
++    start = source.rfind('\n', 0, start) + 1
++    brace = source.index('{', start)
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end]
++
++
++def main():
++    root = Path(__file__).resolve().parents[5]
++    source = (root / 'drivers/bluetooth/hci_bcm4377.c').read_text()
++    code = r'''
++#include <assert.h>
++#include <errno.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef uint32_t u32;
++typedef struct { int unused; } wait_queue_head_t;
++struct bcm4377_data { u32 bootstage, rti_status; wait_queue_head_t event; };
++#define READ_ONCE(x) (x)
++#define WRITE_ONCE(x,v) ((x)=(v))
++#define dev_dbg(...) ((void)0)
++#define ERESTARTSYS 512
++struct step { bool update; u32 bootstage, rti_status; int signal; };
++static struct bcm4377_data *controller;
++static struct step steps[16];
++static unsigned count, ticks, wakes;
++static u32 expected_boot, expected_rti;
++static void wake_up_all(wait_queue_head_t *q)
++{
++    assert(q==&controller->event);
++    /* Wakeup is a publication: both cached fields must already be current. */
++    assert(controller->bootstage==expected_boot && controller->rti_status==expected_rti);
++    wakes++;
++}
++static int inject_tick(void);
++#define wait_event_interruptible_timeout(q,condition,budget) ({ \
++    (void)&(q); long left=(budget), result=0; \
++    while (!(condition) && left) { \
++        int signal=inject_tick(); \
++        if (signal) { result=signal; break; } \
++        left--; \
++    } \
++    if (!result && (condition)) result=left ? left : 1; \
++    result; \
++})
++'''
++    code += definition(source, 'static void bcm4377_update_state(') + '\n'
++    code += definition(source, 'static int bcm4377_wait_for_state(') + '\n'
++    code += r'''
++static int inject_tick(void)
++{
++    assert(ticks<16);
++    struct step s=ticks<count ? steps[ticks] : (struct step){0};
++    ticks++;
++    if (s.signal) return s.signal;
++    if (s.update) {
++        expected_boot=s.bootstage; expected_rti=s.rti_status;
++        bcm4377_update_state(controller,s.bootstage,s.rti_status);
++    } else {
++        expected_boot=controller->bootstage; expected_rti=controller->rti_status;
++        wake_up_all(&controller->event); /* no state change */
++    }
++    return 0;
++}
++static void reset(struct bcm4377_data *b, u32 boot, u32 rti)
++{
++    *b=(struct bcm4377_data){.bootstage=boot,.rti_status=rti};
++    controller=b; count=ticks=wakes=0; memset(steps,0,sizeof(steps));
++    expected_boot=boot; expected_rti=rti;
++}
++static void update(u32 boot, u32 rti)
++{ steps[count++]=(struct step){.update=true,.bootstage=boot,.rti_status=rti}; }
++int main(void)
++{
++    struct bcm4377_data b;
++    reset(&b,0,0);
++    expected_boot=2; expected_rti=1;
++    bcm4377_update_state(&b,2,1);
++    assert(wakes==1);
++    bcm4377_update_state(&b,2,1);
++    assert(wakes==1); /* duplicate IRQ has no new state to publish */
++
++    reset(&b,2,1);
++    wake_up_all(&b.event); /* stale notification from an earlier phase */
++    count++; update(3,1); update(3,2); /* spurious, unrelated boot, actual RTI2 */
++    assert(bcm4377_wait_for_state(&b,true,2,5)==0 && ticks==3);
++
++    reset(&b,0,0);
++    update(1,0); update(2,0);
++    assert(bcm4377_wait_for_state(&b,false,2,5)==0 && ticks==2);
++
++    reset(&b,2,1);
++    update(2,3);
++    assert(bcm4377_wait_for_state(&b,true,2,5)==-ENODEV && ticks==1);
++    reset(&b,0,0);
++    update(4,0);
++    assert(bcm4377_wait_for_state(&b,false,2,5)==-ENXIO && ticks==1);
++    reset(&b,2,2);
++    assert(bcm4377_wait_for_state(&b,true,1,5)==-ENODEV && !ticks);
++
++    reset(&b,2,1);
++    for (unsigned i=0; i<5; i++) update(2+(i%2),1);
++    update(2,2); /* target after the deadline must not extend the wait */
++    assert(bcm4377_wait_for_state(&b,true,2,5)==-ETIMEDOUT && ticks==5);
++
++    reset(&b,2,1);
++    count++; steps[count++]=(struct step){.signal=-ERESTARTSYS};
++    assert(bcm4377_wait_for_state(&b,true,2,5)==-ERESTARTSYS && ticks==2);
++    reset(&b,2,2);
++    assert(bcm4377_wait_for_state(&b,true,2,5)==0 && !ticks);
++    puts("BCM4377 state waits: publication order, stale/spurious/intermediate events, terminal states, fixed deadline and signals PASS");
++}
++'''
++    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
++    with tempfile.TemporaryDirectory(prefix='bcm4377-state-') as tmp:
++        c = Path(tmp) / 'state.c'
++        exe = Path(tmp) / 'state'
++        c.write_text(code)
++        subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                        str(c), '-o', str(exe)], check=True)
++        subprocess.run([str(exe)], check=True)
++        for control in ["production", "timeout-reprobe", "pci-function-reset"]:
++            tested = source
++            if control != "production":
++                name = ('static void bcm4377_hci_reset(struct hci_dev *hdev)\n{' if control == "timeout-reprobe" else
++                        'static int bcm4377_pci_reset(struct bcm4377_data *bcm4377)\n{')
++                body = definition(source, name)
++                assert body.count('if (bcm4377->dma_window_base) {') == 1
++                tested = source.replace(body, body.replace('if (bcm4377->dma_window_base) {', 'if (false) {', 1), 1)
++            c.write_text(recovery_program(tested))
++            subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                            str(c), '-o', str(exe)], check=True)
++            result = subprocess.run([str(exe)], capture_output=True, text=True)
++            if control != "production":
++                assert result.returncode and 'Assertion' in result.stderr, result
++                print('BCM4388 unguarded ' + control + ' negative control: detected at runtime')
++            else:
++                assert result.returncode == 0, result.stderr
++                print('BCM4388 recovery: high-window reprobe/function reset refused; legacy recovery paths PASS')
++
++
++if __name__ == '__main__':
++    main()

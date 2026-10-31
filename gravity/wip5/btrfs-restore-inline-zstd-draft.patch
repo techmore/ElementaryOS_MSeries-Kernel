@@ -1,0 +1,66 @@
+--- a/cmds/restore.c
++++ b/cmds/restore.c
+@@ -197,16 +197,48 @@
+-		goto out;
++		goto out;
+-	}
++	}
+-
++
+-	zret = ZSTD_decompressStream(strm, &out, &in);
+-	if (ZSTD_isError(zret)) {
+-		error("zstd decompress failed %s", ZSTD_getErrorName(zret));
+-		ret = -1;
+-		goto out;
+-	}
+-	if (zret != 0) {
+-		error("zstd frame incomplete");
+-		ret = -1;
+-		goto out;
++	/* A valid inline frame may decode to a sector while ram_bytes names
++	 * only the meaningful prefix. Drain and validate the entire frame into
++	 * bounded scratch after filling the caller's output. */
++	{
++		char scratch[4096];
++		ZSTD_outBuffer sink = {scratch, sizeof(scratch), 0};
++		size_t total = 0;
++		bool use_sink = false;
++
++		for (;;) {
++			ZSTD_outBuffer *dest = use_sink ? &sink : &out;
++			size_t old_in = in.pos, old_out = dest->pos;
++
++			zret = ZSTD_decompressStream(strm, dest, &in);
++			if (ZSTD_isError(zret)) {
++				error("zstd decompress failed %s", ZSTD_getErrorName(zret));
++				ret = -1;
++				goto out;
++			}
++			total += dest->pos - old_out;
++			if (total > BTRFS_MAX_UNCOMPRESSED) {
++				error("zstd frame exceeds maximum extent size");
++				ret = -1;
++				goto out;
++			}
++			if (zret == 0) {
++				if (out.pos != decompress_len) {
++					error("zstd frame shorter than extent");
++					ret = -1;
++				}
++				break;
++			}
++			if (in.pos == old_in && dest->pos == old_out && dest->pos < dest->size) {
++				error("zstd frame incomplete");
++				ret = -1;
++				goto out;
++			}
++			if (dest->pos == dest->size) {
++				use_sink = true;
++				sink.pos = 0;
++			}
++		}
+-	}
++	}
+-
++
+ out:
