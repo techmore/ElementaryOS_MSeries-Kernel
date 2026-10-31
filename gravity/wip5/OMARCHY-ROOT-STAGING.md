@@ -41,6 +41,14 @@ files after copying. This does not provision a user, firmware or boot entry.
 The detailed attended plan is in the local staging cache; no mount or target
 subvolume has been created.
 
+`stage-omarchy-root.sh` prepares that copy as an attended root operation. It
+checks the image hash, available space and mounted filesystem UUIDs, then mounts
+the source read-only and copies it to a new `omarchy-root-subvolume` below the
+specified staging directory. It prints a checksum and metadata dry run and
+leaves a partial target for inspection on failure. Nested subvolume layout and
+any differences reported by rsync still need review. The script has passed
+shell syntax and non-root refusal checks only; it has not been run as root.
+
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
 `87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
 and reports extended-attribute failures. Isolated checks preserved an actual
