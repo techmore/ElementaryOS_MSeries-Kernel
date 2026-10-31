@@ -113,6 +113,15 @@ class DirectRootValidation(unittest.TestCase):
         self.assertIn('needs a provisioned local login user', result.stderr)
         self.assertFalse((self.base / 'output').exists())
 
+    def test_explicit_unprovisioned_diagnostic(self):
+        self.prepare_recorded_fixture()
+        (self.root / 'etc/passwd').write_text('root:x:0:0:root:/root:/bin/bash\n')
+        self.args.append('--allow-unprovisioned')
+        result = self.run_recorded_fixture()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.base / 'output/manifest.json').read_text())
+        self.assertIn('unprovisioned diagnostic root; no local desktop user established', manifest['limits'])
+
     def test_missing_home_rejected(self):
         self.prepare_recorded_fixture()
         (self.root / 'home/sample').rmdir()

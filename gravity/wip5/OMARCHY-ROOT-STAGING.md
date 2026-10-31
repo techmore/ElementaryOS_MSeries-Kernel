@@ -145,3 +145,21 @@ creation; actual provisioning and hardware boot remain untested.
 The local-user check additionally requires that the declared home directory and
 shell resolve to existing paths inside the staged root. It still does not read
 or validate credentials or establish a working login.
+
+`provision-omarchy-user.sh` is an attended provisioning path for an already
+staged `omarchy-root-subvolume`. It prompts for a new local username and invokes
+`passwd` interactively inside the staged root; no password is placed in command
+arguments or a log. It validates the existing sudoers configuration and adds a
+password-required wheel rule after password setup. It refuses an existing user,
+home or policy, and checks that `/dev/tty` can be opened inside the chroot
+before creating an account. If needed it creates a temporary character device
+with major 5, minor 0 and removes only that same node on exit. A failure after
+`useradd` can leave a partial account for manual inspection. The script has not
+been run against the real staged root or with a real password; user-namespace
+fixtures covered refusal of an incorrect existing tty and failed tty creation.
+
+For storage-only troubleshooting, `stage-j773g-omarchy.py` now accepts the
+explicit `--allow-unprovisioned` option and labels a bundle without a local user
+as an unprovisioned diagnostic. The default still requires the account check.
+This does not establish interactive access, recovery, a working loader, or a
+bootable desktop.

@@ -11,6 +11,7 @@ import uuid
 p = argparse.ArgumentParser(description=__doc__)
 for option in ('image', 'dtb', 'stage1', 'stage2', 'fill-tool', 'output', 'root-directory'):
     p.add_argument('--' + option, type=pathlib.Path, required=True)
+p.add_argument('--allow-unprovisioned', action='store_true', help='permit a diagnostic root without a local desktop user')
 for option in ('esp-partuuid', 'root-partuuid', 'esp-directory', 'root-subvol'):
     p.add_argument('--' + option, required=True)
 a = p.parse_args()
@@ -75,10 +76,10 @@ if not asahi.is_file() or hashlib.sha256(asahi.read_bytes()).hexdigest() != expe
     p.error('staged Asahi module does not match the graphics kernel')
 # The generic image has no regular user; require evidence of local provisioning.
 passwd = root_dir / 'etc/passwd'
-if not passwd.is_file():
+if not passwd.is_file() and not a.allow_unprovisioned:
     p.error('staged root is missing /etc/passwd')
 has_login_user = False
-for line in passwd.read_text().splitlines():
+for line in (passwd.read_text().splitlines() if passwd.is_file() else []):
     fields = line.split(':')
     if len(fields) != 7:
         continue
@@ -99,7 +100,7 @@ for line in passwd.read_text().splitlines():
             home_path.is_dir() and shell_path.is_file()):
         has_login_user = True
         break
-if not has_login_user:
+if not has_login_user and not a.allow_unprovisioned:
     p.error('staged root needs a provisioned local login user')
 a.output.mkdir(parents=True, exist_ok=False)
 for source, name in ((a.image, 'Image'), (a.dtb, 't8132-j773g.dtb')):
@@ -112,5 +113,9 @@ artifacts = {}
 for name in ('Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin'):
     data = (a.output / name).read_bytes()
     artifacts[name] = {'bytes': len(data), 'sha1': hashlib.sha1(data).hexdigest(), 'sha256': hashlib.sha256(data).hexdigest()}
-(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount and subvolume checked; login authentication and contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
+limits = ['mount and subvolume checked; login authentication and contents still require verification',
+          'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']
+if not has_login_user:
+    limits.append('unprovisioned diagnostic root; no local desktop user established')
+(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': limits}, indent=2) + '\n')
 print(f'Staged experiment in {a.output}; no boot files changed')
