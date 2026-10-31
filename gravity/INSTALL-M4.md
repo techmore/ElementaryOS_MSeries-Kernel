@@ -11,7 +11,7 @@ One page. Do it in order. macOS stays installed and is your fallback the whole t
 
 ## 2. Install (macOS side)
 
-1. Double-click **`Omarchy-J773g-developer-wifi.pkg`** in your home folder under `Omarchy-J773g` (`~/Omarchy-J773g/`, 3.4 GB, SHA-256 `81b1be4e91cc30589d5532dbad559d433f9061498e20bb2c8a8871cb0e2e4700`, kernel 7.3.0-90-3 with Wi-Fi calibration).   If macOS blocks it, right-click the file → **Open**, or go to System Settings → Privacy & Security → **Open Anyway**.
+1. Double-click **`Omarchy-J773g-developer-wifi.pkg`** in your home folder under `Omarchy-J773g` (`~/Omarchy-J773g/`, 3.4 GB, SHA-256 `c7e5a5fe7ddc3ee44585f77e2c4a30d7a6322e9e7cc9ca84a1e0232f5947206f`, kernel 7.3.0-90-3 with Wi-Fi calibration, installer app 2.3.0).   If macOS blocks it, right-click the file → **Open**, or go to System Settings → Privacy & Security → **Open Anyway**.
    When the package finishes, **delete the `.pkg` file** (Move to Trash, then empty the Trash). The installed app carries its own copy of the image, and the installer needs the space: Omarchy needs at least ~41 GB carved out of the macOS disk.
 2. Open **Omarchy Installer** from Applications and follow it. When it asks how much space to give Omarchy, choose about **90 GB**. About 108 GB is free; the installer also needs ~6 GB for a macOS 26.6.2 system stub, and macOS should keep ~10 GB free for itself. It shrinks the macOS partition, adds Omarchy beside it, and asks for your Mac password when it needs admin rights.
 3. At the end it asks you to shut down. It also records how long each step took, for the install-speed measurement.
