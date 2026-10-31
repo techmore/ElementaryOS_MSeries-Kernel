@@ -67,3 +67,10 @@ not been compiled as Mesa, tested on a GPU, or reviewed for real buffer
 lifetimes and state-tracker behavior. It does not fix the separate unchecked
 encoder allocation/mapping path or establish the original VM_BIND cause. Do
 not deploy or upstream it as a validated fix.
+
+The follow-up `mesa103-failed-render-v2-draft.patch` (SHA-256
+`705a1d749a7f8253bbfbf56313145b1918c23098237fc7d90abbd576ba9f9a52`)
+separates driver-side batch failure from the existing guilty-context flag and
+reports an unknown context reset instead. It applies to the extracted build-103
+source. It remains uncompiled and untested on hardware at this point; reset
+propagation, subsequent submissions and query-buffer semantics remain open.
