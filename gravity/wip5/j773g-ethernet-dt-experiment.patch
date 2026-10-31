@@ -8,7 +8,7 @@
 +#include "t8132-j773g-ethernet-draft.dtsi"
 --- /dev/null
 +++ b/arch/arm64/boot/dts/apple/t8132-j773g-ethernet-draft.dtsi
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,69 @@
 +#include <dt-bindings/gpio/gpio.h>
 +/* Experimental J773g Ethernet topology; all new devices stay disabled. */
 +&pinctrl_ap {
@@ -70,5 +70,11 @@
 +				<0 0 0 3 &j773g_port02 0 0 0 2>,
 +				<0 0 0 4 &j773g_port02 0 0 0 3>;
 +		status = "disabled";
++
++		j773g_ethernet: ethernet@0,0 {
++			reg = <0x20000 0 0 0 0>;
++			/* Per-machine MAC must be provided by a qualified handoff. */
++			status = "disabled";
++		};
 +	};
 +};
