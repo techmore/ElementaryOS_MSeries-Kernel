@@ -62,6 +62,12 @@ before relying on the mini's internal disk.
 - `0006-m1n1-no-display-build-option.patch` exposes `NO_DISPLAY=1` in that
   loader's generated build configuration. Without it, the Makefile silently
   ignores the option and the intended framebuffer-preserving build is not made.
+- `0007-uboot-j773g-storage-import.patch` adds a separate opt-in J773g storage
+  importer against Aurora U-Boot `cc47d3b7c86deb4094dc186d26799602272e37fb`.
+  It imports ANS resources and memory/CPU/framebuffer data into a scratch tree
+  without applying J713 keyboard or display policy. Kernel draft
+  `0008-j773g-uboot-import-marker.patch` opts into it; the marker records the
+  WIP5 base and is not proof of source provenance.
 
 The kernel drafts apply to the current WIP5 source with the preceding SMC
 patch; the board DTB compiles in the matching-input checkout. Both loader
@@ -74,9 +80,15 @@ build produced both stages with `NO_DISPLAY`; stage 1 additionally has
 `c1b853663bdc4450fa23db8978c6c2f0aabd6b9e301bfa8541f945ad2f39f5eb`, stage 2
 `ce3e5d78163cb3ca7e7c469d5d4ceacde8bae0dbbda0bf95f488bc42a798d427`.
 These are non-release local builds; compiler warnings were reported in T8140
-display code. U-Boot's matching handoff still requires integration. This is a
-build integration starting point, not an enabled,
-bootable or hardware-qualified storage path. Do not install the draft loader.
+display code. The patched U-Boot builds with `apple_m1_defconfig`; its draft
+`u-boot-nodtb.bin` is staged at
+`~/.cache/m4-kernel/wip5-source/uboot-j773g-draft/` with SHA-256
+`049ed439eb8a51e12f0c9720c79d38c785c6ac3af0467ff7d79a7290a6525ae5`.
+The running WIP5 kernel build started before the opt-in marker; rebuild its
+DTB with the complete patch set before pairing. Boot selection, source
+identity, framebuffer properties and actual J773g firmware resources remain
+unverified. This is not a bootable or hardware-qualified storage path. Do not
+install the draft loader.
 
 ## Sound on the current Gravity host
 
