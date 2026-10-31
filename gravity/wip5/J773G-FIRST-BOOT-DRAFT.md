@@ -53,3 +53,12 @@ resources from the live J773g ADT and does not require U-Boot for that step;
 the actual handoff is untested. If configured stage 1 cannot load its target,
 it falls to the m1n1 proxy, not automatically back to Gravity. This must be
 accounted for in any recovery plan.
+
+A second local bundle, `~/.cache/m4-kernel/latest-aurora/j773g-keyboard-rescue-draft/`,
+uses the optional rear USB2 keyboard DTB and an ESP stage 2 with the USB2
+calibration gate. Its DTB SHA-1 is `a399dc6e91244487cced595d80914c66c2b98cfd`
+and SHA-256 is `55da61de1a351c5eeb36360ec822d153f8f665bb3c775adcef61bcad069361d5`.
+Its untouched source baseline matched the latest build's original DTB
+byte-for-byte; the trial adds the import marker and keyboard-only include.
+The DART version, port power ownership, physical keyboard and fallback remain
+unverified. This variant is a diagnostic experiment and was not installed.
