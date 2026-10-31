@@ -66,9 +66,10 @@ root with matching modules. It supplies `root=PARTUUID=...`, Btrfs subvolume
 root flags and no initramfs. The graphics config builds GPT partition parsing,
 Apple NVMe, SART, DART and Btrfs into the kernel; the loader's boot grammar
 accepts `-` for no initramfs. A synthetic-root fixture verified generated
-arguments and artifact hashes. The supplied PARTUUID and top-level-relative
-subvolume path must be independently matched to the actual staged root before
-use; the script cannot establish this mapping. Storage handoff, init, display,
+arguments and artifact hashes. The tool compares the supplied PARTUUID and
+top-level-relative path against `findmnt` and `lsblk`; a Btrfs fixture passed,
+and mismatched partition and path cases were rejected. This verifies the mount
+mapping, not that the path is a complete staged subvolume. Storage handoff, init, display,
 input, firmware and recovery remain untested. No real root bundle was made.
 
 A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1

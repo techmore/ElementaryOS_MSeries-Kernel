@@ -25,6 +25,24 @@ if not a.output.resolve().is_relative_to(pathlib.Path.home().resolve()):
 release = '7.2.11-elementary-m4-graphics-draft'
 if not (a.root_directory / 'etc/os-release').is_file() or not (a.root_directory / 'usr/lib/modules' / release / 'modules.dep').is_file():
     p.error('staged root or matching modules are missing')
+root_dir = a.root_directory.resolve(strict=True)
+mounts = json.loads(subprocess.check_output(
+    ['findmnt', '-J', '-T', str(root_dir), '-o', 'TARGET,SOURCE,FSROOT,FSTYPE'], text=True))
+mount = mounts['filesystems'][0]
+if mount['fstype'] != 'btrfs':
+    p.error('staged root must be on a mounted Btrfs filesystem')
+mountpoint = pathlib.Path(mount['target']).resolve(strict=True)
+try:
+    relative = root_dir.relative_to(mountpoint)
+except ValueError:
+    p.error('staged root is outside its reported mountpoint')
+subvol = (pathlib.PurePosixPath(mount['fsroot']) / relative.as_posix()).as_posix().lstrip('/')
+if subvol != a.root_subvol:
+    p.error('root subvolume does not match the staged root path and mount FSROOT')
+device = mount['source'].split('[', 1)[0]
+actual_partuuid = subprocess.check_output(['lsblk', '-dn', '-o', 'PARTUUID', device], text=True).strip()
+if not actual_partuuid or str(uuid.UUID(actual_partuuid)) != root:
+    p.error('root PARTUUID does not match the staged root device')
 expected = 'd7503a309985d172374c3ef1045fdab7fb1e4b370118d0f48fbe021221107de7'
 if hashlib.sha256(a.image.read_bytes()).hexdigest() != expected:
     p.error('Image does not match the graphics module release')
@@ -39,5 +57,5 @@ artifacts = {}
 for name in ('Image', 't8132-j773g.dtb', 'stage1-configured.bin', 'stage2.bin'):
     data = (a.output / name).read_bytes()
     artifacts[name] = {'bytes': len(data), 'sha1': hashlib.sha1(data).hexdigest(), 'sha256': hashlib.sha256(data).hexdigest()}
-(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['root identity and subvolume path require independent verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
+(a.output / 'manifest.json').write_text(json.dumps({'status': 'uninstalled, unbooted direct-root experiment', 'artifacts': artifacts, 'limits': ['mount mapping checked; subvolume identity and contents still require verification', 'storage, display, input, firmware and recovery unverified', 'not a qualified Omarchy installation']}, indent=2) + '\n')
 print(f'Staged experiment in {a.output}; no boot files changed')
