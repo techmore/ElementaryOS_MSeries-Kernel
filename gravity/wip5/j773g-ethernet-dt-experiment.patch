@@ -8,9 +8,14 @@
 +#include "t8132-j773g-ethernet-draft.dtsi"
 --- /dev/null
 +++ b/arch/arm64/boot/dts/apple/t8132-j773g-ethernet-draft.dtsi
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,74 @@
 +#include <dt-bindings/gpio/gpio.h>
 +/* Experimental J773g Ethernet topology; all new devices stay disabled. */
++/ {
++	aliases {
++		ethernet0 = &j773g_ethernet;
++	};
++};
 +&pinctrl_ap {
 +	j773g_pcie_pins: j773g-pcie-pins {
 +		pinmux = <0x100a0 0x100a1 0x100a2>;
