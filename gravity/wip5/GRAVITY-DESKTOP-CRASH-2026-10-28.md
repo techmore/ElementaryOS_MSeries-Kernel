@@ -94,3 +94,11 @@ changed C files compiled against the exact Gravity 103 source. Secondary
 encoder allocations, pool continuation, other mapping callers and nested
 context-loss handling remain incomplete; no fault injection or hardware run
 has validated it. This is a work-in-progress artifact and must not be deployed.
+
+The follow-up `mesa103-allocation-incomplete-v5.patch` (SHA-256
+`3be3c5821ef11427665edbcd3c1a64b3ab1b14db8ab2288d7e48dd6f9c87ed78`)
+adds checked handling to the six secondary encoder allocations and associated
+draw, compute and temporary-resource failure paths. Its changed AGX objects
+compiled against the exact Gravity 103 source. Pool continuation, other
+mapping callers, full cleanup and reset propagation remain unaudited; no
+fault-injection or GPU execution validated it. It is not deployable.
