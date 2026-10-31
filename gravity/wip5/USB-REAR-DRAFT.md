@@ -1,6 +1,6 @@
 # J773g rear USB forward-port draft
 
-`0007-j773g-rear-usb-draft.patch` is an initial J773g-only port adapted from
+`usb-0001-j773g-rear-draft.patch` is an initial J773g-only port adapted from
 Gravity `0003` (Yureka Lilian, commit 840ac90252e2ef1962c318fbd567efcf29031661)
 and the later select-IRQ correction in its `gravity-m4` pin. It follows WIP5's
 five patches and local 0001–0004. It creates a board-specific include carrying
