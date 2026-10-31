@@ -45,6 +45,17 @@ module dependency resolution passed. It has not been paired with an installed
 boot configuration or tested on hardware; module presence does not establish
 that the USB controller, DART or keyboard works.
 
+The matching graphics keyboard trial was assembled separately at
+`~/.cache/m4-kernel/latest-aurora/j773g-graphics-keyboard-rescue-draft/`.
+It pairs the graphics Image with the experimental rear USB2 DTB, the above
+module-equipped initramfs, and the USB2 trial stage 2. The untouched graphics
+DTB rebuilt from the trial source matched the original byte-for-byte; the trial
+DTB SHA-256 is `97f2733b7006858c4a095ad7fd78f2f6f89253004ec6f298a63fbf31c7030be2`.
+The local manifest's five sizes and SHA-1/SHA-256 hashes were verified, along
+with the initramfs gzip/newc header and stage 2 path and console arguments.
+It is uninstalled and unbooted, with the same recovery and USB ownership
+limitations as the earlier trial.
+
 An optional rear-keyboard experiment is recorded in
 `0017-j773g-usb2-keyboard-trial.patch` and
 `0018-m1n1-usb2-calibration-gate.patch`. The running Gravity system enumerates
