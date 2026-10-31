@@ -79,6 +79,15 @@ and mismatched partition and path cases were rejected. This verifies the mount
 mapping, not that the path is a complete staged subvolume. Storage handoff, init, display,
 input, firmware and recovery remain untested. No real root bundle was made.
 
+After the root and matching modules are staged, the unprivileged
+`prepare-local-omarchy-bundle.sh` command derives the root PARTUUID and
+top-level-relative subvolume path from the mounted filesystem, then invokes the
+direct-root staging tool with the recorded graphics kernel, keyboard-trial DTB
+and m1n1 artifacts. It creates a new bundle under the local cache only. Its
+syntax and missing-root refusal were checked; the actual assembled root path,
+physical input, storage, recovery and boot have not been exercised. The
+optional `--allow-unprovisioned` flag produces a diagnostic-only bundle.
+
 Selective read-only extraction confirms `/sbin/init` resolves through
 `/usr/bin/init` to the ARM64 systemd executable, its ELF interpreter is
 present, and the packaged default target is graphical. The image's passwd
