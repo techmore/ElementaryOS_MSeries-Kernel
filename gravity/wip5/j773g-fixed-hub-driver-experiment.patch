@@ -1,0 +1,162 @@
+diff --git a/drivers/phy/apple/atc.c b/drivers/phy/apple/atc.c
+--- a/drivers/phy/apple/atc.c
++++ b/drivers/phy/apple/atc.c
+@@ -825,6 +825,8 @@
+ 	bool dp_presets_valid[5];
+ 	bool dp_only;
+ 	bool fixed_usb2;
++	/* J773g front hub: fixed SuperSpeed route and optional lane swap. */
++	bool fixed_usb3;
+ 	enum atcphy_mode typec_mode;
+ 	bool host_active;
+ 	bool usb3_port_off;
+@@ -4162,6 +4164,11 @@
+ 	/* A failed lane/domain transition must be restored before routing PIPE. */
+ 	if (atcphy->mode_dirty)
+ 		return -EBUSY;
++	if (atcphy->fixed_usb3 && host && atcphy->mode != APPLE_ATCPHY_MODE_USB3) {
++		ret = atcphy_configure(atcphy, APPLE_ATCPHY_MODE_USB3);
++		if (ret)
++			return ret;
++	}
+ 	/* dwc3 can select its role before the debounced Type-C mux update. */
+ 	if (atcphy->t8103_usb3_workaround &&
+ 	    atcphy->mode == APPLE_ATCPHY_MODE_OFF) {
+@@ -4226,7 +4233,7 @@
+ 			 readl(atcphy->regs.pipehandler + PIPEHANDLER_MUX_CTRL),
+ 			 readl(atcphy->regs.pipehandler + PIPEHANDLER_NONSELECTED_OVERRIDE),
+ 			 readl(atcphy->regs.pipehandler + PIPEHANDLER_T8132_USB2_CONFIG));
+-	if (!ret || !atcphy->fixed_usb2 || mode != PHY_MODE_USB_HOST)
++	if (!ret || atcphy->fixed_usb3 || !atcphy->fixed_usb2 || mode != PHY_MODE_USB_HOST)
+ 		return ret;
+ 
+ 	/*
+@@ -5910,6 +5917,16 @@
+ 	atcphy->mode = APPLE_ATCPHY_MODE_OFF;
+ 	atcphy->pipe_state = ATCPHY_PIPEHANDLER_STATE_DUMMY;
+ 	atcphy->fixed_usb2 = atcphy_usb2_behind_fixed_hub(atcphy);
++	atcphy->fixed_usb3 = device_property_read_bool(dev, "apple,fixed-usb3");
++	if (atcphy->fixed_usb3) {
++		if (!of_machine_is_compatible("apple,j773g") ||
++		    atcphy->hw->gen != ATCPHY_GENERATION_T8132 ||
++		    !atcphy->fixed_usb2 || !atcphy->t8132_ss || !atcphy->ss_tunables)
++			return dev_err_probe(dev, -EINVAL, "invalid fixed USB3 hub setup\n");
++		atcphy->swap_lanes = device_property_read_bool(dev, "apple,fixed-lane-swap");
++	} else if (device_property_present(dev, "apple,fixed-lane-swap")) {
++		return dev_err_probe(dev, -EINVAL, "fixed lane swap requires fixed USB3\n");
++	}
+ 	atcphy->typec_mode = APPLE_ATCPHY_MODE_USB2;
+ 	atcphy_probe_pd_notifier(atcphy);
+ 
+diff --git a/Documentation/devicetree/bindings/phy/apple,atcphy.yaml b/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
+--- a/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
++++ b/Documentation/devicetree/bindings/phy/apple,atcphy.yaml
+@@ -38,6 +38,21 @@
+ 
+ allOf:
+   - $ref: /schemas/usb/usb-switch.yaml#
++  - if:
++      required: [apple,fixed-lane-swap]
++    then:
++      required: [apple,fixed-usb3]
++  - if:
++      required: [apple,fixed-usb3]
++    then:
++      properties:
++        compatible:
++          const: apple,t8132-atcphy
++        orientation-switch: false
++        mode-switch: false
++      required: [power-domains]
++    else:
++      required: [orientation-switch, mode-switch]
+   - if:
+       properties:
+         compatible:
+@@ -189,6 +204,14 @@
+   "#reset-cells":
+     const: 0
+ 
++  apple,fixed-usb3:
++    description: The PHY has a permanently attached host-only SuperSpeed hub.
++    type: boolean
++
++  apple,fixed-lane-swap:
++    description: The permanently connected hub requires the reversed lane route.
++    type: boolean
++
+   mode-switch: true
+   orientation-switch: true
+ 
+@@ -341,8 +364,6 @@
+   - reg-names
+   - "#phy-cells"
+   - "#reset-cells"
+-  - orientation-switch
+-  - mode-switch
+   - ports
+ 
+ additionalProperties: false
+diff --git a/tools/testing/selftests/drivers/apple/j773g-fixed-hub.py b/tools/testing/selftests/drivers/apple/j773g-fixed-hub.py
+new file mode 100755
+--- /dev/null
++++ b/tools/testing/selftests/drivers/apple/j773g-fixed-hub.py
+@@ -0,0 +1,58 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Exercise the production fixed-hub route with host-side PHY stubs."""
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++root = Path(__file__).resolve().parents[5]
++src = (root / 'drivers/phy/apple/atc.c').read_text()
++m = re.search(r'^static int atcphy_usb3_route\(', src, re.M)
++assert m
++start = m.start()
++brace = src.index('{', start)
++depth = 1
++end = brace + 1
++while depth:
++    depth += (src[end] == '{') - (src[end] == '}')
++    end += 1
++fn = src[start:end]
++pre = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <errno.h>
++#include <stdio.h>
++#define lockdep_assert_held(x) ((void)0)
++enum { APPLE_ATCPHY_MODE_OFF, APPLE_ATCPHY_MODE_USB2, APPLE_ATCPHY_MODE_USB3, APPLE_ATCPHY_MODE_USB3_DP };
++struct apple_atcphy { bool fixed_usb3, mode_dirty, t8103_dummy_pending, t8103_usb3_workaround;
++    bool t8103_usb3_retry, dp_only, ss_tunables, pipe_pending; int mode, typec_mode, pipe_state, lock; };
++struct { int pipehandler_state; } atcphy_modes[] = {{0},{0},{1},{1}};
++static int starts, routes, failure;
++static int atcphy_configure(struct apple_atcphy *a, int mode) {
++    starts++; if (failure) return -EIO; a->mode = mode; return 0;
++}
++static int atcphy_park_live_t8103_pipehandler(struct apple_atcphy *a) { (void)a; return 0; }
++static int atcphy_park_pipehandler(struct apple_atcphy *a, bool stopped) { (void)stopped; a->pipe_pending = false; return 0; }
++static int atcphy_configure_pipehandler(struct apple_atcphy *a, bool host) { (void)host; routes++; a->pipe_state = 1; return 0; }
++'''
++test = r'''
++int main(void) {
++    struct apple_atcphy a = {.fixed_usb3 = true, .mode = APPLE_ATCPHY_MODE_USB2, .ss_tunables = true};
++    assert(!atcphy_usb3_route(&a, true)); assert(starts == 1 && routes == 1 && a.mode == APPLE_ATCPHY_MODE_USB3);
++    assert(!atcphy_usb3_route(&a, true)); assert(starts == 1 && routes == 1);
++    a.mode = APPLE_ATCPHY_MODE_USB2; a.pipe_state = 0; failure = 1; routes = 0;
++    assert(atcphy_usb3_route(&a, true) == -EIO && routes == 0);
++    failure = 0; a.mode_dirty = true; starts = 0;
++    assert(atcphy_usb3_route(&a, true) == -EBUSY && starts == 0);
++    a.mode_dirty = false; a.fixed_usb3 = false; a.mode = APPLE_ATCPHY_MODE_USB2; a.pipe_state = 0;
++    assert(!atcphy_usb3_route(&a, true) && starts == 0);
++    puts("fixed hub: admission, idempotence, failures and non-hub isolation passed");
++}
++'''
++with tempfile.TemporaryDirectory() as d:
++    c = Path(d) / 'test.c'
++    c.write_text(pre + fn + '\n' + test)
++    exe = Path(d) / 'test'
++    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', str(c), '-o', str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
