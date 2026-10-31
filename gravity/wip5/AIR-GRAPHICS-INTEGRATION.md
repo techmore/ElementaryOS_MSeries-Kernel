@@ -157,3 +157,17 @@ Both are staged locally and include the separate mini USB2 calibration gate
 source path but does not prove live ANS initialization, U-Boot adoption, disk
 integrity or boot safety.
 The older packed candidate retains the blocker and should not be used.
+
+On 2026-10-30 the combined latest-Aurora `Image modules dtbs` build completed
+with exit 0. Its `7.2.11-elementary-m4-graphics-draft` Image and 1,690 modules
+were staged under `~/.cache/m4-kernel/latest-aurora/graphics-module-stage/`;
+`manifest.json` records the paired config, mini DTB and SHA-1/SHA-256. The
+Image SHA-1 is `855f568bf84c1d2938af433940e0961eea801886` and the Asahi
+module SHA-1 is `f5487bb6758575f8185df6eabbb0749e5041c3b5`. Its module
+vermagic matches the release. `NVME_APPLE`, `APPLE_SART` and `BTRFS_FS` are
+built in, and the module includes the experimental G16 backend.
+
+This is a build and offline staging result, not a tested GPU or desktop. The
+mini GPU DT node remains disabled; its PMP/TVM and exact firmware admission,
+USB input, storage handoff and hardware boot are unqualified. It does not
+replace the already staged framebuffer rescue kernel or the installed system.
