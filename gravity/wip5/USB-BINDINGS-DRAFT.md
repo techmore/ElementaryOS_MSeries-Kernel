@@ -8,7 +8,7 @@ This is a draft description of device-tree compatibility, not confirmation
 that the newer drivers' behavior or hardware initialization is correct.
 The controllers in usb-0001 remain disabled.
 
-The patch applies to the current WIP5 + 0001–0004 + 0007 source tree. It is
+The patch applies to the current WIP5 + 0001–0004 + usb-0001 source tree. It is
 not included in the active kernel compilation, which started before this draft.
 Standalone schema checks from a partial binding directory could not resolve
 three referenced schemas and are not a validation pass. Full-tree schema and
