@@ -30,3 +30,15 @@ host binaries and libraries, so it is a diagnostic artifact specific to the
 build environment and is not a reproducible Omarchy userspace. The staged
 archive passed gzip, newc, shell syntax and packaged-library checks; physical
 console and input remain untested.
+
+An optional rear-keyboard experiment is recorded in
+`0017-j773g-usb2-keyboard-trial.patch` and
+`0018-m1n1-usb2-calibration-gate.patch`. The running Gravity system enumerates
+the keyboard on rear controller 1 at USB2 speed. The trial enables only that
+port and compiles a DTB; it leaves the mouse's controller disabled. The m1n1
+change avoids applying old-format USB3 calibration to the mini's two-bank
+USB2 profile and passed its host gate checks. Both are opt-in drafts, not
+included in the rescue bundle. The mini DARTs expose 0x4000-byte windows but
+their actual version is unknown; the newer driver must reject any v2 register
+access beyond that range. Mini power ownership and physical input remain
+unverified.
