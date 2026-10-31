@@ -84,7 +84,12 @@ The currently booted Gravity tree exposes `gravity,efi-system-partition`, not
 source tree. The running Linux tree is not the original m1n1 source tree, so
 this is a compatibility question, not proof that the draft handoff fails. The
 actual proposed loader configuration and source FDT must be checked together
-before attempting a boot.
+before attempting a boot. The pinned m1n1 `payload_run()` supplies the Asahi
+property when a valid in-image stage1 configuration selects a target; its
+factory-empty configuration has no target. The compiled stage binaries alone
+are therefore not a configured chainload bundle. Preserve an explicitly
+selected ESP identity when assembling one, rather than relying on U-Boot's
+fallback to the first EFI partition on a multi-boot machine.
 
 The kernel drafts apply to the current WIP5 source with the preceding SMC
 patch; the board DTB compiles in the matching-input checkout. Both loader
