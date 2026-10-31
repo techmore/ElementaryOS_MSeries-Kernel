@@ -195,3 +195,18 @@ The live GPU node lacks the draft's version and segment metadata. Thus these
 representations must not be treated as interchangeable; the actual ADT segment
 properties, reservation lifetime and firmware compatibility still require
 validation. This comparison did not access hardware registers.
+
+The staged graphics kernel's `asahi.ko` does not advertise an OF module alias
+for `apple,agx-t8132`; source comments intentionally defer G16 registration
+until userspace explicitly loads the module after native display is up. Thus
+merely copying this module into the Omarchy root cannot automatically create a
+mini GPU device. A future qualified boot integration needs an explicit,
+display-ordered load policy. Adding unconditional early loading now would be
+unsafe: the candidate GPU node, firmware identity, DCP, and mini power
+admission are still unqualified and disabled.
+
+The four live `apple,sgx-*` base/size pairs corresponding to GPU TTBS, shared
+page tables, handoff and shared L2 matched the respective live FDT reservations
+when decoded as little-endian 64-bit values. This supports those four observed
+mappings but does not supply or validate the draft's separate firmware text and
+data segments or reservation lifetime.
