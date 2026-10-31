@@ -208,3 +208,13 @@ submissions: the reviewed queue-finish path has no explicit GPU-idle wait.
 Retained BOs can also increase memory consumption. Concurrency, failure
 injection, query/fence behavior and GPU runtime remain unvalidated; do not
 deploy this draft.
+
+`mesa103-allocation-incomplete-v18.patch` (SHA-256
+`5b2b3c026571cb3b7133d798426da4857d1b304b5e54e7591b8d3f51d8b5c943`)
+also changes Vulkan queue teardown order and handles several failed command BO
+and rodata mappings. The affected queue, device, command and shared Vulkan
+runtime objects compile against Gravity 103. The shared runtime change affects
+more than this GPU and is untested. Host-thread draining does not prove GPU
+idle, device-loss waits may still hang, and scratch BO teardown safety remains
+unproven. Mapping, query/fence and injected-failure coverage is incomplete;
+no GPU runtime validation occurred. This draft must not be deployed.
