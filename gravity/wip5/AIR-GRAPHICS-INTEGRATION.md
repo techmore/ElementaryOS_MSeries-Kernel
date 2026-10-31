@@ -133,3 +133,12 @@ the optional DTB compiled; the normal candidate does not include this option.
 identity guards while printing only size and hashes. No real mini PMP table was
 available from the running system. A match would not establish mini TVM/power
 sequencing or firmware compatibility and does not authorize enabling the GPU.
+
+**Inline U-Boot handoff blocker:** source review after staging found that
+`payload_run()` initializes an inline T8132 payload's NVMe session only for
+J713, and sets `nvme_keep_running_for_linux` only for `boot=` payloads. The
+packed `stage2-esp-candidate.bin` is an inline J773g U-Boot payload, so its
+storage session initialization and retention are not established. Do not use
+that packed bundle for a boot attempt. The separately staged direct rescue
+uses `boot=`, whose `boot_storage_load()` initializes NVMe and whose successful
+handoff sets the retention flag; that source path is also untested on hardware.
