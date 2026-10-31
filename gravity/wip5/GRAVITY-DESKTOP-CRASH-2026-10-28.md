@@ -118,3 +118,11 @@ copy and query paths. Its changed state, query and blit objects compiled against
 the exact Gravity 103 source. Generic pool and mapping callers, generated-call
 behavior, Apple9 preparation and cleanup remain unaudited; neither fault
 injection nor GPU runtime validation has been performed. It is not deployable.
+
+The isolated `mesa103-allocation-incomplete-v8.patch` (SHA-256
+`0480c373084f2e498fa1105bdd1450d1bfe0f1c49adafa2768d231d12fbbba5c`)
+adds checked allocation and context-loss propagation for Apple9 compute launch
+preparation. The changed objects compile against Gravity 103. Apple9 draw
+preparation, generic pools, mapping callers and cleanup remain incomplete;
+invalid ABI state also takes the unknown-reset path. No injected-failure or
+GPU runtime validation was performed, and the patch is not deployable.
