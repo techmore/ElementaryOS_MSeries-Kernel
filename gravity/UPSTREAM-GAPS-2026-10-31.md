@@ -32,7 +32,13 @@ the dockchannel HID (MacBook Air M4 keyboard).
 | 6 | T8132 HDMI audio over DCP | `49045c3465` | `drivers/gpu/drm/apple/{audio,av}.c` |
 | 7 | SMC `gp00` GPIO keys (power button) | `3988dac166`, `f33138368c`, `ab76ccfdd0` | `mfd/macsmc`, `gpio-macsmc`, binding |
 
-Order: 1 first (smallest, DT only), then 7, then audio 2→5, then 6.
+| 8 | **M4 GPU: the Gravity fixes that made it run well** — on a lost or late firmware notification, poll the completion stamps and rescue finished work instead of failing the pipeline; cap the wait at 250 ms while work is in flight (patch 0066, `071d8cfd40`; Gravity `replacement/210-gpu` `g16_drm_pump.rs`) | `071d8cfd40` | Aurora `drivers/gpu/drm/asahi/g16/` submission/retire path |
+
+Order: 1 first (smallest, DT only), then 8 (the GPU, which Omarchy and elementary need), then 7, then audio 2→5, then 6.
+
+Gap 8 is re-implemented in Aurora's driver, not copied: the two drivers share the idea, not the code. If
+Aurora's loop turns out not to have the bug, gap 8 becomes "find why the mini GPU is disabled in this
+draft's candidate" instead.
 
 ## GPU: not a straight port
 
