@@ -22,7 +22,18 @@ diff --git a/drivers/phy/apple/atc.c b/drivers/phy/apple/atc.c
  	/* dwc3 can select its role before the debounced Type-C mux update. */
  	if (atcphy->t8103_usb3_workaround &&
  	    atcphy->mode == APPLE_ATCPHY_MODE_OFF) {
-@@ -4226,7 +4233,7 @@
+@@ -4198,6 +4205,10 @@
+ 	if (atcphy->usb_off_pending)
+ 		return -EBUSY;
+ 
++	/* A fixed hub has no peripheral-mode peer. */
++	if (atcphy->fixed_usb3 && mode == PHY_MODE_USB_DEVICE)
++		return -EOPNOTSUPP;
++
+ 	if (atcphy->t8132_ss &&
+ 	    (atcphy->mode == APPLE_ATCPHY_MODE_USB3 || atcphy->mode == APPLE_ATCPHY_MODE_USB3_DP) &&
+ 	    mode == PHY_MODE_USB_DEVICE)
+@@ -4226,7 +4237,7 @@
  			 readl(atcphy->regs.pipehandler + PIPEHANDLER_MUX_CTRL),
  			 readl(atcphy->regs.pipehandler + PIPEHANDLER_NONSELECTED_OVERRIDE),
  			 readl(atcphy->regs.pipehandler + PIPEHANDLER_T8132_USB2_CONFIG));
@@ -31,7 +42,7 @@ diff --git a/drivers/phy/apple/atc.c b/drivers/phy/apple/atc.c
  		return ret;
  
  	/*
-@@ -5910,6 +5917,16 @@
+@@ -5910,6 +5921,16 @@
  	atcphy->mode = APPLE_ATCPHY_MODE_OFF;
  	atcphy->pipe_state = ATCPHY_PIPEHANDLER_STATE_DUMMY;
  	atcphy->fixed_usb2 = atcphy_usb2_behind_fixed_hub(atcphy);
