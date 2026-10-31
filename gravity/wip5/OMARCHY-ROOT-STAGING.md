@@ -115,3 +115,12 @@ option. Host tests verify both rejections occur before output creation. This
 is not a contents, provisioning or hardware boot validation.
 
 For the direct-root path, the matching graphics config also builds devtmpfs and its automatic mount support, Unix sockets, tmpfs, cgroups, futexes and file handles in. A selective read-only restore of the image's systemd executable, interpreter and its transitive ELF `NEEDED` libraries was checked with the image's AArch64 dynamic loader in `--list` mode and an explicit library path; all listed non-vDSO dependencies resolved to extracted image files. The restored copies are unprivileged inspection artifacts, not metadata-correct root files, and the loader's list mode does not run systemd or test optional runtime loads, mount behavior or boot.
+
+The direct-root staging tool now accepts only the two recorded DTB hashes for
+the exact graphics kernel: its baseline DTB and the separate rear-keyboard trial
+DTB. Both observed DTBs contain the `ans` alias used by direct m1n1 ANS
+admission; the `u-boot,j773g-dtb-source` marker is for the separate U-Boot
+importer and is not the direct m1n1 admission condition. Hash matching prevents
+accidentally pairing an unrelated DTB, but neither candidate nor its loader,
+storage or keyboard handoff is boot-qualified. New DTBs require explicit
+review and an updated allowlist.

@@ -46,6 +46,14 @@ device = mount['source'].split('[', 1)[0]
 actual_partuuid = subprocess.check_output(['lsblk', '-dn', '-o', 'PARTUUID', device], text=True).strip()
 if not actual_partuuid or str(uuid.UUID(actual_partuuid)) != root:
     p.error('root PARTUUID does not match the staged root device')
+# Accept the DTBs recorded alongside this exact graphics kernel build.
+# The keyboard variant is an unqualified optional hardware trial.
+known_dtbs = {
+    'abff43e472901a55798b0c3ad833574d13c6fc52ea07a7cf7499180ba440cbc9',
+    '97f2733b7006858c4a095ad7fd78f2f6f89253004ec6f298a63fbf31c7030be2',
+}
+if hashlib.sha256(a.dtb.read_bytes()).hexdigest() not in known_dtbs:
+    p.error('DTB does not match a recorded graphics-kernel candidate')
 expected = 'd7503a309985d172374c3ef1045fdab7fb1e4b370118d0f48fbe021221107de7'
 if hashlib.sha256(a.image.read_bytes()).hexdigest() != expected:
     p.error('Image does not match the graphics module release')
