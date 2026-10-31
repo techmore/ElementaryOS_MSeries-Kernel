@@ -258,3 +258,15 @@ the pair together; missing or invalid diagnostic data is omitted without
 rejecting the handoff. The modified object compiled and synthetic libfdt tests
 passed. It remains unbooted, leaves the GPU disabled, and cannot make the
 actual mini DATA or TEXT firmware layout known without a hardware capture.
+
+An integrated diagnostic loader build is staged under
+`~/.cache/m4-kernel/latest-aurora/gpu-diagnostic-loader-draft/`. Its reconstructed
+ESP-stage2 m1n1 has SHA-1 `27a20b132f0a07a36c18a2672073e573f091e98c`
+and SHA-256 `941ac3d132ac6d3183a9009bff40f87e3623bde6e9cfa3be1bd081532d5403f8`.
+The combined U-Boot binary has SHA-1 `b228d21f84d997155effc0f8981233482b4a256d`
+and SHA-256 `c1c72d0dc590aca75971b695d4872c1259e591306753dd50c37909df1ef4e1c3`.
+Both full builds completed and targeted synthetic handoff fixtures passed.
+The m1n1 source was reconstructed from the documented pin and patches; it is
+not established to be identical to the earlier linked stage 2. These are
+separate raw binaries, not a packed or installed boot bundle. The diagnostic
+requires explicit opt-in, and no hardware or GPU operation has been tested.
