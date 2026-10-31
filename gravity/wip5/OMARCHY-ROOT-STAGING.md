@@ -150,7 +150,8 @@ or validate credentials or establish a working login.
 staged `omarchy-root-subvolume`. It prompts for a new local username and invokes
 `passwd` interactively inside the staged root; no password is placed in command
 arguments or a log. It validates the existing sudoers configuration and adds a
-password-required wheel rule after password setup. It refuses an existing user,
+general password-required wheel rule after password setup; existing command-specific
+passwordless rules remain in effect. It refuses an existing user,
 home or policy, and checks that `/dev/tty` can be opened inside the chroot
 before creating an account. If needed it creates a temporary character device
 with major 5, minor 0 and removes only that same node on exit. A failure after

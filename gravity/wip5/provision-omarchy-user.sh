@@ -36,7 +36,7 @@ if chroot "$target" /usr/bin/getent passwd "$username" >/dev/null; then
 fi
 chroot "$target" /usr/bin/getent group wheel >/dev/null || { echo 'Staged wheel group is missing.' >&2; exit 1; }
 [[ ! -e $target/home/$username && ! -L $target/home/$username ]] || { echo 'Home path already exists; refusing to adopt it.' >&2; exit 1; }
-printf '%s\n' 'Creating the user in wheel with password-required sudo in the staged root.'
+printf '%s\n' 'Creating the user in wheel and adding a general password-required sudo rule; existing command-specific rules remain.'
 chroot "$target" /usr/bin/visudo -cf /etc/sudoers >/dev/null
 # Validate a password-required sudo policy in the target before installing it.
 policy=$(mktemp "$target/etc/sudoers.d/.90-omarchy-wheel.XXXXXXXX")
@@ -75,4 +75,4 @@ if ! chroot "$target" /usr/bin/passwd "$username"; then
   exit 1
 fi
 mv -- "$policy" "$target/etc/sudoers.d/90-omarchy-wheel"
-echo 'Staged account and password-required wheel sudo policy created. Verify access on a safe first boot.'
+echo 'Staged account and general password-required wheel sudo rule created. Existing rules remain; verify effective access on a safe first boot.'
