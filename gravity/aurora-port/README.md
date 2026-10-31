@@ -1,9 +1,10 @@
 # Port to Aurora: M4 mini (J773g) GPU, step 1
 
 Kernel commits for `techmore/linux-m1pro-touchid` branch `elementaryos-mseries`, on top of
-`aurora-silicon/linux` `aurora-wip` @ `23e431a98962`. The branch exists locally; pushing it needs a GitHub token
-with the `workflow` scope (`gh auth refresh -h github.com -s workflow`), because Aurora's tree carries CI
-workflow files. These patch files keep the work safe until then: `git am 000*.patch` on `aurora-wip`.
+`aurora-silicon/linux` `aurora-wip` @ `23e431a98962`. Pushed 2026-10-31: kernel `techmore/linux-m1pro-touchid` `elementaryos-mseries` @ `cfd21dd36b57`
+(CI: workflow "elementaryos-mseries kernel", first run 41204370112), and m1n1 `techmore/m1n1`
+`elementaryos-mseries` @ `c7fdbe7bb777` (fork of `aurora-silicon/m1n1` `aurora-wip` @ `b6b4592`). The patch
+files below are the same commits.
 
 | File | What |
 |---|---|
