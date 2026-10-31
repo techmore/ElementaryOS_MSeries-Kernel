@@ -40,3 +40,10 @@ handling. Verify owners, setuid bits, hardlinks, ACLs, capabilities and special
 files after copying. This does not provision a user, firmware or boot entry.
 The detailed attended plan is in the local staging cache; no mount or target
 subvolume has been created.
+
+A second, dependent draft `btrfs-restore-metadata-draft.patch` (SHA-1
+`87fbba2a6875cf772ec1d304c1af0f8f91800aed`) reapplies file mode after writing
+and reports extended-attribute failures. Isolated checks preserved an actual
+setuid file and capability and rejected an injected xattr failure. This does
+not resolve special-node or hardlink preservation, so the privileged copy route
+remains the practical full-root path; both drafts need broader upstream review.

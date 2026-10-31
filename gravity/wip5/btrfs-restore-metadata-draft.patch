@@ -1,0 +1,76 @@
+--- a/cmds/restore.c
++++ b/cmds/restore.c
+@@ -581,9 +581,13 @@
+-					   len);
++					   len);
+-			data_len = len;
++			data_len = len;
+-
++
+-			if (fsetxattr(fd, name, data, data_len, 0))
++			if (fsetxattr(fd, name, data, data_len, 0)) {
++				int saved_errno = errno;
+-				error("setting extended attribute %s on file %s: %m",
++				error("setting extended attribute %s on file %s: %m",
+-					name, file_name);
++					name, file_name);
++				ret = -saved_errno;
++				goto out;
++			}
+-
++
+-			len = sizeof(*di) + name_len + data_len;
++			len = sizeof(*di) + name_len + data_len;
+-			cur += len;
++			cur += len;
+@@ -662,6 +666,7 @@
+-	u64 found_size = 0;
++	u64 found_size = 0;
+-	struct timespec times[2];
++	struct timespec times[2];
+-	bool times_ok = false;
++	bool times_ok = false;
++	mode_t source_mode = 0;
+-
++
+-	ret = btrfs_lookup_inode(NULL, root, &path, key, 0);
++	ret = btrfs_lookup_inode(NULL, root, &path, key, 0);
+-	if (ret == 0) {
++	if (ret == 0) {
+@@ -680,9 +685,7 @@
+-			if (ret && !ignore_errors)
++			if (ret && !ignore_errors)
+-				goto out;
++				goto out;
+-
++
+-			ret = fchmod(fd, btrfs_inode_mode(path.nodes[0], inode_item));
+-			if (ret && !ignore_errors)
+-				goto out;
++			source_mode = btrfs_inode_mode(path.nodes[0], inode_item);
+-
++
+-			bts = btrfs_inode_atime(inode_item);
++			bts = btrfs_inode_atime(inode_item);
+-			times[0].tv_sec = btrfs_timespec_sec(path.nodes[0], bts);
++			times[0].tv_sec = btrfs_timespec_sec(path.nodes[0], bts);
+@@ -776,6 +779,13 @@
+-		if (ret)
++		if (ret)
+-			return ret;
++			return ret;
+-	}
++	}
++	/* Writes and truncate can clear setuid/setgid. Apply the saved mode
++	 * after all content writes and before restoring security xattrs. */
++	if (restore_metadata && times_ok) {
++		ret = fchmod(fd, source_mode);
++		if (ret && !ignore_errors)
++			return ret;
++	}
+-	if (get_xattrs) {
++	if (get_xattrs) {
+-		ret = set_file_xattrs(root, key->objectid, fd, file);
++		ret = set_file_xattrs(root, key->objectid, fd, file);
+-		if (ret)
++		if (ret)
