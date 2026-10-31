@@ -177,3 +177,12 @@ geometry and tessellation. The changed state object compiles against Gravity
 103. Shared pools, shader caches, other mapping paths, arithmetic overflow,
 Vulkan scratch propagation and query/fence cleanup remain incomplete. It has
 not been fault-injected or GPU-tested and must not be deployed.
+
+`mesa103-allocation-incomplete-v15.patch` (SHA-256
+`4e843d654e10c812d006388b5da21238769a649dcd3133037a191e294e4ba313`)
+extends the draft to shader-cache allocation and mapping, helper-program
+failure, pool preallocation tracking and checked-path arithmetic. The affected
+cache, pool, pipe and state objects compile against Gravity 103. Vulkan still
+uses aborting wrappers; generic pools, other allocation/mapping callers and
+query/fence cleanup remain incomplete. There is no fault-injection or GPU
+runtime validation, so this draft must not be deployed.
