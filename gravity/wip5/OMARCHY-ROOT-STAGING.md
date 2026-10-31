@@ -107,3 +107,5 @@ the Btrfs subvolume-root inode. It rejects commas in paths used to construct
 boot arguments, preventing a subvolume name from adding a separate mount
 option. Host tests verify both rejections occur before output creation. This
 is not a contents, provisioning or hardware boot validation.
+
+For the direct-root path, the matching graphics config also builds devtmpfs and its automatic mount support, Unix sockets, tmpfs, cgroups, futexes and file handles in. A selective read-only restore of the image's systemd executable, interpreter and its transitive ELF `NEEDED` libraries was checked with the image's AArch64 dynamic loader in `--list` mode and an explicit library path; all listed non-vDSO dependencies resolved to extracted image files. The restored copies are unprivileged inspection artifacts, not metadata-correct root files, and the loader's list mode does not run systemd or test optional runtime loads, mount behavior or boot.
