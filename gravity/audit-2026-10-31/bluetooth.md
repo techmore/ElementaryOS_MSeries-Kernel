@@ -55,11 +55,25 @@ What the commit does:
 ## Still open
 
 - **Not run on hardware.** The file name depends on m1n1 filling `local-bd-address` from a non-zero `/chosen` `mac-address-bluetooth0`. The ADT dump here has it zeroed, as it does the serials, and Gravity validated the live value on J773g. The installer must have written the file for the same address.
-- **Wi-Fi calibration:** `brcmfmac` reads only DT `brcm,cal-blob` (`of.c`), so `brcmfmac4388-<addr>-cal.bin` is still unused. The same kind of fallback, in `brcmf_of_probe` or the PCIe firmware request, would cover it. Without it, Wi-Fi runs with default calibration.
-- To use the fix, `mini/bt` must be merged into `elementaryos-mseries` (or picked into the package build).
+- **Wi-Fi calibration:** handled by the Wi-Fi twin on `mini/wifi` (see below).
+- `mini/bt` is merged into `elementaryos-mseries` (fb0b8e6).
 
 ## CI
 
 Run 41213517087 on `mini/bt` (self-hosted runner `m4mini-kbuild-2`) passed these steps: Configure (Aurora config + asahi.config, `CONFIG_BT_HCIBCM4377=m`), **Build Image, modules and DTBs**, Check the J773g device tree, Stage artifacts. So the changed driver compiles as a module. When this note was written (16:11 UTC), the artifact upload was still running.
 
 m1n1: nothing was pushed. The coordinator's CI commit `4eba195` on `elementaryos-mseries` does not affect this work.
+
+## Wi-Fi twin (`mini/wifi`)
+
+Commit `48be8a810854` on techmore/linux-m1pro-touchid `mini/wifi`, cut from `elementaryos-mseries` `4e2d375ab53d` (worktree `/private/tmp/claude-501/wt/wifi`). It touches only `brcmfmac` `common.c`, `common.h` and `of.c` (+60 lines), and checkpatch reports 0 problems.
+
+- **File name and address:** `brcm/brcmfmac4388-<address>-cal.bin`. `<address>` is the DT `local-mac-address` on the `wifi0` node, written as 12 lowercase hex digits **in its own byte order**. m1n1 copies `/chosen` `mac-address-wifi0` there without swapping it. The installer keys on the same raw `/chosen` value. This is the same as GravityLinux/u-boot `a2f6913694` (`reverse=false` for Wi-Fi). Bluetooth is keyed differently: its address is the **reverse** of the little-endian `local-bd-address`, and its key is `mac-address-bluetooth0`.
+- **What the code does:**
+  - `brcmf_of_probe`: when an Apple node (one with `brcm,board-type`) has no `brcm,cal-blob`, it saves `local-mac-address` in `settings->cal_mac`.
+  - `brcmf_c_load_cal_file`: runs from `brcmf_c_process_cal_blob` during preinit, the point where the DT blob would be downloaded. It acts only when `bus->chip == 0x4388`, the address passes `is_valid_ether_addr` (nonzero and unicast, as Gravity requires), and there is no DT blob. It loads the file with `firmware_request_nowarn`, size-checks it (4 B–32 KiB) and checks the `BLOB` magic. Then it sets `cal_blob`/`cal_size`, which the existing `calload` path uses.
+  - A missing or invalid file only logs, and Wi-Fi runs as before.
+  - The firmware stays in the settings, which survive `brcmf_pcie_reset`, and is released in `brcmf_release_module_param`.
+- **Without hardware, these can't be checked:** whether the live `local-mac-address` is non-zero and matches the installer's file, and whether the firmware accepts `calload` with this blob. Gravity reports that it does (`brcmfmac loads its platform calibration`).
+- **CI:** run 41218774797 on `mini/wifi` was **cancelled** at 17:08 UTC, about 52 minutes into a cold build of a new `~/kbuild/mini-wifi` tree. I did not cancel it. Before the cancel, `brcmfmac/common.o` compiled with no warnings. Then, in the `kbuild` VM, I built `brcmfmac/of.o` in the same tree (`make ARCH=arm64 LLVM=1 CC="ccache clang" O=~/kbuild/mini-wifi …/of.o …/common.o`), and it also compiled with no warnings. That make re-synced `kernel.release` and regenerated the Rust bindings with the VM's own bindgen, so the next CI run on `mini/wifi` redoes a little of that work.
+- Correction for `mini/bt`: run 41213517087 is recorded as **cancelled**. The build, DT check and staging all passed, and the cancel came during artifact upload.
