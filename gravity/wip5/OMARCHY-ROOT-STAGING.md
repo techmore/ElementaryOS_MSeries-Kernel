@@ -55,6 +55,13 @@ recorded SHA-256 and kernel release, and refuses an existing destination.
 Its root operation has not been run or tested; the Asahi hash is only an
 identity check, not proof that the GPU works or that every module is intact.
 The kernel image, firmware and boot configuration still need integration.
+The optional graphics-matched Atlantic module stage is at
+`~/.cache/m4-kernel/latest-aurora/graphics-ethernet-stage/root`; it uses a
+`usr/lib/modules` layout. The module-staging script accepts that layout as
+well as `lib/modules`, and checks the extra Atlantic module's recorded hash and
+release when present. Its PCI ID matches the live mini's Ethernet controller,
+but the experimental PCIe/DART and loader handoffs are not qualified or
+enabled, so packaging it does not establish network operation.
 Read-only selective extraction from the image confirms that `/lib` points to
 `usr/lib` and `/usr/lib/modules` exists, as required by this script. The root
 copy script records its rsync dry-run output and exits with an error when that
