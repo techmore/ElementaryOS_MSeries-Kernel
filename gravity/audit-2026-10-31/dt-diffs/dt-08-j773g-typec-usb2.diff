@@ -1,0 +1,297 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -22,6 +22,10 @@
+ 	aliases {
+ 		ans = &nvme;
+ 		ans-mbox = &ans_mbox;
++		atcphy0 = &atcphy0;
++		atcphy1 = &atcphy1;
++		atcphy2 = &atcphy2;
++		atcphy3 = &atcphy3;
+ 		bluetooth0 = &bluetooth0;
+ 		ethernet0 = &ethernet0;
+ 		pmp = &pmp;
+@@ -123,6 +127,282 @@
+ 		reg = <0x20000 0x0 0x0 0x0 0x0>;
+ 		/* To be filled by the loader */
+ 		local-mac-address = [00 10 18 00 00 00];
++	};
++};
++
++/*
++ * Rear USB-C ports (J773g ADT nub-spmi-a0 hpm0/1/3, port-location):
++ * hpm0 -> ATC0 back-middle, hpm1 -> ATC1 back-left, hpm3 -> ATC3 back-right.
++ * Data starts USB2-only, as the J713 ports did.
++ */
++&nub_spmi_a0 {
++	status = "okay";
++
++	hpm0: usb-pd@c {
++		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
++		reg = <0xc SPMI_USID>;
++		/* ADT hpm0: irq, sleep, wake; select is polled on T8132. */
++		interrupts = <11 IRQ_TYPE_EDGE_RISING>,
++			     <17 IRQ_TYPE_EDGE_RISING>,
++			     <19 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "sleep", "wake";
++
++		typec0: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Back-middle";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					typec0_connector_hs: endpoint {
++						remote-endpoint = <&dwc3_0_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					typec0_connector_ss: endpoint {
++						remote-endpoint = <&atcphy0_typec_lanes>;
++					};
++				};
++			};
++		};
++	};
++
++	hpm1: usb-pd@a {
++		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
++		reg = <0xa SPMI_USID>;
++		/* ADT hpm1: irq, sleep, wake; select is polled on T8132. */
++		interrupts = <37 IRQ_TYPE_EDGE_RISING>,
++			     <43 IRQ_TYPE_EDGE_RISING>,
++			     <45 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "sleep", "wake";
++
++		typec1: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Back-left";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					typec1_connector_hs: endpoint {
++						remote-endpoint = <&dwc3_1_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					typec1_connector_ss: endpoint {
++						remote-endpoint = <&atcphy1_typec_lanes>;
++					};
++				};
++			};
++		};
++	};
++
++	hpm3: usb-pd@8 {
++		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
++		reg = <0x8 SPMI_USID>;
++		/* ADT hpm3: irq, sleep, wake; select is polled on T8132. */
++		interrupts = <63 IRQ_TYPE_EDGE_RISING>,
++			     <69 IRQ_TYPE_EDGE_RISING>,
++			     <71 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "irq", "sleep", "wake";
++
++		typec3: connector {
++			compatible = "usb-c-connector";
++			label = "USB-C Back-right";
++			power-role = "dual";
++			data-role = "dual";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++					typec3_connector_hs: endpoint {
++						remote-endpoint = <&dwc3_3_hs>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++					typec3_connector_ss: endpoint {
++						remote-endpoint = <&atcphy3_typec_lanes>;
++					};
++				};
++			};
++		};
++	};
++};
++
++&atcphy0 {
++	status = "okay";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			atcphy0_typec_lanes: endpoint {
++				remote-endpoint = <&typec0_connector_ss>;
++			};
++		};
++	};
++};
++
++&dwc3_0_dart_0 {
++	status = "okay";
++};
++
++&dwc3_0_dart_1 {
++	status = "okay";
++};
++
++&dwc3_0 {
++	status = "okay";
++	dr_mode = "host";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			dwc3_0_hs: endpoint {
++				remote-endpoint = <&typec0_connector_hs>;
++			};
++		};
++	};
++};
++
++&atcphy1 {
++	status = "okay";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			atcphy1_typec_lanes: endpoint {
++				remote-endpoint = <&typec1_connector_ss>;
++			};
++		};
++	};
++};
++
++&dwc3_1_dart_0 {
++	status = "okay";
++};
++
++&dwc3_1_dart_1 {
++	status = "okay";
++};
++
++&dwc3_1 {
++	status = "okay";
++	dr_mode = "host";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			dwc3_1_hs: endpoint {
++				remote-endpoint = <&typec1_connector_hs>;
++			};
++		};
++	};
++};
++
++&atcphy3 {
++	status = "okay";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			atcphy3_typec_lanes: endpoint {
++				remote-endpoint = <&typec3_connector_ss>;
++			};
++		};
++	};
++};
++
++&dwc3_3_dart_0 {
++	status = "okay";
++};
++
++&dwc3_3_dart_1 {
++	status = "okay";
++};
++
++&dwc3_3 {
++	status = "okay";
++	dr_mode = "host";
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@0 {
++			reg = <0>;
++			dwc3_3_hs: endpoint {
++				remote-endpoint = <&typec3_connector_hs>;
++			};
++		};
++	};
++};
++
++/*
++ * The two front ports sit behind a permanently attached GL3590 hub on ATC2
++ * (ADT usb3hub-fw: reset GPIO 0xc6, flash OE GPIO 0x65). No Type-C
++ * controller: host only, USB2 until atc.c learns apple,fixed-usb3.
++ */
++&atcphy2 {
++	status = "okay";
++	/delete-property/ orientation-switch;
++	/delete-property/ mode-switch;
++};
++
++&dwc3_2_dart_0 {
++	status = "okay";
++};
++
++&dwc3_2_dart_1 {
++	status = "okay";
++};
++
++&dwc3_2 {
++	status = "okay";
++	dr_mode = "host";
++	/delete-property/ usb-role-switch;
++	/delete-property/ role-switch-default-mode;
++};
++
++&pinctrl_ap {
++	usb3hub-flash-oe-hog {
++		gpio-hog;
++		gpios = <101 GPIO_ACTIVE_HIGH>;
++		output-high;
++		line-name = "usb3hub-flash-oe";
++	};
++
++	usb3hub-reset-hog {
++		gpio-hog;
++		gpios = <198 GPIO_ACTIVE_HIGH>;
++		output-high;
++		line-name = "usb3hub-reset";
+ 	};
+ };
+ 
