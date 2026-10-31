@@ -98,3 +98,15 @@ under `~/.cache/m4-kernel/wip5-source/m1n1/j773g-loader-draft/`, and
 These are separate, unconfigured binaries, not an installed chain or a tested
 GPU handoff. Stage1 uses `NO_DISPLAY=1 CHAINLOADING=1`; stage2 uses
 `NO_DISPLAY=1`. USB calibration changes remain a separate draft.
+
+On the `2dd4aab` mini/Air platform source (including its five WIP display
+patches), the following draft sequence replays with `git apply --unidiff-zero`:
+`graphics-0003`, `graphics-0001`, `graphics-0002`, `graphics-0004`,
+`0011`, then `0013-j773g-latest-import-marker.patch`. A fresh replay matched
+all 89 modified or added files byte-for-byte with the focused graphics source.
+The last patch records the newer base in the NVMe import marker; the marker is
+an opt-in, not cryptographic verification of the source or handoff. The
+resulting J773g DTB compiled (SHA-1 `25f1d50cdd0e70b84d6511d9ac319dbb17d5bbc7`,
+SHA-256 `abff43e472901a55798b0c3ad833574d13c6fc52ea07a7cf7499180ba440cbc9`)
+and its GPU remains disabled. This sequence is experimental and still lacks
+native display #367 patch 7 and mini power/firmware admission.

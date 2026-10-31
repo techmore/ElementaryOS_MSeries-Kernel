@@ -1,0 +1,12 @@
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -139,3 +139,8 @@
+ &smc_mbox {
+-	status = "okay";
++	status = "okay";
+ };
++
++&{/chosen} {
++	/* Request J773g runtime import from the matching U-Boot draft. */
++	u-boot,j773g-dtb-source = "2dd4aab661e42eccf3eef0f4dd765bcc72e5832a";
++};
