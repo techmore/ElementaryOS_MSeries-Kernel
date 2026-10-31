@@ -134,3 +134,11 @@ failure as unknown context loss. The changed objects compile against Gravity
 103. Earlier descriptor, texture and sampler allocations, generic pools,
 mapping and cleanup remain incomplete. It has not been fault-injected or
 tested on a GPU and must not be deployed.
+
+`mesa103-allocation-incomplete-v10.patch` (SHA-256
+`65f6000eb02cd2a2e99d33fb2ab7f7274aa9c7ec161e41e68916846deefa3eb6`)
+adds checked Apple9 graphics sysval, resource-descriptor, texture and sampler
+table allocation, propagating failure in draw and compute callers. The changed
+AGX state object compiles against Gravity 103. Other descriptor, uniform, pool
+and mapping paths and cleanup remain incomplete; no fault-injection or GPU
+runtime validation has been performed. It must not be deployed.
