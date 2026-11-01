@@ -19,10 +19,12 @@ ESP_UUID=dac5a463-154c-4516-b223-7cfddbd4ddec      # Omarchy ESP partition UUID 
 ROOT_UUID=4f4d5801-524f-4f54-8000-000000000001     # Omarchy btrfs root
 mkdir -p "$O"
 
-# Kernel command line: Gravity's required M4 args (kiwi-descriptions 58bdc596), verbose for bring-up,
+# Kernel command line: Gravity's required M4 args (kiwi-descriptions 58bdc596), efi=noruntime and
+# no splash (andreinita21/OmarchyM4Mini docs/j773g-install.md: U-Boot's EFI runtime services and
+# Plymouth's splash both hang the SMP boot through U-Boot and Limine), verbose for bring-up,
 # finite root wait, crash -> reboot to macOS.
 CMDLINE="root=UUID=$ROOT_UUID rw rootflags=subvol=@,x-systemd.device-timeout=90 rootfstype=btrfs \
-nohlt idle=nop arm64.nowfxt appledrm.hdmi_audio=1 console=tty0 loglevel=7 printk.time=1 \
+nohlt idle=nop arm64.nowfxt efi=noruntime appledrm.hdmi_audio=1 console=tty0 loglevel=7 printk.time=1 \
 systemd.show_status=true plymouth.enable=0 initramfs_async=0 systemd.tty.term.console=dumb panic=10"
 
 # 1. Stage 2: m1n1 + DTBs + gzip U-Boot (GravityLinux/scripts update-m1n1)
