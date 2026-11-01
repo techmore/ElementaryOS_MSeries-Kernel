@@ -1,0 +1,138 @@
+From cfd21dd36b579e723bff5a6de3a6baa411762186 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Sat, 31 Oct 2026 09:08:06 -0400
+Subject: [PATCH] ci: build the elementaryos-mseries kernel the way
+ alarm-aurora builds linux-aurora
+
+LLVM, Rust 1.99.0, bindgen 0.73.2 behind alarm-aurora's wrapper, its
+distribution config (sha256-verified at a pinned commit) merged with the
+tree's asahi.config. Builds Image, modules and the J773g and J713 DTBs,
+checks the J773g GPU and PMP nodes, and uploads the result. Nothing is
+packaged, signed or installed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../workflows/elementaryos-mseries-kernel.yml | 111 ++++++++++++++++++
+ 1 file changed, 111 insertions(+)
+ create mode 100644 .github/workflows/elementaryos-mseries-kernel.yml
+
+diff --git a/.github/workflows/elementaryos-mseries-kernel.yml b/.github/workflows/elementaryos-mseries-kernel.yml
+new file mode 100644
+index 000000000000..207173348962
+--- /dev/null
++++ b/.github/workflows/elementaryos-mseries-kernel.yml
+@@ -0,0 +1,111 @@
++# Build the elementaryos-mseries kernel (Aurora aurora-wip plus the M4 mini GPU commits) the way
++# aurora-silicon/alarm-aurora builds linux-aurora: LLVM, Rust 1.99.0, bindgen 0.73.2 behind the
++# same wrapper, the distribution config merged with the tree's asahi.config. Build check and
++# artifacts only: nothing is packaged, signed or installed.
++name: elementaryos-mseries kernel
++
++on:
++  push:
++    branches: [elementaryos-mseries]
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: true
++
++env:
++  # aurora-silicon/alarm-aurora packages/linux-aurora at this commit supplies config,
++  # bindgen-kernel.py and validate-config.py; sha256 values are its PKGBUILD's.
++  ALARM_AURORA: 3669a71f64b0246d14383bb03ff5189d648fc569
++  CONFIG_SHA256: 0eecd1615eadf03039f945bbe57aa8f94dbb9714605c520f62e4d3d248c54e44
++  BINDGEN_WRAPPER_SHA256: 84a03d5fea19cae243c89f50c1736c639622d25d4d1de8d7d53ebd8f603c0f62
++  VALIDATE_SHA256: 534214d07ad388822b3d7ca2b63efce988c1424131329775479ebbd7552715b0
++  RUST: 1.99.0
++  BINDGEN: 0.73.2
++
++jobs:
++  build:
++    runs-on: ubuntu-24.04-arm
++    timeout-minutes: 240
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 1
++
++      - name: Install build dependencies
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y --no-install-recommends bc bison flex cpio dwarves \
++            device-tree-compiler kmod libelf-dev libssl-dev python3 clang lld llvm libclang-dev
++          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST"
++          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
++          "$HOME/.cargo/bin/rustup" component add --toolchain "$RUST" rust-src rustfmt
++          "$HOME/.cargo/bin/cargo" install --locked bindgen-cli --version "$BINDGEN"
++
++      - name: Fetch and verify the Aurora package inputs
++        run: |
++          base="https://raw.githubusercontent.com/aurora-silicon/alarm-aurora/$ALARM_AURORA/packages/linux-aurora"
++          mkdir -p "$RUNNER_TEMP/aurora"
++          for f in config bindgen-kernel.py validate-config.py; do
++            curl -fsSL "$base/$f" -o "$RUNNER_TEMP/aurora/$f"
++          done
++          cd "$RUNNER_TEMP/aurora"
++          printf '%s  config\n%s  bindgen-kernel.py\n%s  validate-config.py\n' \
++            "$CONFIG_SHA256" "$BINDGEN_WRAPPER_SHA256" "$VALIDATE_SHA256" | sha256sum -c -
++          chmod +x bindgen-kernel.py
++
++      - name: Configure
++        run: |
++          mkdir -p build
++          cp "$RUNNER_TEMP/aurora/config" build/.config
++          scripts/kconfig/merge_config.sh -m -O "$PWD/build" build/.config arch/arm64/configs/asahi.config
++          scripts/config --file build/.config --set-str LOCALVERSION '-elementaryos-mseries' --disable LOCALVERSION_AUTO
++          make ARCH=arm64 LLVM=1 O=build olddefconfig
++          python3 "$RUNNER_TEMP/aurora/validate-config.py" arch/arm64/configs/asahi.config build/.config
++          grep -qx 'CONFIG_RUST=y' build/.config
++          grep -E '^CONFIG_(DRM_ASAHI|DRM_APPLE|APPLE_PMP|ARM64_16K_PAGES)[A-Z_]*=' build/.config | tee build/key-config.txt
++
++      - name: Build Image, modules and DTBs
++        run: |
++          export AURORA_BINDGEN_REAL="$HOME/.cargo/bin/bindgen" RUSTUP_TOOLCHAIN="$RUST"
++          export LIBCLANG_PATH="$(llvm-config --libdir)"
++          export RUSTFMT="$(rustup which --toolchain "$RUST" rustfmt)"
++          make ARCH=arm64 LLVM=1 O=build BINDGEN="$RUNNER_TEMP/aurora/bindgen-kernel.py" LOCALVERSION= \
++            -j"$(nproc)" Image modules apple/t8132-j773g.dtb apple/t8132-j713.dtb 2>&1 | tee build/build.log
++          test -f build/arch/arm64/boot/Image
++          test -f build/arch/arm64/boot/dts/apple/t8132-j773g.dtb
++
++      - name: Check the J773g device tree
++        run: |
++          dtb=build/arch/arm64/boot/dts/apple/t8132-j773g.dtb
++          fdtget "$dtb" / compatible
++          fdtget -t s "$dtb" /aliases pmp
++          fdtget -t s "$dtb" /aliases gpu
++          fdtget "$dtb" /soc/gpu@302600000 compatible
++
++      - name: Stage artifacts
++        run: |
++          out="$RUNNER_TEMP/out"
++          mkdir -p "$out"
++          make ARCH=arm64 LLVM=1 O=build INSTALL_MOD_PATH="$out/modules" INSTALL_MOD_STRIP=1 modules_install
++          cp build/arch/arm64/boot/Image build/arch/arm64/boot/dts/apple/t8132-j773g.dtb \
++            build/arch/arm64/boot/dts/apple/t8132-j713.dtb build/.config build/key-config.txt "$out/"
++          make -s O=build kernelrelease > "$out/kernelrelease"
++          git rev-parse HEAD > "$out/source-commit"
++          (cd "$out" && sha256sum Image *.dtb > SHA256SUMS)
++
++      - uses: actions/upload-artifact@v4
++        with:
++          name: elementaryos-mseries-kernel-${{ github.sha }}
++          path: ${{ runner.temp }}/out
++          retention-days: 14
++
++      - uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: build-log-${{ github.sha }}
++          path: build/build.log
++          retention-days: 14
+-- 
+2.50.1 (Apple Git-155)
+

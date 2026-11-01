@@ -1,0 +1,11 @@
+--- a/ane/h16/t8132-ane-experimental.dts
++++ b/ane/h16/t8132-ane-experimental.dts
+@@ -30,7 +30,7 @@
+ 	omarchy,opt-in = "ane-h16-experimental";
+ 
+ 	fragment@0 {
+-		target-path = "/soc/interrupt-controller@381180000";
++		target-path = "/soc/interrupt-controller@381000000";
+ 		aic: __overlay__ {
+ 		};
+ 	};

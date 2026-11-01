@@ -1,0 +1,34 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -11,6 +11,9 @@
+ 
+ #include "t8132.dtsi"
+ #include "t8132-jxxx.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/phy/phy.h>
++#include <dt-bindings/spmi/spmi.h>
+ 
+ / {
+ 	compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+@@ -63,5 +66,20 @@
+ &framebuffer0 {
+ 	power-domains = <&ps_dispext0_fe>, <&ps_dptx_phy>;
+ };
++
++&smc {
++	status = "okay";
++
++	smc_hwmon: hwmon {
++		compatible = "apple,smc-hwmon";
++	};
++};
++
++&smc_mbox {
++	status = "okay";
++};
++
++#include "hwmon-common.dtsi"
++#include "hwmon-mini.dtsi"
+ 
+ #include "t8132-gpu.dtsi"

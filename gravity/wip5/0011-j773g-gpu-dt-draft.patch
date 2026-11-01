@@ -1,0 +1,67 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index b8dce34..10457fc 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -20,11 +20,54 @@
+-		ans = &nvme;
++		ans = &nvme;
+-		ans-mbox = &ans_mbox;
++		ans-mbox = &ans_mbox;
+-		sart-ans = &sart;
++		sart-ans = &sart;
++		gpu = &gpu;
++	};
++
++	/* m1n1 may populate these ranges from the machine's original ADT.
++	 * Zero placeholders are never usable as firmware reservations.
++	 */
++	reserved-memory {
++		gpu_ttbs: uat-ttbs { reg = <0 0 0 0>; no-map; status = "disabled"; };
++		gpu_pagetables: uat-pagetables { reg = <0 0 0 0>; no-map; status = "disabled"; };
++		gpu_handoff: uat-handoff { reg = <0 0 0 0>; no-map; status = "disabled"; };
++		gpu_shared_l2: uat-shared-l2 { reg = <0 0 0 0>; no-map; status = "disabled"; };
++		gpu_fw_text: gpu-fw-text { reg = <0 0 0 0>; no-map; status = "disabled"; };
++		gpu_fw_data: gpu-fw-data { reg = <0 0 0 0>; no-map; status = "disabled"; };
+-	};
++	};
+ };
+-
++
+ /* The Mac mini's SMC mailbox. */
+ &soc {
++	/* The current Gravity DT identifies these T8132 GPU apertures and IRQs.
++	 * Keep both devices disabled until the mini power, firmware and complete
++	 * m1n1/U-Boot resource handoff have been qualified.
++	 */
++	agx_mbox: mailbox@302608000 {
++		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x3 0x02608000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 993 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 994 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 995 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 996 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty", "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++		status = "disabled";
++	};
++
++	gpu: gpu@302600000 {
++		compatible = "apple,agx-t8132";
++		reg = <0x3 0x02600000 0x0 0x88000>, <0x3 0x00000000 0x0 0x4000000>;
++		reg-names = "asc", "sgx";
++		mboxes = <&agx_mbox>;
++		power-domains = <&ps_gfx>;
++		memory-region = <&gpu_ttbs>, <&gpu_pagetables>, <&gpu_handoff>,
++		                <&gpu_shared_l2>, <&gpu_fw_text>, <&gpu_fw_data>;
++		memory-region-names = "ttbs", "pagetables", "handoff",
++		                      "shared-l2", "fw-text", "fw-data";
++		status = "disabled";
++	};
++
+-	/* Placeholders must stay disabled until a J773g-aware loader supplies
++	/* Placeholders must stay disabled until a J773g-aware loader supplies
+-	 * the ANS resources and interrupts from the machine's live ADT.
++	 * the ANS resources and interrupts from the machine's live ADT.
+-	 */
++	 */

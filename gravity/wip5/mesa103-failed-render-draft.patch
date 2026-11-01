@@ -1,0 +1,180 @@
+diff --git a/src/gallium/drivers/asahi/agx_batch.c b/src/gallium/drivers/asahi/agx_batch.c
+index 3414578..05e667e 100644
+--- a/src/gallium/drivers/asahi/agx_batch.c
++++ b/src/gallium/drivers/asahi/agx_batch.c
+@@ -226,7 +226,8 @@ agx_batch_print_stats(struct agx_device *dev, struct agx_batch *batch)
+ }
+ 
+ static void
+-agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
++agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset,
++                  bool discarded)
+ {
+    struct agx_device *dev = agx_device(ctx->base.screen);
+    struct agx_screen *screen = agx_screen(ctx->base.screen);
+@@ -237,7 +238,7 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+    assert(ctx->batch != batch);
+ 
+    uint64_t begin_ts = ~0, end_ts = 0;
+-   if (batch->timestamps.size) {
++   if (!discarded && batch->timestamps.size) {
+       struct agx_timestamps *ts = agx_batch_timestamps(batch);
+ 
+       if (batch->cdm.bo) {
+@@ -251,7 +252,10 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+       }
+    }
+ 
+-   agx_finish_batch_queries(batch, begin_ts, end_ts);
++   if (discarded)
++      agx_cancel_batch_queries(batch);
++   else
++      agx_finish_batch_queries(batch, begin_ts, end_ts);
+ 
+    if (reset) {
+       int handle;
+@@ -293,7 +297,7 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+    util_dynarray_fini(&batch->timestamps);
+    util_dynarray_fini(&batch->apple9_attachments);
+ 
+-   if (!(dev->debug & (AGX_DBG_TRACE | AGX_DBG_SYNC))) {
++   if (!discarded && !(dev->debug & (AGX_DBG_TRACE | AGX_DBG_SYNC))) {
+       agx_batch_print_stats(dev, batch);
+    }
+ 
+@@ -326,7 +330,7 @@ agx_cleanup_batches(struct agx_context *ctx)
+       return -1;
+ 
+    assert(first < AGX_MAX_BATCHES);
+-   agx_batch_cleanup(ctx, batches[first], false);
++   agx_batch_cleanup(ctx, batches[first], false, false);
+    return agx_batch_idx(batches[first]);
+ }
+ 
+@@ -1116,7 +1120,7 @@ agx_sync_batch(struct agx_context *ctx, struct agx_batch *batch)
+    assert(batch->syncobj);
+    int ret = drmSyncobjWait(dev->fd, &batch->syncobj, 1, INT64_MAX, 0, NULL);
+    assert(!ret);
+-   agx_batch_cleanup(ctx, batch, false);
++   agx_batch_cleanup(ctx, batch, false, false);
+ }
+ 
+ void
+@@ -1151,10 +1155,11 @@ agx_batch_discard(struct agx_context *ctx, struct agx_batch *batch)
+    /* A failed encoder may already own resource write dependencies. Retire
+     * those along with its allocations without publishing a GPU command. */
+    assert(agx_batch_is_active(batch));
++   ctx->any_faults = true;
+    agx_batch_mark_submitted(batch);
+    if (ctx->batch == batch)
+       ctx->batch = NULL;
+-   agx_batch_cleanup(ctx, batch, false);
++   agx_batch_cleanup(ctx, batch, false, true);
+ }
+ 
+ void
+@@ -1170,7 +1175,7 @@ agx_batch_reset(struct agx_context *ctx, struct agx_batch *batch)
+    if (ctx->batch == batch)
+       ctx->batch = NULL;
+ 
+-   agx_batch_cleanup(ctx, batch, true);
++   agx_batch_cleanup(ctx, batch, true, false);
+ }
+ 
+ /*
+diff --git a/src/gallium/drivers/asahi/agx_pipe.c b/src/gallium/drivers/asahi/agx_pipe.c
+index 0d8d00a..f79f6dc 100644
+--- a/src/gallium/drivers/asahi/agx_pipe.c
++++ b/src/gallium/drivers/asahi/agx_pipe.c
+@@ -1817,6 +1817,12 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
+ 
+    if (batch->vdm.bo && (batch->clear || batch->initialized)) {
+       has_vdm = agx_flush_render(ctx, batch, &render);
++      if (!has_vdm) {
++         /* Compute and render share this batch's resources. Never submit
++          * only one engine after preparing the other has failed. */
++         agx_batch_discard(ctx, batch);
++         return;
++      }
+    }
+ 
+    if (!has_cdm && !has_vdm) {
+diff --git a/src/gallium/drivers/asahi/agx_query.c b/src/gallium/drivers/asahi/agx_query.c
+index 0d43976..f0e1e87 100644
+--- a/src/gallium/drivers/asahi/agx_query.c
++++ b/src/gallium/drivers/asahi/agx_query.c
+@@ -389,8 +389,13 @@ agx_get_query_result(struct pipe_context *pctx, struct pipe_query *pquery,
+    struct agx_context *ctx = agx_context(pctx);
+    struct agx_device *dev = agx_device(pctx->screen);
+ 
++   if (ctx->any_faults)
++      return false;
++
+    /* TODO: Honour `wait` */
+    sync_query_writers(ctx, query, "Reading query results");
++   if (ctx->any_faults)
++      return false;
+ 
+    uint64_t *ptr = query->ptr.cpu;
+    uint64_t value = *ptr;
+@@ -439,12 +444,13 @@ agx_get_query_result_resource_cpu(struct agx_context *ctx,
+    union pipe_query_result result;
+    if (index < 0) {
+       /* availability */
+-      result.u64 = !is_query_busy(ctx, query);
++      result.u64 = !ctx->any_faults && !is_query_busy(ctx, query);
+    } else {
+       bool ready =
+          agx_get_query_result(&ctx->base, (void *)query, true, &result);
+ 
+-      assert(ready);
++      if (!ready)
++         return;
+    }
+ 
+    /* Clamp to type, arb_query_buffer_object-qbo tests */
+@@ -468,6 +474,9 @@ agx_get_query_result_resource_gpu(struct agx_context *ctx,
+                                   int index, struct pipe_resource *prsrc,
+                                   unsigned offset)
+ {
++   if (ctx->any_faults)
++      return false;
++
+    /* Handle availability queries on CPU */
+    if (index < 0)
+       return false;
+@@ -478,6 +487,8 @@ agx_get_query_result_resource_gpu(struct agx_context *ctx,
+       return false;
+ 
+    flush_query_writers(ctx, query, util_str_query_type(query->type, true));
++   if (ctx->any_faults)
++      return false;
+ 
+    struct agx_resource *rsrc = agx_resource(prsrc);
+    enum query_copy_type copy_type = classify_query_type(query->type);
+@@ -563,6 +574,13 @@ agx_get_query_address(struct agx_batch *batch, struct agx_query *query)
+    }
+ }
+ 
++void
++agx_cancel_batch_queries(struct agx_batch *batch)
++{
++   /* Retire query-writer dependencies without publishing GPU timestamps. */
++   batch->ctx->batches.generation[agx_batch_idx(batch)]++;
++}
++
+ void
+ agx_finish_batch_queries(struct agx_batch *batch, uint64_t begin_ts,
+                          uint64_t end_ts)
+diff --git a/src/gallium/drivers/asahi/agx_state.h b/src/gallium/drivers/asahi/agx_state.h
+index 3015c43..5280315 100644
+--- a/src/gallium/drivers/asahi/agx_state.h
++++ b/src/gallium/drivers/asahi/agx_state.h
+@@ -1279,6 +1279,7 @@ uint64_t agx_get_query_address(struct agx_batch *batch,
+                                struct agx_query *query);
+ uint64_t agx_get_occlusion_heap(struct agx_batch *batch);
+ 
++void agx_cancel_batch_queries(struct agx_batch *batch);
+ void agx_finish_batch_queries(struct agx_batch *batch, uint64_t begin_ts,
+                               uint64_t end_ts);
+ 

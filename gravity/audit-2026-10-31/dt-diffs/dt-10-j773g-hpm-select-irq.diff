@@ -1,0 +1,57 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -141,11 +141,15 @@
+ 	hpm0: usb-pd@c {
+ 		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
+ 		reg = <0xc SPMI_USID>;
+-		/* ADT hpm0: irq, sleep, wake; select is polled on T8132. */
++		/*
++		 * ADT hpm0 lists irq, sleep, wake only. Gravity adds select at
++		 * irq + 2 (Gravity 4cb9998f58 fixed SID 8 to 65, tested on J773g).
++		 */
+ 		interrupts = <11 IRQ_TYPE_EDGE_RISING>,
++			     <13 IRQ_TYPE_EDGE_RISING>,
+ 			     <17 IRQ_TYPE_EDGE_RISING>,
+ 			     <19 IRQ_TYPE_EDGE_RISING>;
+-		interrupt-names = "irq", "sleep", "wake";
++		interrupt-names = "irq", "select", "sleep", "wake";
+ 
+ 		typec0: connector {
+ 			compatible = "usb-c-connector";
+@@ -177,11 +181,15 @@
+ 	hpm1: usb-pd@a {
+ 		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
+ 		reg = <0xa SPMI_USID>;
+-		/* ADT hpm1: irq, sleep, wake; select is polled on T8132. */
++		/*
++		 * ADT hpm1 lists irq, sleep, wake only. Gravity adds select at
++		 * irq + 2 (Gravity 4cb9998f58 fixed SID 8 to 65, tested on J773g).
++		 */
+ 		interrupts = <37 IRQ_TYPE_EDGE_RISING>,
++			     <39 IRQ_TYPE_EDGE_RISING>,
+ 			     <43 IRQ_TYPE_EDGE_RISING>,
+ 			     <45 IRQ_TYPE_EDGE_RISING>;
+-		interrupt-names = "irq", "sleep", "wake";
++		interrupt-names = "irq", "select", "sleep", "wake";
+ 
+ 		typec1: connector {
+ 			compatible = "usb-c-connector";
+@@ -213,11 +221,15 @@
+ 	hpm3: usb-pd@8 {
+ 		compatible = "apple,t8132-sn201202x", "apple,sn201202x";
+ 		reg = <0x8 SPMI_USID>;
+-		/* ADT hpm3: irq, sleep, wake; select is polled on T8132. */
++		/*
++		 * ADT hpm3 lists irq, sleep, wake only. Gravity adds select at
++		 * irq + 2 (Gravity 4cb9998f58 fixed SID 8 to 65, tested on J773g).
++		 */
+ 		interrupts = <63 IRQ_TYPE_EDGE_RISING>,
++			     <65 IRQ_TYPE_EDGE_RISING>,
+ 			     <69 IRQ_TYPE_EDGE_RISING>,
+ 			     <71 IRQ_TYPE_EDGE_RISING>;
+-		interrupt-names = "irq", "sleep", "wake";
++		interrupt-names = "irq", "select", "sleep", "wake";
+ 
+ 		typec3: connector {
+ 			compatible = "usb-c-connector";

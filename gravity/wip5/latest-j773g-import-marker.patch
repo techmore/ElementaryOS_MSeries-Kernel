@@ -1,0 +1,12 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -96,3 +96,8 @@
+ &smc_mbox {
+ 	status = "okay";
+ };
++
++&{/chosen} {
++	/* Request runtime import by the matching J773g U-Boot handoff. */
++	u-boot,j773g-dtb-source = "2dd4aab661e42eccf3eef0f4dd765bcc72e5832a";
++};

@@ -1,0 +1,23 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g-pmp-inspect.dtsi b/arch/arm64/boot/dts/apple/t8132-j773g-pmp-inspect.dtsi
+new file mode 100644
+index 0000000..3847f56
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-j773g-pmp-inspect.dtsi
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/*
++ * Optional J773g PMP metadata inspection only. Requires the T8132 common
++ * PMP description and matching m1n1/U-Boot inspection handoff. It neither
++ * enables the PMP owner nor establishes GPU/display power ownership.
++ * Deliberately not included by the ordinary board DT.
++ */
++/ {
++	aliases {
++		pmp = &pmp;
++	};
++};
++
++&pmp {
++	apple,j773g-pmp-inspect-only;
++	status = "disabled";
++};

@@ -1,0 +1,111 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -96,3 +96,5 @@
+ &smc_mbox {
+ 	status = "okay";
+ };
++
++#include "t8132-j773g-front-usb.dtsi"
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g-front-usb.dtsi b/arch/arm64/boot/dts/apple/t8132-j773g-front-usb.dtsi
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/boot/dts/apple/t8132-j773g-front-usb.dtsi
+@@ -0,0 +1,97 @@
++// SPDX-License-Identifier: GPL-2.0+ OR MIT
++/* Experimental front hub description. Do not enable before handoff review. */
++#include <dt-bindings/phy/phy.h>
++
++/ {
++	aliases {
++		atcphy2 = &atcphy2;
++	};
++};
++
++&soc {
++	dwc3_2_dart_0: iommu@412f00000 {
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x12f00000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1407 IRQ_TYPE_LEVEL_HIGH>;
++		power-domains = <&ps_atc2_usb>;
++		#iommu-cells = <1>;
++		status = "disabled";
++	};
++
++	dwc3_2_dart_1: iommu@412f80000 {
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x12f80000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1407 IRQ_TYPE_LEVEL_HIGH>;
++		power-domains = <&ps_atc2_usb>;
++		#iommu-cells = <1>;
++		status = "disabled";
++	};
++
++	dwc3_2: usb@412280000 {
++		compatible = "apple,t8132-dwc3";
++		reg = <0x4 0x12280000 0x0 0xcd00>,
++		      <0x4 0x1228cd00 0x0 0x3200>;
++		reg-names = "dwc3-core", "dwc3-apple";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1403 IRQ_TYPE_LEVEL_HIGH>;
++		iommus = <&dwc3_2_dart_0 0>, <&dwc3_2_dart_1 1>;
++		power-domains = <&ps_atc2_usb>;
++		resets = <&atcphy2>;
++		phys = <&atcphy2 PHY_TYPE_USB2>, <&atcphy2 PHY_TYPE_USB3>;
++		phy-names = "usb2-phy", "usb3-phy";
++		dr_mode = "host";
++		usb-role-switch;
++		#address-cells = <1>;
++		#size-cells = <0>;
++		status = "disabled";
++
++		hub@1 {
++			compatible = "usb5ac,800b";
++			reg = <1>;
++		};
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			port@1 {
++				reg = <1>;
++				dwc3_2_ss: endpoint {
++					remote-endpoint = <&atcphy2_usb3>;
++				};
++			};
++		};
++	};
++
++	/* Bank split inferred from the Air ATC1 profile; hardware ownership unverified. */
++	atcphy2: phy@412a90000 {
++		compatible = "apple,t8132-atcphy";
++		reg = <0x4 0x12a90000 0x0 0x4000>,
++		      <0x4 0x12a84000 0x0 0x4000>,
++		      <0x4 0x13000000 0x0 0x24000>,
++		      <0x4 0x10000000 0x0 0x8000>,
++		      <0x4 0x10020000 0x0 0x4000>,
++		      <0x4 0x13044000 0x0 0x4000>,
++		      <0x4 0x13050000 0x0 0x4000>;
++		reg-names = "usb2phy", "pipehandler", "core", "axi2af",
++			    "lioa", "fabric", "common-config";
++		#phy-cells = <1>;
++		#reset-cells = <0>;
++		power-domains = <&ps_atc2_usb>;
++		apple,fixed-usb3;
++		apple,fixed-lane-swap;
++		status = "disabled";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			port@1 {
++				reg = <1>;
++				atcphy2_usb3: endpoint {
++					remote-endpoint = <&dwc3_2_ss>;
++				};
++			};
++		};
++	};
++};

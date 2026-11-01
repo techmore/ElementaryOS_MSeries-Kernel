@@ -1,0 +1,3256 @@
+diff --git a/src/asahi/lib/agx_bg_eot.c b/src/asahi/lib/agx_bg_eot.c
+index f6f3273..ec15311 100644
+--- a/src/asahi/lib/agx_bg_eot.c
++++ b/src/asahi/lib/agx_bg_eot.c
+@@ -55,9 +55,18 @@ agx_compile_bg_eot_shader(struct agx_bg_eot_cache *cache, nir_shader *shader,
+    struct agx_shader_part bin;
+    agx_compile_shader_nir(shader, key, &bin);
+ 
++   struct agx_ptr upload;
++   if (!res || !agx_pool_try_alloc_aligned(&cache->pool, bin.info.binary_size,
++                                            128, &upload)) {
++      free(bin.binary);
++      ralloc_free(shader);
++      ralloc_free(res);
++      return NULL;
++   }
++   memcpy(upload.cpu, bin.binary, bin.info.binary_size);
+    res->info = bin.info;
+-   res->ptr = agx_pool_upload_aligned_with_bo(
+-      &cache->pool, bin.binary, bin.info.binary_size, 128, &res->bo);
++   res->ptr = upload.gpu;
++   res->bo = cache->pool.transient_bo;
+    free(bin.binary);
+    ralloc_free(shader);
+ 
+@@ -182,28 +191,56 @@ agx_build_end_of_tile_shader(struct agx_bg_eot_cache *cache,
+    return agx_compile_bg_eot_shader(cache, b.shader, &compiler_key, NULL);
+ }
+ 
+-struct agx_bg_eot_shader *
+-agx_get_bg_eot_shader(struct agx_bg_eot_cache *cache,
+-                      struct agx_bg_eot_key *key)
++static struct agx_bg_eot_shader *
++agx_try_get_bg_eot_shader_locked(struct agx_bg_eot_cache *cache,
++                                 struct agx_bg_eot_key *key)
+ {
++   simple_mtx_assert_locked(&cache->lock);
+    struct hash_entry *ent = _mesa_hash_table_search(cache->ht, key);
+    if (ent)
+       return ent->data;
+ 
+    struct agx_bg_eot_shader *ret = NULL;
++   bool is_store = false;
+ 
+    for (unsigned rt = 0; rt < ARRAY_SIZE(key->op); ++rt) {
+       if (key->op[rt] == AGX_EOT_STORE) {
++         is_store = true;
+          ret = agx_build_end_of_tile_shader(cache, key);
+          break;
+       }
+    }
+ 
+-   if (!ret)
++   if (!is_store)
+       ret = agx_build_background_shader(cache, key);
++   if (!ret)
++      return NULL;
+ 
+    ret->key = *key;
+-   _mesa_hash_table_insert(cache->ht, &ret->key, ret);
++   if (!_mesa_hash_table_insert(cache->ht, &ret->key, ret)) {
++      ralloc_free(ret);
++      return NULL;
++   }
++   return ret;
++}
++
++struct agx_bg_eot_shader *
++agx_try_get_bg_eot_shader(struct agx_bg_eot_cache *cache,
++                          struct agx_bg_eot_key *key)
++{
++   simple_mtx_lock(&cache->lock);
++   struct agx_bg_eot_shader *ret = agx_try_get_bg_eot_shader_locked(cache, key);
++   simple_mtx_unlock(&cache->lock);
++   return ret;
++}
++
++struct agx_bg_eot_shader *
++agx_get_bg_eot_shader(struct agx_bg_eot_cache *cache,
++                      struct agx_bg_eot_key *key)
++{
++   struct agx_bg_eot_shader *ret = agx_try_get_bg_eot_shader(cache, key);
++   if (!ret)
++      abort();
+    return ret;
+ }
+ 
+@@ -249,9 +286,10 @@ agx_apple9_lower_kernel_input(nir_builder *b, nir_intrinsic_instr *intr,
+    return true;
+ }
+ 
+-static void
++static bool
+ agx_compile_apple9_precompiled(struct agx_bg_eot_cache *cache,
+-                             struct agx_precompiled_shader *p, unsigned program)
++                               struct agx_precompiled_shader *p, unsigned program,
++                               bool *compile_failed)
+ {
+    const uint32_t *serialized = libagx_nir[program];
+    struct blob_reader reader;
+@@ -266,7 +304,10 @@ agx_compile_apple9_precompiled(struct agx_bg_eot_cache *cache,
+       fprintf(stderr, "Apple9 internal program %u (%s) compile failed: %s\n",
+               program, nir->info.name ?: "unnamed", reason ?: "unknown");
+       nir_print_shader(nir, stderr);
+-      abort();
++      *compile_failed = true;
++      ralloc_free(nir);
++      free(part.binary);
++      return false;
+    }
+    ralloc_free(nir);
+    p->apple9 = true;
+@@ -276,16 +317,27 @@ agx_compile_apple9_precompiled(struct agx_bg_eot_cache *cache,
+    p->bo = agx_bo_create(cache->dev, part.info.binary_size, 0,
+                          AGX_BO_EXEC | AGX_BO_LOW_VA | AGX_BO_WRITEBACK,
+                          "Apple9 internal shader");
+-   if (!p->bo)
+-      abort();
+-   memcpy(agx_bo_map(p->bo), part.binary, part.info.binary_size);
++   if (!p->bo) {
++      free(part.binary);
++      return false;
++   }
++   void *map = agx_bo_map(p->bo);
++   if (!map) {
++      agx_bo_unreference(cache->dev, p->bo);
++      p->bo = NULL;
++      free(part.binary);
++      return false;
++   }
++   memcpy(map, part.binary, part.info.binary_size);
+    agx_bo_note_cpu_write(p->bo, 0, part.info.binary_size);
+    p->ptr = p->bo->va->addr;
+    free(part.binary);
++   return true;
+ }
+ 
+ static struct agx_precompiled_shader *
+-agx_get_precompiled_locked(struct agx_bg_eot_cache *cache, unsigned program)
++agx_get_precompiled_locked(struct agx_bg_eot_cache *cache, unsigned program,
++                           bool *compile_failed)
+ {
+    simple_mtx_assert_locked(&cache->lock);
+ 
+@@ -299,8 +351,13 @@ agx_get_precompiled_locked(struct agx_bg_eot_cache *cache, unsigned program)
+    struct agx_precompiled_shader *p =
+       rzalloc(cache->ht, struct agx_precompiled_shader);
+ 
++   if (!p)
++      return NULL;
+    if (cache->dev->chip == AGX_CHIP_G16G) {
+-      agx_compile_apple9_precompiled(cache, p, program);
++      if (!agx_compile_apple9_precompiled(cache, p, program, compile_failed)) {
++         ralloc_free(p);
++         return NULL;
++      }
+       p_atomic_set(&cache->precomp[program], p);
+       return p;
+    }
+@@ -315,8 +372,15 @@ agx_get_precompiled_locked(struct agx_bg_eot_cache *cache, unsigned program)
+       agx_workgroup(info->workgroup_size[0], info->workgroup_size[1],
+                     info->workgroup_size[2]);
+ 
+-   p->ptr = agx_pool_upload_aligned_with_bo(&cache->pool, binary,
+-                                            info->binary_size, 128, &p->bo);
++   struct agx_ptr upload;
++   if (!agx_pool_try_alloc_aligned(&cache->pool, info->binary_size, 128,
++                                   &upload)) {
++      ralloc_free(p);
++      return NULL;
++   }
++   memcpy(upload.cpu, binary, info->binary_size);
++   p->ptr = upload.gpu;
++   p->bo = cache->pool.transient_bo;
+ 
+    /* Bake launch */
+    agx_pack(&p->b.launch, CDM_LAUNCH_WORD_0, cfg) {
+@@ -366,8 +430,10 @@ agx_get_precompiled_locked(struct agx_bg_eot_cache *cache, unsigned program)
+ }
+ 
+ struct agx_precompiled_shader *
+-agx_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program)
++agx_try_get_precompiled_status(struct agx_bg_eot_cache *cache, unsigned program,
++                               bool *compile_failed)
+ {
++   *compile_failed = false;
+    /* Shaders are immutable once written, so if we atomically read a non-NULL
+     * shader, then we have a valid cached shader and are done.
+     */
+@@ -378,17 +444,49 @@ agx_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program)
+ 
+    /* Otherwise, take the lock and upload. */
+    simple_mtx_lock(&cache->lock);
+-   ret = agx_get_precompiled_locked(cache, program);
++   ret = agx_get_precompiled_locked(cache, program, compile_failed);
+    simple_mtx_unlock(&cache->lock);
+ 
+    return ret;
+ }
+ 
++struct agx_precompiled_shader *
++agx_try_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program)
++{
++   bool compile_failed;
++   return agx_try_get_precompiled_status(cache, program, &compile_failed);
++}
++
++struct agx_precompiled_shader *
++agx_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program)
++{
++   struct agx_precompiled_shader *ret = agx_try_get_precompiled(cache, program);
++   if (!ret)
++      abort();
++   return ret;
++}
++
+ uint64_t
+-agx_helper_program(struct agx_bg_eot_cache *cache)
++agx_try_helper_program_status(struct agx_bg_eot_cache *cache,
++                              bool *compile_failed)
+ {
+    struct agx_precompiled_shader *pc =
+-      agx_get_precompiled(cache, LIBAGX_HELPER);
++      agx_try_get_precompiled_status(cache, LIBAGX_HELPER, compile_failed);
++   return pc ? (pc->ptr | 1) : 0;
++}
+ 
+-   return pc->ptr | 1;
++uint64_t
++agx_try_helper_program(struct agx_bg_eot_cache *cache)
++{
++   bool compile_failed;
++   return agx_try_helper_program_status(cache, &compile_failed);
++}
++
++uint64_t
++agx_helper_program(struct agx_bg_eot_cache *cache)
++{
++   uint64_t ret = agx_try_helper_program(cache);
++   if (!ret)
++      abort();
++   return ret;
+ }
+diff --git a/src/asahi/lib/agx_bg_eot.h b/src/asahi/lib/agx_bg_eot.h
+index 5da8e9e..9bf0b37 100644
+--- a/src/asahi/lib/agx_bg_eot.h
++++ b/src/asahi/lib/agx_bg_eot.h
+@@ -36,11 +36,19 @@ struct agx_bg_eot_cache {
+  * Get a precompiled shader, uploading if necessary. This is thread-safe.
+  */
+ struct agx_precompiled_shader *
++agx_try_get_precompiled_status(struct agx_bg_eot_cache *cache, unsigned program,
++                               bool *compile_failed);
++struct agx_precompiled_shader *
++agx_try_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program);
++struct agx_precompiled_shader *
+ agx_get_precompiled(struct agx_bg_eot_cache *cache, unsigned program);
+ 
+ /*
+  * Get the address of the cached helper program. This is thread-safe.
+  */
++uint64_t agx_try_helper_program_status(struct agx_bg_eot_cache *cache,
++                                       bool *compile_failed);
++uint64_t agx_try_helper_program(struct agx_bg_eot_cache *cache);
+ uint64_t agx_helper_program(struct agx_bg_eot_cache *cache);
+ 
+ enum agx_bg_eot_op {
+@@ -63,6 +71,8 @@ struct agx_bg_eot_shader {
+    uint64_t ptr;
+ };
+ 
++struct agx_bg_eot_shader *agx_try_get_bg_eot_shader(struct agx_bg_eot_cache *cache,
++                                                    struct agx_bg_eot_key *key);
+ struct agx_bg_eot_shader *agx_get_bg_eot_shader(struct agx_bg_eot_cache *cache,
+                                                 struct agx_bg_eot_key *key);
+ 
+diff --git a/src/asahi/lib/agx_device.c b/src/asahi/lib/agx_device.c
+index c972844..f3cacc5 100644
+--- a/src/asahi/lib/agx_device.c
++++ b/src/asahi/lib/agx_device.c
+@@ -254,7 +254,7 @@ agx_bo_mmap(struct agx_device *dev, struct agx_bo *bo, void *fixed_addr)
+    ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_GEM_MMAP_OFFSET, &gem_mmap_offset);
+    if (ret) {
+       fprintf(stderr, "DRM_IOCTL_ASAHI_MMAP_BO failed: %m\n");
+-      assert(0);
++      return;
+    }
+ 
+    flags = MAP_SHARED | (fixed_addr ? MAP_FIXED : 0);
+diff --git a/src/asahi/lib/agx_scratch.c b/src/asahi/lib/agx_scratch.c
+index 2791e22..2973b8b 100644
+--- a/src/asahi/lib/agx_scratch.c
++++ b/src/asahi/lib/agx_scratch.c
+@@ -69,12 +69,9 @@ agx_scratch_get_bucket(uint32_t dwords)
+       1 + util_logbase2_ceil(DIV_ROUND_UP(dwords, AGX_SPILL_UNIT_DWORDS)));
+ }
+ 
+-static void
++static bool
+ agx_scratch_realloc(struct agx_scratch *scratch)
+ {
+-   if (scratch->buf)
+-      agx_bo_unreference(scratch->dev, scratch->buf);
+-
+    struct spill_size size = agx_scratch_get_spill_size(scratch->size_dwords);
+ 
+    if (scratch->dev->debug & AGX_DBG_SCRATCH)
+@@ -113,7 +110,14 @@ agx_scratch_realloc(struct agx_scratch *scratch)
+ #endif
+    scratch->buf = agx_bo_create(scratch->dev, total_alloc, block_size_bytes,
+                                 flags, "Scratch");
++   if (!scratch->buf)
++      return false;
+    void *map = agx_bo_map(scratch->buf);
++   if (!map) {
++      agx_bo_unreference(scratch->dev, scratch->buf);
++      scratch->buf = NULL;
++      return false;
++   }
+    memset(map, 0, blocks_off);
+ 
+    struct agx_helper_header *hdr = map;
+@@ -179,37 +183,54 @@ agx_scratch_realloc(struct agx_scratch *scratch)
+    if (scratch->dev->debug & AGX_DBG_SCRATCH)
+       fprintf(stderr, "New Scratch @ 0x%" PRIx64 " (size: 0x%zx)\n",
+               scratch->buf->va->addr, scratch->buf->size);
++   return true;
+ }
+ 
+-void
+-agx_scratch_alloc(struct agx_scratch *scratch, unsigned dwords,
++bool
++agx_scratch_try_alloc(struct agx_scratch *scratch, unsigned dwords,
+                   size_t subgroups)
+ {
+    bool realloc = false;
+ 
+    if (!dwords)
+-      return;
++      return true;
+ 
+-   assert(dwords <= AGX_MAX_SCRATCH_DWORDS && "Scratch size too large");
++   if (dwords > AGX_MAX_SCRATCH_DWORDS)
++      return false;
+ 
+    if (!subgroups)
+       subgroups = AGX_MAX_SUBGROUPS_PER_CORE;
+ 
+    subgroups = MIN2(AGX_MAX_SUBGROUPS_PER_CORE, subgroups);
+ 
+-   if (dwords > scratch->size_dwords) {
+-      scratch->size_dwords = dwords;
++   struct agx_scratch replacement = *scratch;
++   if (dwords > replacement.size_dwords) {
++      replacement.size_dwords = dwords;
+       realloc = true;
+    }
+ 
+-   if (subgroups > scratch->subgroups) {
+-      scratch->subgroups = subgroups;
++   if (subgroups > replacement.subgroups) {
++      replacement.subgroups = subgroups;
+       realloc = true;
+    }
+ 
+    if (realloc) {
+-      agx_scratch_realloc(scratch);
++      replacement.buf = NULL;
++      if (!agx_scratch_realloc(&replacement))
++         return false;
++      agx_bo_unreference(scratch->dev, scratch->buf);
++      *scratch = replacement;
+    }
++   return true;
++}
++
++void
++agx_scratch_alloc(struct agx_scratch *scratch, unsigned dwords,
++                  size_t subgroups)
++{
++   /* Existing Vulkan callers have no error channel yet. */
++   if (!agx_scratch_try_alloc(scratch, dwords, subgroups))
++      abort();
+ }
+ 
+ void
+diff --git a/src/asahi/lib/agx_scratch.h b/src/asahi/lib/agx_scratch.h
+index eab82f5..b064fd7 100644
+--- a/src/asahi/lib/agx_scratch.h
++++ b/src/asahi/lib/agx_scratch.h
+@@ -35,5 +35,7 @@ void agx_scratch_debug_pre(struct agx_scratch *scratch);
+ void agx_scratch_debug_post(struct agx_scratch *scratch);
+ 
+ uint32_t agx_scratch_get_bucket(uint32_t dwords);
++bool agx_scratch_try_alloc(struct agx_scratch *scratch, uint32_t dwords,
++                           size_t subgroups);
+ void agx_scratch_alloc(struct agx_scratch *scratch, uint32_t dwords,
+                        size_t subgroups);
+diff --git a/src/asahi/lib/pool.c b/src/asahi/lib/pool.c
+index f532218..c131342 100644
+--- a/src/asahi/lib/pool.c
++++ b/src/asahi/lib/pool.c
+@@ -21,7 +21,14 @@ agx_pool_alloc_backing(struct agx_pool *pool, size_t bo_sz)
+    struct agx_bo *bo =
+       agx_bo_create(pool->dev, bo_sz, 0, pool->create_flags, pool->label);
+ 
+-   util_dynarray_append(&pool->bos, bo);
++   if (!bo)
++      return NULL;
++   struct agx_bo **entry = util_dynarray_grow(&pool->bos, struct agx_bo *, 1);
++   if (!entry) {
++      agx_bo_unreference(pool->dev, bo);
++      return NULL;
++   }
++   *entry = bo;
+    pool->transient_bo = bo;
+    pool->transient_offset = 0;
+ 
+@@ -82,6 +89,57 @@ agx_pool_alloc_aligned_with_bo(struct agx_pool *pool, size_t sz,
+    return ret;
+ }
+ 
++bool
++agx_pool_try_alloc_aligned(struct agx_pool *pool, size_t sz,
++                           unsigned alignment, struct agx_ptr *out)
++{
++   if (!alignment || (alignment & (alignment - 1)) || sz > UINT_MAX ||
++       sz > SIZE_MAX - 16383)
++      return false;
++   uint64_t aligned_offset = ((uint64_t)pool->transient_offset + alignment - 1)
++                             & ~((uint64_t)alignment - 1);
++   if (aligned_offset > UINT_MAX)
++      return false;
++   struct agx_bo *bo = pool->transient_bo;
++   unsigned offset = aligned_offset;
++   bool new_bo = !bo || offset >= POOL_SLAB_SIZE ||
++                 sz >= POOL_SLAB_SIZE - offset;
++
++   if (new_bo) {
++      bo = agx_bo_create(pool->dev, ALIGN_POT(MAX2(POOL_SLAB_SIZE, sz), 16384),
++                         0, pool->create_flags, pool->label);
++      if (!bo)
++         return false;
++      offset = 0;
++   }
++
++   if (sz > UINT_MAX - offset || offset + sz > bo->size) {
++      if (new_bo)
++         agx_bo_unreference(pool->dev, bo);
++      return false;
++   }
++
++   uint8_t *map = agx_bo_map(bo);
++   if (!map) {
++      if (new_bo)
++         agx_bo_unreference(pool->dev, bo);
++      return false;
++   }
++
++   if (new_bo) {
++      struct agx_bo **entry = util_dynarray_grow(&pool->bos, struct agx_bo *, 1);
++      if (!entry) {
++         agx_bo_unreference(pool->dev, bo);
++         return false;
++      }
++      *entry = bo;
++      pool->transient_bo = bo;
++   }
++   pool->transient_offset = offset + sz;
++   *out = (struct agx_ptr){.cpu = map + offset, .gpu = bo->va->addr + offset};
++   return true;
++}
++
+ uint64_t
+ agx_pool_upload(struct agx_pool *pool, const void *data, size_t sz)
+ {
+diff --git a/src/asahi/lib/pool.h b/src/asahi/lib/pool.h
+index eab4c0d..f598d6a 100644
+--- a/src/asahi/lib/pool.h
++++ b/src/asahi/lib/pool.h
+@@ -44,6 +44,10 @@ void agx_pool_cleanup(struct agx_pool *pool);
+ struct agx_ptr agx_pool_alloc_aligned_with_bo(struct agx_pool *pool, size_t sz,
+                                               unsigned alignment,
+                                               struct agx_bo **bo);
++/* Checked allocation for encoder continuations. Other pool users still need
++ * their own fallible paths. */
++bool agx_pool_try_alloc_aligned(struct agx_pool *pool, size_t sz,
++                                unsigned alignment, struct agx_ptr *out);
+ 
+ static inline struct agx_ptr
+ agx_pool_alloc_aligned(struct agx_pool *pool, size_t sz, unsigned alignment)
+diff --git a/src/asahi/vulkan/hk_cmd_buffer.c b/src/asahi/vulkan/hk_cmd_buffer.c
+index b527e97..d23c644 100644
+--- a/src/asahi/vulkan/hk_cmd_buffer.c
++++ b/src/asahi/vulkan/hk_cmd_buffer.c
+@@ -193,13 +193,26 @@ hk_pool_alloc_internal(struct hk_cmd_buffer *cmd, uint32_t size,
+    if (size > HK_CMD_BO_SIZE) {
+       uint32_t flags = usc ? AGX_BO_LOW_VA : 0;
+       struct agx_bo *bo =
+-         agx_bo_create(&dev->dev, size, flags, 0, "Large pool allocation");
+-
+-      util_dynarray_append(&cmd->large_bos, bo);
+-      return (struct agx_ptr){
+-         .gpu = bo->va->addr,
+-         .cpu = agx_bo_map(bo),
+-      };
++         agx_bo_create(&dev->dev, size, 0, flags, "Large pool allocation");
++      if (!bo) {
++         vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++         return (struct agx_ptr){0};
++      }
++      void *map = agx_bo_map(bo);
++      if (!map) {
++         agx_bo_unreference(&dev->dev, bo);
++         vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_HOST_MEMORY);
++         return (struct agx_ptr){0};
++      }
++      struct agx_bo **entry =
++         util_dynarray_grow(&cmd->large_bos, struct agx_bo *, 1);
++      if (!entry) {
++         agx_bo_unreference(&dev->dev, bo);
++         vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_HOST_MEMORY);
++         return (struct agx_ptr){0};
++      }
++      *entry = bo;
++      return (struct agx_ptr){.gpu = bo->va->addr, .cpu = map};
+    }
+ 
+    assert(size <= HK_CMD_BO_SIZE);
+@@ -231,7 +244,7 @@ hk_pool_alloc_internal(struct hk_cmd_buffer *cmd, uint32_t size,
+     * BO.
+     */
+    if (uploader->map == NULL || size < uploader->offset) {
+-      uploader->map = agx_bo_map(bo->bo);
++      uploader->map = bo->map;
+       uploader->base = bo->bo->va->addr;
+       uploader->offset = size;
+    }
+@@ -641,7 +654,10 @@ hk_reserve_scratch(struct hk_cmd_buffer *cmd, struct hk_cs *cs,
+    unsigned preamble_size = (s->b.info.preamble_scratch_size > 0) ? 1 : 0;
+ 
+    /* Note: this uses the hardware stage, not the software stage */
+-   hk_device_alloc_scratch(dev, s->b.info.stage, max_scratch_size);
++   if (!hk_device_alloc_scratch(dev, s->b.info.stage, max_scratch_size)) {
++      vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++      return;
++   }
+    perf_debug(cmd, "Reserving %u (%u) bytes of scratch for stage %s",
+               s->b.info.scratch_size, s->b.info.preamble_scratch_size,
+               _mesa_shader_stage_to_abbrev(s->b.info.stage));
+@@ -758,7 +774,15 @@ hk_dispatch_precomp(struct hk_cmd_buffer *cmd, struct agx_grid grid,
+                     void *data, size_t data_size)
+ {
+    struct hk_device *dev = hk_cmd_buffer_device(cmd);
+-   struct agx_precompiled_shader *prog = agx_get_precompiled(&dev->bg_eot, idx);
++   bool compile_failed;
++   struct agx_precompiled_shader *prog =
++      agx_try_get_precompiled_status(&dev->bg_eot, idx, &compile_failed);
++   if (!prog) {
++      vk_command_buffer_set_error(&cmd->vk,
++                                  compile_failed ? VK_ERROR_UNKNOWN :
++                                                   VK_ERROR_OUT_OF_DEVICE_MEMORY);
++      return;
++   }
+ 
+    struct hk_cs **target = (barrier & AGX_POSTGFX)  ? &cmd->current_cs.post_gfx
+                            : (barrier & AGX_PREGFX) ? &cmd->current_cs.pre_gfx
+diff --git a/src/asahi/vulkan/hk_cmd_draw.c b/src/asahi/vulkan/hk_cmd_draw.c
+index 5823c65..62b83ad 100644
+--- a/src/asahi/vulkan/hk_cmd_draw.c
++++ b/src/asahi/vulkan/hk_cmd_draw.c
+@@ -432,7 +432,11 @@ hk_build_bg_eot(struct hk_cmd_buffer *cmd, const VkRenderingInfo *info,
+    /* Get the shader */
+    key.reserved_preamble = uniforms;
+    /* XXX: locking? */
+-   struct agx_bg_eot_shader *shader = agx_get_bg_eot_shader(&dev->bg_eot, &key);
++   struct agx_bg_eot_shader *shader = agx_try_get_bg_eot_shader(&dev->bg_eot, &key);
++   if (!shader) {
++      vk_command_buffer_set_error(&cmd->vk, VK_ERROR_OUT_OF_DEVICE_MEMORY);
++      return (struct hk_bg_eot){0};
++   }
+ 
+    agx_usc_pack(&b, SHADER, cfg) {
+       cfg.code = agx_usc_addr(&dev->dev, shader->ptr);
+@@ -623,13 +627,21 @@ hk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+ 
+    render->cr.bg.main = hk_build_bg_eot(cmd, pRenderingInfo, false, false,
+                                         incomplete_render_area);
++   if (vk_command_buffer_has_error(&cmd->vk))
++      return;
+    render->cr.bg.partial =
+       hk_build_bg_eot(cmd, pRenderingInfo, false, true, incomplete_render_area);
++   if (vk_command_buffer_has_error(&cmd->vk))
++      return;
+ 
+    render->cr.eot.main =
+       hk_build_bg_eot(cmd, pRenderingInfo, true, false, incomplete_render_area);
++   if (vk_command_buffer_has_error(&cmd->vk))
++      return;
+    render->cr.eot.partial =
+       hk_build_bg_eot(cmd, pRenderingInfo, true, true, incomplete_render_area);
++   if (vk_command_buffer_has_error(&cmd->vk))
++      return;
+ 
+    render->cr.isp_bgobjvals = 0x300;
+ 
+diff --git a/src/asahi/vulkan/hk_cmd_pool.c b/src/asahi/vulkan/hk_cmd_pool.c
+index 1f71a2f..7beb9fe 100644
+--- a/src/asahi/vulkan/hk_cmd_pool.c
++++ b/src/asahi/vulkan/hk_cmd_pool.c
+@@ -30,6 +30,11 @@ hk_cmd_bo_create(struct hk_cmd_pool *pool, bool usc, struct hk_cmd_bo **bo_out)
+    }
+ 
+    bo->map = agx_bo_map(bo->bo);
++   if (!bo->map) {
++      agx_bo_unreference(&dev->dev, bo->bo);
++      vk_free(&pool->vk.alloc, bo);
++      return vk_error(pool, VK_ERROR_OUT_OF_HOST_MEMORY);
++   }
+ 
+    *bo_out = bo;
+    return VK_SUCCESS;
+diff --git a/src/asahi/vulkan/hk_device.c b/src/asahi/vulkan/hk_device.c
+index b3263bf..c855de1 100644
+--- a/src/asahi/vulkan/hk_device.c
++++ b/src/asahi/vulkan/hk_device.c
+@@ -64,6 +64,11 @@ hk_upload_rodata(struct hk_device *dev)
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+ 
+    uint8_t *map = agx_bo_map(dev->rodata.bo);
++   if (!map) {
++      agx_bo_unreference(&dev->dev, dev->rodata.bo);
++      dev->rodata.bo = NULL;
++      return VK_ERROR_OUT_OF_HOST_MEMORY;
++   }
+    uint32_t offs = 0;
+ 
+    offs = align(offs, 8);
+@@ -430,6 +435,7 @@ hk_CreateDevice(VkPhysicalDevice physicalDevice,
+    *pDevice = hk_device_to_handle(dev);
+ 
+    simple_mtx_init(&dev->scratch.lock, mtx_plain);
++   dev->scratch.retired = UTIL_DYNARRAY_INIT;
+    agx_scratch_init(&dev->dev, &dev->scratch.vs);
+    agx_scratch_init(&dev->dev, &dev->scratch.fs);
+    agx_scratch_init(&dev->dev, &dev->scratch.cs);
+@@ -479,6 +485,12 @@ hk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+    if (!dev)
+       return;
+ 
++   /* Submit threads can access queue and device-owned state during drain. */
++   vk_foreach_queue_safe(iter, &dev->vk) {
++      struct hk_queue *queue = container_of(iter, struct hk_queue, vk);
++      hk_queue_finish(dev, queue);
++   }
++
+    util_dynarray_fini(&dev->external_bos.counts);
+    util_dynarray_fini(&dev->external_bos.list);
+    u_rwlock_destroy(&dev->external_bos.lock);
+@@ -489,16 +501,14 @@ hk_DestroyDevice(VkDevice _device, const VkAllocationCallbacks *pAllocator)
+ 
+    vk_pipeline_cache_destroy(dev->vk.mem_cache, NULL);
+ 
+-   vk_foreach_queue_safe(iter, &dev->vk) {
+-      struct hk_queue *queue = container_of(iter, struct hk_queue, vk);
+-      hk_queue_finish(dev, queue);
+-   }
+-
+    vk_device_finish(&dev->vk);
+ 
+    agx_scratch_fini(&dev->scratch.vs);
+    agx_scratch_fini(&dev->scratch.fs);
+    agx_scratch_fini(&dev->scratch.cs);
++   util_dynarray_foreach(&dev->scratch.retired, struct agx_bo *, bo)
++      agx_bo_unreference(&dev->dev, *bo);
++   util_dynarray_fini(&dev->scratch.retired);
+    simple_mtx_destroy(&dev->scratch.lock);
+ 
+    if (dev->null_fs) {
+diff --git a/src/asahi/vulkan/hk_device.h b/src/asahi/vulkan/hk_device.h
+index e6c71aa..6c42389 100644
+--- a/src/asahi/vulkan/hk_device.h
++++ b/src/asahi/vulkan/hk_device.h
+@@ -94,6 +94,8 @@ struct hk_device {
+ 
+    struct {
+       struct agx_scratch vs, fs, cs;
++      /* Keep replaced BOs alive while prior submissions may still use them. */
++      struct util_dynarray retired;
+       simple_mtx_t lock;
+    } scratch;
+ 
+@@ -148,11 +150,30 @@ hk_device_scratch_locked(struct hk_device *dev, mesa_shader_stage stage)
+    }
+ }
+ 
+-static inline void
++static inline bool
+ hk_device_alloc_scratch(struct hk_device *dev, mesa_shader_stage stage,
+                         unsigned size)
+ {
+    simple_mtx_lock(&dev->scratch.lock);
+-   agx_scratch_alloc(hk_device_scratch_locked(dev, stage), size, 0);
++   struct agx_scratch *scratch = hk_device_scratch_locked(dev, stage);
++   struct agx_bo *old = scratch->buf;
++   bool retain = old && size > scratch->size_dwords;
++   if (retain) {
++      struct agx_bo **entry =
++         util_dynarray_grow(&dev->scratch.retired, struct agx_bo *, 1);
++      if (!entry) {
++         simple_mtx_unlock(&dev->scratch.lock);
++         return false;
++      }
++      agx_bo_reference(old);
++      *entry = old;
++   }
++   bool ok = agx_scratch_try_alloc(scratch, size, 0);
++   if (!ok && retain) {
++      struct agx_bo *retired = util_dynarray_pop(&dev->scratch.retired,
++                                                 struct agx_bo *);
++      agx_bo_unreference(&dev->dev, retired);
++   }
+    simple_mtx_unlock(&dev->scratch.lock);
++   return ok;
+ }
+diff --git a/src/asahi/vulkan/hk_queue.c b/src/asahi/vulkan/hk_queue.c
+index e7e6aec..dc33f4f 100644
+--- a/src/asahi/vulkan/hk_queue.c
++++ b/src/asahi/vulkan/hk_queue.c
+@@ -78,7 +78,7 @@ queue_submit_empty(struct hk_device *dev, struct hk_queue *queue,
+ 
+ static void
+ asahi_fill_cdm_command(struct hk_device *dev, struct hk_cs *cs,
+-                       struct drm_asahi_cmd_compute *cmd)
++                       struct drm_asahi_cmd_compute *cmd, uint64_t helper)
+ {
+    size_t len = cs->stream_linked ? 65536 /* XXX */ : (cs->current - cs->start);
+ 
+@@ -98,13 +98,13 @@ asahi_fill_cdm_command(struct hk_device *dev, struct hk_cs *cs,
+    if (cs->scratch.cs.main || cs->scratch.cs.preamble) {
+       cmd->helper.data = dev->scratch.cs.buf->va->addr;
+       cmd->helper.cfg = cs->scratch.cs.preamble ? (1 << 16) : 0;
+-      cmd->helper.binary = agx_helper_program(&dev->bg_eot);
++      cmd->helper.binary = helper;
+    }
+ }
+ 
+ static void
+ asahi_fill_vdm_command(struct hk_device *dev, struct hk_cs *cs,
+-                       struct drm_asahi_cmd_render *c)
++                       struct drm_asahi_cmd_render *c, uint64_t helper)
+ {
+    memset(c, 0, sizeof(*c));
+ 
+@@ -205,13 +205,13 @@ asahi_fill_vdm_command(struct hk_device *dev, struct hk_cs *cs,
+       c->flags |= DRM_ASAHI_RENDER_VERTEX_SCRATCH;
+       c->vertex_helper.data = dev->scratch.vs.buf->va->addr;
+       c->vertex_helper.cfg = cs->scratch.vs.preamble ? (1 << 16) : 0;
+-      c->vertex_helper.binary = agx_helper_program(&dev->bg_eot);
++      c->vertex_helper.binary = helper;
+    }
+ 
+    if (cs->scratch.fs.main || cs->scratch.fs.preamble) {
+       c->fragment_helper.data = dev->scratch.fs.buf->va->addr;
+       c->fragment_helper.cfg = cs->scratch.fs.preamble ? (1 << 16) : 0;
+-      c->fragment_helper.binary = agx_helper_program(&dev->bg_eot);
++      c->fragment_helper.binary = helper;
+    }
+ 
+    if (cs->timestamp.end.handle) {
+@@ -737,6 +737,23 @@ static VkResult
+ queue_submit(struct hk_device *dev, struct hk_queue *queue,
+              struct vk_queue_submit *submit)
+ {
++   /* Resolve any scratch helper before sparse binds or queue submissions. */
++   bool needs_helper = false;
++   for (unsigned i = 0; i < submit->command_buffer_count; ++i) {
++      struct hk_cmd_buffer *cmdbuf =
++         (struct hk_cmd_buffer *)submit->command_buffers[i];
++      list_for_each_entry(struct hk_cs, cs, &cmdbuf->control_streams, node) {
++         needs_helper |= cs->scratch.cs.main || cs->scratch.cs.preamble ||
++                         cs->scratch.vs.main || cs->scratch.vs.preamble ||
++                         cs->scratch.fs.main || cs->scratch.fs.preamble;
++      }
++   }
++   bool compile_failed = false;
++   uint64_t helper = needs_helper ?
++      agx_try_helper_program_status(&dev->bg_eot, &compile_failed) : 0;
++   if (needs_helper && !helper)
++      return compile_failed ? VK_ERROR_UNKNOWN : VK_ERROR_OUT_OF_DEVICE_MEMORY;
++
+    /* TODO: Support asynchronous sparse queue? */
+    if (submit->buffer_bind_count || submit->image_bind_count ||
+        submit->image_opaque_bind_count) {
+@@ -813,6 +830,9 @@ queue_submit(struct hk_device *dev, struct hk_queue *queue,
+ 
+    unsigned nr_vdm = 0, nr_cdm = 0;
+ 
++   /* Scratch growth runs on recording threads; snapshot its BO addresses
++    * while the lock excludes replacement. Retired BOs survive submissions. */
++   simple_mtx_lock(&dev->scratch.lock);
+    for (unsigned i = 0; i < submit->command_buffer_count; ++i) {
+       struct hk_cmd_buffer *cmdbuf =
+          (struct hk_cmd_buffer *)submit->command_buffers[i];
+@@ -835,7 +855,7 @@ queue_submit(struct hk_device *dev, struct hk_queue *queue,
+                    cs->timestamp.end.handle);
+ 
+             struct drm_asahi_cmd_compute cmd;
+-            asahi_fill_cdm_command(dev, cs, &cmd);
++            asahi_fill_cdm_command(dev, cs, &cmd, helper);
+             util_dynarray_append(&payload, cmd);
+             nr_cdm++;
+          } else {
+@@ -846,13 +866,15 @@ queue_submit(struct hk_device *dev, struct hk_queue *queue,
+                    cs->timestamp.end.handle);
+ 
+             struct drm_asahi_cmd_render cmd;
+-            asahi_fill_vdm_command(dev, cs, &cmd);
++            asahi_fill_vdm_command(dev, cs, &cmd, helper);
+             util_dynarray_append(&payload, cmd);
+             nr_vdm++;
+          }
+       }
+    }
+ 
++   simple_mtx_unlock(&dev->scratch.lock);
++
+    if (dev->dev.debug & AGX_DBG_TRACE) {
+       agxdecode_drm_cmdbuf(dev->dev.agxdecode, &dev->dev.params, &payload,
+                            true);
+@@ -975,8 +997,9 @@ hk_queue_init(struct hk_device *dev, const VkDeviceQueueCreateInfo *pCreateInfo,
+ 
+    if (drmSyncobjCreate(dev->dev.fd, 0, &queue->drm.syncobj)) {
+       mesa_loge("drmSyncobjCreate() failed %d\n", errno);
+-      agx_destroy_command_queue(&dev->dev, queue->drm.id);
+       vk_queue_finish(&queue->vk);
++      agx_destroy_command_queue(&dev->dev, queue->drm.id);
++      vk_free(&dev->vk.alloc, queue);
+ 
+       return vk_errorf(dev, VK_ERROR_OUT_OF_HOST_MEMORY,
+                        "DRM_IOCTL_SYNCOBJ_CREATE failed: %m");
+@@ -996,8 +1019,10 @@ hk_queue_init(struct hk_device *dev, const VkDeviceQueueCreateInfo *pCreateInfo,
+ void
+ hk_queue_finish(struct hk_device *dev, struct hk_queue *queue)
+ {
++   /* Drain and join the host submit thread while its kernel queue and
++    * timeline syncobj are still usable. This does not wait for GPU idle. */
++   vk_queue_finish(&queue->vk);
+    drmSyncobjDestroy(dev->dev.fd, queue->drm.syncobj);
+    agx_destroy_command_queue(&dev->dev, queue->drm.id);
+-   vk_queue_finish(&queue->vk);
+    vk_free(&dev->vk.alloc, queue);
+ }
+diff --git a/src/gallium/drivers/asahi/agx_apple9.c b/src/gallium/drivers/asahi/agx_apple9.c
+index bd4d668..0b03de6 100644
+--- a/src/gallium/drivers/asahi/agx_apple9.c
++++ b/src/gallium/drivers/asahi/agx_apple9.c
+@@ -419,7 +419,8 @@ agx_apple9_prepare_compute_dispatch(
+    uint64_t preamble_address, uint64_t *launch_address)
+ {
+    const struct apple9_compute_abi_desc *abi = apple9_compute_abi(profile);
+-   if (!abi || !resources || !geometry || !launch_address ||
++   if (!dev || !body || !dev->apple9_entries || !dev->apple9_entry_map ||
++       !abi || !resources || !geometry || !launch_address ||
+        !apple9_compute_profile_valid(profile, abi) ||
+        resource_count != profile->resource_binding_count ||
+        !!preamble_address != !!profile->preamble_size)
+@@ -430,16 +431,22 @@ agx_apple9_prepare_compute_dispatch(
+       return false;
+ 
+    size_t record_size = apple9_compute_resource_record_size_for_abi(abi);
+-   struct agx_ptr record = agx_pool_alloc_aligned(usc_pool, record_size, 64);
++   struct agx_ptr record;
++   if (!agx_pool_try_alloc_aligned(usc_pool, record_size, 64, &record))
++      return false;
+    memset(record.cpu, 0, record_size);
+    if (!agx_apple9_build_compute_geometry_fields(record.cpu, record_size,
+                                                 record.gpu, geometry))
+       return false;
+    if (profile->abi == AGX_APPLE9_COMPUTE_ABI_DESCRIPTOR_TABLES) {
++      size_t resource_bytes = resource_count * sizeof(uint64_t);
++      struct agx_ptr resource_table;
++      if (!agx_pool_try_alloc_aligned(usc_pool, resource_bytes, 64,
++                                      &resource_table))
++         return false;
++      memcpy(resource_table.cpu, resources, resource_bytes);
+       uint64_t roots[AGX_APPLE9_GRAPHICS_ROOT_WORDS / 2] = {
+-         textures, samplers,
+-         agx_pool_upload_aligned(usc_pool, resources,
+-                                 resource_count * sizeof(uint64_t), 64),
++         textures, samplers, resource_table.gpu,
+          apple9_get_u64(record.cpu), AGX_APPLE9_COMPUTE_SHARED_ROOT, 0,
+       };
+       memcpy(record.cpu, roots, sizeof(roots));
+@@ -450,8 +457,11 @@ agx_apple9_prepare_compute_dispatch(
+                        resources[i]);
+    }
+ 
+-   struct agx_ptr launch = agx_pool_alloc_aligned(
+-      usc_pool, agx_apple9_compute_launch_size(profile), 64);
++   struct agx_ptr launch;
++   if (!agx_pool_try_alloc_aligned(usc_pool,
++                                   agx_apple9_compute_launch_size(profile),
++                                   64, &launch))
++      return false;
+    if (!apple9_build_compute_launch(launch.cpu, dev->shader_base, launch.gpu,
+                                     record.gpu, entry, profile, preamble_address))
+       return false;
+@@ -788,6 +798,9 @@ agx_apple9_prepare_draw(struct agx_device *dev, struct agx_pool *usc_pool,
+                         struct agx_apple9_uniform_draw *draw,
+                         const struct agx_apple9_uniform_draw *previous)
+ {
++   if (!dev || !dev->apple9_entries || !dev->apple9_entry_map ||
++       !usc_pool || !context_pool || !pipeline || !draw)
++      return false;
+    const struct agx_apple9_render_stage *stages[] = {&pipeline->vertex,
+                                                      &pipeline->fragment};
+    unsigned tile_bytes = 0;
+@@ -845,7 +858,10 @@ agx_apple9_prepare_draw(struct agx_device *dev, struct agx_pool *usc_pool,
+          return false;
+       }
+       unsigned launch_size = AGX_APPLE9_GRAPHICS_LAUNCH_SIZE;
+-      struct agx_ptr state = agx_pool_alloc_aligned(usc_pool, 0x100 + launch_size, 64);
++      struct agx_ptr state;
++      if (!agx_pool_try_alloc_aligned(usc_pool, 0x100 + launch_size, 64,
++                                      &state))
++         return false;
+       uint8_t *roots = state.cpu;
+       memset(roots, 0, 0x100);
+       apple9_put_u64(roots, draw->texture_table[stage]);
+@@ -893,8 +909,10 @@ agx_apple9_prepare_draw(struct agx_device *dev, struct agx_pool *usc_pool,
+       draw->coefficients = previous->coefficients;
+       cf_count = previous->cf_count;
+    } else {
+-      struct agx_ptr cf =
+-         agx_pool_alloc_aligned(usc_pool, APPLE9_CF_BINDINGS_SIZE, 64);
++      struct agx_ptr cf;
++      if (!agx_pool_try_alloc_aligned(usc_pool, APPLE9_CF_BINDINGS_SIZE, 64,
++                                      &cf))
++         return false;
+       cf_count = apple9_build_cf_bindings(
+          cf.cpu, pipeline->vertex.varying_components,
+          pipeline->fragment.apple9_linear_mask,
+@@ -1009,10 +1027,15 @@ agx_apple9_prepare_draw(struct agx_device *dev, struct agx_pool *usc_pool,
+        !memcmp(previous->ppp_record, ppp, sizeof(draw->ppp_record))) {
+       draw->ppp = previous->ppp;
+    } else {
+-      uint64_t address = agx_pool_upload_aligned(context_pool, ppp,
+-                                                 sizeof(draw->ppp_record), 64);
+-      assert(address >= AGX_APPLE9_RENDER_CONTEXT_BASE &&
+-             address - AGX_APPLE9_RENDER_CONTEXT_BASE <= UINT32_MAX);
++      struct agx_ptr ppp_allocation;
++      if (!agx_pool_try_alloc_aligned(context_pool, sizeof(draw->ppp_record),
++                                      64, &ppp_allocation))
++         return false;
++      uint64_t address = ppp_allocation.gpu;
++      if (address < AGX_APPLE9_RENDER_CONTEXT_BASE ||
++          address - AGX_APPLE9_RENDER_CONTEXT_BASE > UINT32_MAX)
++         return false;
++      memcpy(ppp_allocation.cpu, ppp, sizeof(draw->ppp_record));
+       draw->ppp = address - AGX_APPLE9_RENDER_CONTEXT_BASE;
+    }
+    return true;
+diff --git a/src/gallium/drivers/asahi/agx_batch.c b/src/gallium/drivers/asahi/agx_batch.c
+index 3414578..debdcee 100644
+--- a/src/gallium/drivers/asahi/agx_batch.c
++++ b/src/gallium/drivers/asahi/agx_batch.c
+@@ -78,28 +78,55 @@ agx_batch_mark_complete(struct agx_batch *batch)
+    BITSET_CLEAR(batch->ctx->batches.submitted, batch_idx);
+ }
+ 
+-struct agx_encoder
+-agx_encoder_allocate(struct agx_device *dev, bool vdm)
++static bool
++agx_encoder_try_allocate(struct agx_device *dev, bool vdm,
++                         struct agx_encoder *encoder)
+ {
+    unsigned flags = vdm && agx_apple9_direct_render_enabled(dev)
+                        ? AGX_BO_CONTEXT | AGX_BO_WRITEBACK
+                        : 0;
+    struct agx_bo *bo = agx_bo_create(dev, 0x80000, 0, flags, "Encoder");
++   if (!bo)
++      return false;
+    uint8_t *map = agx_bo_map(bo);
+-   return (struct agx_encoder){
+-      .bo = bo,
+-      .current = map,
+-      .end = map + bo->size,
+-   };
++   if (!map) {
++      agx_bo_unreference(dev, bo);
++      return false;
++   }
++   *encoder = (struct agx_encoder){.bo = bo, .current = map,
++                                   .end = map + bo->size};
++   return true;
+ }
+ 
+-static void
++bool
++agx_batch_ensure_compute_encoder(struct agx_batch *batch)
++{
++   struct agx_context *ctx = batch->ctx;
++   if (ctx->batch_discarded)
++      return false;
++   if (batch->cdm.bo)
++      return true;
++   if (!agx_encoder_try_allocate(agx_device(ctx->base.screen), false,
++                                 &batch->cdm)) {
++      ctx->batch_discarded = true;
++      return false;
++   }
++   return true;
++}
++
++static bool
+ agx_batch_init(struct agx_context *ctx,
+                const struct pipe_framebuffer_state *key,
+                struct agx_batch *batch)
+ {
+    struct agx_device *dev = agx_device(ctx->base.screen);
+    struct agx_screen *screen = agx_screen(ctx->base.screen);
++   bool compute = key->width == AGX_COMPUTE_BATCH_WIDTH;
++   struct agx_encoder encoder = {0};
++   if (!agx_encoder_try_allocate(dev, !compute, &encoder)) {
++      ctx->batch_discarded = true;
++      return false;
++   }
+ 
+    batch->ctx = ctx;
+    util_copy_framebuffer_state(&batch->key, key);
+@@ -128,11 +155,11 @@ agx_batch_init(struct agx_context *ctx,
+    batch->apple9_render_initialized = false;
+    batch->apple9_draw_count = 0;
+ 
+-   if (agx_batch_is_compute(batch)) {
+-      batch->cdm = agx_encoder_allocate(dev, false);
++   if (compute) {
++      batch->cdm = encoder;
+       memset(&batch->vdm, 0, sizeof(batch->vdm));
+    } else {
+-      batch->vdm = agx_encoder_allocate(dev, true);
++      batch->vdm = encoder;
+       memset(&batch->cdm, 0, sizeof(batch->cdm));
+    }
+ 
+@@ -182,6 +209,7 @@ agx_batch_init(struct agx_context *ctx,
+    }
+ 
+    agx_batch_mark_active(batch);
++   return true;
+ }
+ 
+ static struct agx_timestamps *
+@@ -226,7 +254,8 @@ agx_batch_print_stats(struct agx_device *dev, struct agx_batch *batch)
+ }
+ 
+ static void
+-agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
++agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset,
++                  bool discarded)
+ {
+    struct agx_device *dev = agx_device(ctx->base.screen);
+    struct agx_screen *screen = agx_screen(ctx->base.screen);
+@@ -237,7 +266,7 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+    assert(ctx->batch != batch);
+ 
+    uint64_t begin_ts = ~0, end_ts = 0;
+-   if (batch->timestamps.size) {
++   if (!discarded && batch->timestamps.size) {
+       struct agx_timestamps *ts = agx_batch_timestamps(batch);
+ 
+       if (batch->cdm.bo) {
+@@ -251,7 +280,10 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+       }
+    }
+ 
+-   agx_finish_batch_queries(batch, begin_ts, end_ts);
++   if (discarded)
++      agx_cancel_batch_queries(batch);
++   else
++      agx_finish_batch_queries(batch, begin_ts, end_ts);
+ 
+    if (reset) {
+       int handle;
+@@ -293,7 +325,7 @@ agx_batch_cleanup(struct agx_context *ctx, struct agx_batch *batch, bool reset)
+    util_dynarray_fini(&batch->timestamps);
+    util_dynarray_fini(&batch->apple9_attachments);
+ 
+-   if (!(dev->debug & (AGX_DBG_TRACE | AGX_DBG_SYNC))) {
++   if (!discarded && !(dev->debug & (AGX_DBG_TRACE | AGX_DBG_SYNC))) {
+       agx_batch_print_stats(dev, batch);
+    }
+ 
+@@ -326,7 +358,7 @@ agx_cleanup_batches(struct agx_context *ctx)
+       return -1;
+ 
+    assert(first < AGX_MAX_BATCHES);
+-   agx_batch_cleanup(ctx, batches[first], false);
++   agx_batch_cleanup(ctx, batches[first], false, false);
+    return agx_batch_idx(batches[first]);
+ }
+ 
+@@ -334,6 +366,9 @@ static struct agx_batch *
+ agx_get_batch_for_framebuffer(struct agx_context *ctx,
+                               const struct pipe_framebuffer_state *state)
+ {
++   if (ctx->batch_discarded)
++      return NULL;
++
+    /* Look if we have a matching batch */
+    unsigned i;
+    foreach_active(ctx, i) {
+@@ -353,8 +388,7 @@ agx_get_batch_for_framebuffer(struct agx_context *ctx,
+       if (!BITSET_TEST(ctx->batches.active, i) &&
+           !BITSET_TEST(ctx->batches.submitted, i)) {
+          struct agx_batch *batch = &ctx->batches.slots[i];
+-         agx_batch_init(ctx, state, batch);
+-         return batch;
++         return agx_batch_init(ctx, state, batch) ? batch : NULL;
+       }
+    }
+ 
+@@ -362,8 +396,7 @@ agx_get_batch_for_framebuffer(struct agx_context *ctx,
+    int freed = agx_cleanup_batches(ctx);
+    if (freed >= 0) {
+       struct agx_batch *batch = &ctx->batches.slots[freed];
+-      agx_batch_init(ctx, state, batch);
+-      return batch;
++      return agx_batch_init(ctx, state, batch) ? batch : NULL;
+    }
+ 
+    /* Else, evict something */
+@@ -387,18 +420,21 @@ agx_get_batch_for_framebuffer(struct agx_context *ctx,
+    agx_sync_batch_for_reason(ctx, batch, "Too many batches");
+ 
+    /* Batch is now free */
+-   agx_batch_init(ctx, state, batch);
+-   return batch;
++   return agx_batch_init(ctx, state, batch) ? batch : NULL;
+ }
+ 
+ struct agx_batch *
+ agx_get_batch(struct agx_context *ctx)
+ {
++   if (ctx->batch_discarded)
++      return NULL;
+    if (!ctx->batch || agx_batch_is_compute(ctx->batch)) {
+       ctx->batch = agx_get_batch_for_framebuffer(ctx, &ctx->framebuffer);
+       agx_dirty_all(ctx);
+    }
+ 
++   if (!ctx->batch)
++      return NULL;
+    assert(util_framebuffer_state_equal(&ctx->framebuffer, &ctx->batch->key));
+    return ctx->batch;
+ }
+@@ -1116,7 +1152,7 @@ agx_sync_batch(struct agx_context *ctx, struct agx_batch *batch)
+    assert(batch->syncobj);
+    int ret = drmSyncobjWait(dev->fd, &batch->syncobj, 1, INT64_MAX, 0, NULL);
+    assert(!ret);
+-   agx_batch_cleanup(ctx, batch, false);
++   agx_batch_cleanup(ctx, batch, false, false);
+ }
+ 
+ void
+@@ -1151,10 +1187,11 @@ agx_batch_discard(struct agx_context *ctx, struct agx_batch *batch)
+    /* A failed encoder may already own resource write dependencies. Retire
+     * those along with its allocations without publishing a GPU command. */
+    assert(agx_batch_is_active(batch));
++   ctx->batch_discarded = true;
+    agx_batch_mark_submitted(batch);
+    if (ctx->batch == batch)
+       ctx->batch = NULL;
+-   agx_batch_cleanup(ctx, batch, false);
++   agx_batch_cleanup(ctx, batch, false, true);
+ }
+ 
+ void
+@@ -1170,7 +1207,7 @@ agx_batch_reset(struct agx_context *ctx, struct agx_batch *batch)
+    if (ctx->batch == batch)
+       ctx->batch = NULL;
+ 
+-   agx_batch_cleanup(ctx, batch, true);
++   agx_batch_cleanup(ctx, batch, true, false);
+ }
+ 
+ /*
+diff --git a/src/gallium/drivers/asahi/agx_blit.c b/src/gallium/drivers/asahi/agx_blit.c
+index ba286d6..d0547c8 100644
+--- a/src/gallium/drivers/asahi/agx_blit.c
++++ b/src/gallium/drivers/asahi/agx_blit.c
+@@ -1550,6 +1550,8 @@ agx_resource_copy_region(struct pipe_context *pctx, struct pipe_resource *dst,
+ 
+    if (dst->target == PIPE_BUFFER && src->target == PIPE_BUFFER) {
+       struct agx_batch *batch = agx_get_compute_batch(agx_context(pctx));
++      if (!batch)
++         return;
+       agx_batch_init_state(batch);
+       assert(dst->format == src->format);
+       unsigned bs = util_format_get_blocksize(dst->format);
+@@ -1569,6 +1571,8 @@ agx_resource_copy_region(struct pipe_context *pctx, struct pipe_resource *dst,
+          unsigned bytes = uint4s * 16;
+ 
+          libagx_copy_uint4(batch, agx_1d(uint4s), AGX_BARRIER_ALL, dst_addr, src_addr);
++         if (agx_context(pctx)->batch_discarded)
++            return;
+ 
+          dst_addr += bytes;
+          src_addr += bytes;
+diff --git a/src/gallium/drivers/asahi/agx_pipe.c b/src/gallium/drivers/asahi/agx_pipe.c
+index 0d8d00a..71ac982 100644
+--- a/src/gallium/drivers/asahi/agx_pipe.c
++++ b/src/gallium/drivers/asahi/agx_pipe.c
+@@ -1183,6 +1183,8 @@ agx_clear(struct pipe_context *pctx, unsigned buffers,
+ {
+    struct agx_context *ctx = agx_context(pctx);
+    struct agx_batch *batch = agx_get_batch(ctx);
++   if (!batch)
++      return;
+ 
+    if (unlikely(!agx_render_condition_check(ctx)))
+       return;
+@@ -1236,8 +1238,12 @@ agx_clear(struct pipe_context *pctx, unsigned buffers,
+          util_framebuffer_get_num_samples(&ctx->framebuffer) > 1);
+    }
+ 
++   if (ctx->batch_discarded)
++      return;
+    if (fastclear)
+       agx_batch_init_state(batch);
++   if (ctx->batch_discarded)
++      return;
+ 
+    batch->clear |= fastclear;
+    batch->resolve |= buffers;
+@@ -1333,7 +1339,7 @@ build_timestamp_offset(struct agx_batch *batch, unsigned offset)
+ #define timestamp_offset(batch, offs)                                          \
+    build_timestamp_offset(batch, offsetof(struct agx_timestamps, offs))
+ 
+-static void
++static bool
+ agx_cmdbuf(struct agx_device *dev, struct drm_asahi_cmd_render *c,
+            struct agx_pool *pool, struct agx_batch *batch,
+            struct pipe_framebuffer_state *framebuffer, uint64_t encoder_ptr,
+@@ -1530,12 +1536,16 @@ agx_cmdbuf(struct agx_device *dev, struct drm_asahi_cmd_render *c,
+       c->flags |= DRM_ASAHI_RENDER_VERTEX_SCRATCH;
+       c->vertex_helper.data = batch->ctx->scratch_vs.buf->va->addr;
+       c->vertex_helper.cfg = batch->vs_preamble_scratch << 16;
+-      c->vertex_helper.binary = agx_helper_program(&batch->ctx->bg_eot);
++      c->vertex_helper.binary = agx_try_helper_program(&batch->ctx->bg_eot);
++      if (!c->vertex_helper.binary)
++         return false;
+    }
+    if (batch->fs_scratch) {
+       c->fragment_helper.data = batch->ctx->scratch_fs.buf->va->addr;
+       c->fragment_helper.cfg = batch->fs_preamble_scratch << 16;
+-      c->fragment_helper.binary = agx_helper_program(&batch->ctx->bg_eot);
++      c->fragment_helper.binary = agx_try_helper_program(&batch->ctx->bg_eot);
++      if (!c->fragment_helper.binary)
++         return false;
+    }
+ 
+    if (batch->timestamps.size > 0) {
+@@ -1544,6 +1554,7 @@ agx_cmdbuf(struct agx_device *dev, struct drm_asahi_cmd_render *c,
+       c->ts_vtx.start.offset = timestamp_offset(batch, vtx_start);
+       c->ts_frag.end.offset = timestamp_offset(batch, frag_end);
+    }
++   return true;
+ }
+ 
+ /* Explicit pbuffer presentation for the optional m1n1 shim. No resource is
+@@ -1657,7 +1668,7 @@ agx_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
+    }
+ }
+ 
+-static void
++static bool
+ agx_flush_compute(struct agx_context *ctx, struct agx_batch *batch,
+                   struct drm_asahi_cmd_compute *cmdbuf)
+ {
+@@ -1692,7 +1703,9 @@ agx_flush_compute(struct agx_context *ctx, struct agx_batch *batch,
+       cmdbuf->helper.data = ctx->scratch_cs.buf->va->addr;
+       cmdbuf->helper.cfg = batch->cs_preamble_scratch << 16;
+       // cmdbuf->helper.cfg |= 0x40;
+-      cmdbuf->helper.binary = agx_helper_program(&batch->ctx->bg_eot);
++      cmdbuf->helper.binary = agx_try_helper_program(&batch->ctx->bg_eot);
++      if (!cmdbuf->helper.binary)
++         return false;
+    }
+ 
+    if (batch->timestamps.size > 0) {
+@@ -1701,6 +1714,7 @@ agx_flush_compute(struct agx_context *ctx, struct agx_batch *batch,
+       cmdbuf->ts.start.offset = timestamp_offset(batch, comp_start);
+       cmdbuf->ts.end.offset = timestamp_offset(batch, comp_start);
+    }
++   return true;
+ }
+ 
+ static bool
+@@ -1730,11 +1744,17 @@ agx_flush_render(struct agx_context *ctx, struct agx_batch *batch,
+ 
+    struct asahi_bg_eot pipeline_background =
+       agx_build_bg_eot(batch, false, false);
++   if (ctx->batch_discarded)
++      return false;
+ 
+    struct asahi_bg_eot pipeline_background_partial =
+       agx_build_bg_eot(batch, false, true);
++   if (ctx->batch_discarded)
++      return false;
+ 
+    struct asahi_bg_eot pipeline_store = agx_build_bg_eot(batch, true, false);
++   if (ctx->batch_discarded)
++      return false;
+ 
+    bool clear_pipeline_textures =
+       agx_tilebuffer_spills(&batch->tilebuffer_layout);
+@@ -1750,10 +1770,20 @@ agx_flush_render(struct agx_context *ctx, struct agx_batch *batch,
+     * submit time, they're done growing and are uploaded to GPU memory attached
+     * to the batch.
+     */
+-   uint64_t scissor = agx_pool_upload_aligned(&batch->pool, batch->scissor.data,
+-                                              batch->scissor.size, 64);
+-   uint64_t zbias = agx_pool_upload_aligned(
+-      &batch->pool, batch->depth_bias.data, batch->depth_bias.size, 64);
++   struct agx_ptr scissor_upload, zbias_upload;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, batch->scissor.size, 64,
++                                   &scissor_upload) ||
++       !agx_pool_try_alloc_aligned(&batch->pool, batch->depth_bias.size, 64,
++                                   &zbias_upload)) {
++      ctx->batch_discarded = true;
++      return false;
++   }
++   if (batch->scissor.size)
++      memcpy(scissor_upload.cpu, batch->scissor.data, batch->scissor.size);
++   if (batch->depth_bias.size)
++      memcpy(zbias_upload.cpu, batch->depth_bias.data, batch->depth_bias.size);
++   uint64_t scissor = scissor_upload.gpu;
++   uint64_t zbias = zbias_upload.gpu;
+ 
+    /* BO list for a given batch consists of:
+     *  - BOs for the batch's pools
+@@ -1763,12 +1793,13 @@ agx_flush_render(struct agx_context *ctx, struct agx_batch *batch,
+     */
+    agx_batch_add_bo(batch, batch->vdm.bo);
+ 
+-   agx_cmdbuf(dev, cmdbuf, &batch->pool, batch, &batch->key,
+-              batch->vdm.bo->va->addr, scissor,
+-              zbias, agx_get_occlusion_heap(batch), pipeline_background,
+-              pipeline_background_partial, pipeline_store,
+-              clear_pipeline_textures, batch->clear_depth, batch->clear_stencil,
+-              &batch->tilebuffer_layout);
++   if (!agx_cmdbuf(dev, cmdbuf, &batch->pool, batch, &batch->key,
++                   batch->vdm.bo->va->addr, scissor,
++                   zbias, agx_get_occlusion_heap(batch), pipeline_background,
++                   pipeline_background_partial, pipeline_store,
++                   clear_pipeline_textures, batch->clear_depth,
++                   batch->clear_stencil, &batch->tilebuffer_layout))
++      return false;
+ 
+    if (agx_apple9_direct_render_enabled(dev)) {
+       if (batch->key.nr_cbufs > 8) {
+@@ -1807,16 +1838,32 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
+    assert(agx_batch_is_active(batch));
+    assert(!agx_batch_is_submitted(batch));
+ 
++   /* Once preparation has failed, do not submit subsequent work from this
++    * context. Retire pending batches through the discard cleanup path. */
++   if (ctx->batch_discarded) {
++      agx_batch_discard(ctx, batch);
++      return;
++   }
++
+    struct drm_asahi_cmd_render render;
+    struct drm_asahi_cmd_compute compute;
+    bool has_vdm = false, has_cdm = false;
+    if (batch->cdm.bo) {
+-      agx_flush_compute(ctx, batch, &compute);
++      if (!agx_flush_compute(ctx, batch, &compute)) {
++         agx_batch_discard(ctx, batch);
++         return;
++      }
+       has_cdm = true;
+    }
+ 
+    if (batch->vdm.bo && (batch->clear || batch->initialized)) {
+       has_vdm = agx_flush_render(ctx, batch, &render);
++      if (!has_vdm) {
++         /* Compute and render share this batch's resources. Never submit
++          * only one engine after preparing the other has failed. */
++         agx_batch_discard(ctx, batch);
++         return;
++      }
+    }
+ 
+    if (!has_cdm && !has_vdm) {
+@@ -1895,6 +1942,8 @@ agx_invalidate_resource(struct pipe_context *pctx,
+ {
+    struct agx_context *ctx = agx_context(pctx);
+    struct agx_batch *batch = agx_get_batch(ctx);
++   if (!batch)
++      return;
+ 
+    /* Handle the glInvalidateFramebuffer case */
+    if (batch->key.zsbuf.texture == resource)
+@@ -1913,7 +1962,9 @@ asahi_get_device_reset_status(struct pipe_context *pipe)
+ {
+    struct agx_context *ctx = agx_context(pipe);
+ 
+-   return ctx->any_faults ? PIPE_GUILTY_CONTEXT_RESET : PIPE_NO_RESET;
++   if (ctx->any_faults)
++      return PIPE_GUILTY_CONTEXT_RESET;
++   return ctx->batch_discarded ? PIPE_UNKNOWN_CONTEXT_RESET : PIPE_NO_RESET;
+ }
+ 
+ static void
+@@ -1936,6 +1987,8 @@ asahi_clear_buffer(struct pipe_context *pipe, struct pipe_resource *resource,
+ 
+       if (aligned_16) {
+          struct agx_batch *batch = agx_get_compute_batch(agx_context(pipe));
++         if (!batch)
++            return;
+          agx_batch_init_state(batch);
+          agx_batch_writes_range(batch, agx_resource(resource), offset, size);
+          libagx_fill_uint4(batch, agx_2d(size / 16, 1), AGX_BARRIER_ALL,
+@@ -1944,6 +1997,8 @@ asahi_clear_buffer(struct pipe_context *pipe, struct pipe_resource *resource,
+          return;
+       } else if (aligned_4 && clear_value_size <= 4) {
+          struct agx_batch *batch = agx_get_compute_batch(agx_context(pipe));
++         if (!batch)
++            return;
+          agx_batch_init_state(batch);
+          agx_batch_writes_range(batch, agx_resource(resource), offset, size);
+          libagx_fill(batch, agx_1d(size / 4), AGX_BARRIER_ALL,
+diff --git a/src/gallium/drivers/asahi/agx_query.c b/src/gallium/drivers/asahi/agx_query.c
+index 0d43976..f2e65ce 100644
+--- a/src/gallium/drivers/asahi/agx_query.c
++++ b/src/gallium/drivers/asahi/agx_query.c
+@@ -389,8 +389,13 @@ agx_get_query_result(struct pipe_context *pctx, struct pipe_query *pquery,
+    struct agx_context *ctx = agx_context(pctx);
+    struct agx_device *dev = agx_device(pctx->screen);
+ 
++   if ((ctx->any_faults || ctx->batch_discarded))
++      return false;
++
+    /* TODO: Honour `wait` */
+    sync_query_writers(ctx, query, "Reading query results");
++   if ((ctx->any_faults || ctx->batch_discarded))
++      return false;
+ 
+    uint64_t *ptr = query->ptr.cpu;
+    uint64_t value = *ptr;
+@@ -436,6 +441,9 @@ agx_get_query_result_resource_cpu(struct agx_context *ctx,
+                                   int index, struct pipe_resource *resource,
+                                   unsigned offset)
+ {
++   if (ctx->any_faults || ctx->batch_discarded)
++      return;
++
+    union pipe_query_result result;
+    if (index < 0) {
+       /* availability */
+@@ -444,7 +452,8 @@ agx_get_query_result_resource_cpu(struct agx_context *ctx,
+       bool ready =
+          agx_get_query_result(&ctx->base, (void *)query, true, &result);
+ 
+-      assert(ready);
++      if (!ready)
++         return;
+    }
+ 
+    /* Clamp to type, arb_query_buffer_object-qbo tests */
+@@ -456,8 +465,18 @@ agx_get_query_result_resource_cpu(struct agx_context *ctx,
+       result.u32 = x;
+    }
+ 
+-   pipe_buffer_write(&ctx->base, resource, offset,
+-                     result_type_size(result_type), &result.u64);
++   /* Mapping may flush another batch and expose a preparation failure. Do
++    * not publish a query value if that happens during synchronization. */
++   unsigned size = result_type_size(result_type);
++   struct pipe_transfer *transfer = NULL;
++   void *map = pipe_buffer_map_range(&ctx->base, resource, offset, size,
++                                     PIPE_MAP_WRITE, &transfer);
++   if (!map)
++      return;
++
++   if (!ctx->any_faults && !ctx->batch_discarded)
++      memcpy(map, &result.u64, size);
++   pipe_buffer_unmap(&ctx->base, transfer);
+ }
+ 
+ static bool
+@@ -468,6 +487,9 @@ agx_get_query_result_resource_gpu(struct agx_context *ctx,
+                                   int index, struct pipe_resource *prsrc,
+                                   unsigned offset)
+ {
++   if ((ctx->any_faults || ctx->batch_discarded))
++      return false;
++
+    /* Handle availability queries on CPU */
+    if (index < 0)
+       return false;
+@@ -478,11 +500,15 @@ agx_get_query_result_resource_gpu(struct agx_context *ctx,
+       return false;
+ 
+    flush_query_writers(ctx, query, util_str_query_type(query->type, true));
++   if ((ctx->any_faults || ctx->batch_discarded))
++      return false;
+ 
+    struct agx_resource *rsrc = agx_resource(prsrc);
+    enum query_copy_type copy_type = classify_query_type(query->type);
+ 
+    struct agx_batch *batch = agx_get_compute_batch(ctx);
++   if (!batch)
++      return false;
+    agx_batch_init_state(batch);
+    agx_dirty_all(ctx);
+ 
+@@ -495,7 +521,7 @@ agx_get_query_result_resource_gpu(struct agx_context *ctx,
+ 
+    libagx_copy_query_gl(batch, agx_1d(1), AGX_BARRIER_ALL, query->ptr.gpu,
+                         agx_map_gpu(rsrc) + offset, result_type, bool_size);
+-   return true;
++   return !ctx->batch_discarded;
+ }
+ 
+ static void
+@@ -563,6 +589,13 @@ agx_get_query_address(struct agx_batch *batch, struct agx_query *query)
+    }
+ }
+ 
++void
++agx_cancel_batch_queries(struct agx_batch *batch)
++{
++   /* Retire query-writer dependencies without publishing GPU timestamps. */
++   batch->ctx->batches.generation[agx_batch_idx(batch)]++;
++}
++
+ void
+ agx_finish_batch_queries(struct agx_batch *batch, uint64_t begin_ts,
+                          uint64_t end_ts)
+diff --git a/src/gallium/drivers/asahi/agx_state.c b/src/gallium/drivers/asahi/agx_state.c
+index 2d71f53..9fe000b 100644
+--- a/src/gallium/drivers/asahi/agx_state.c
++++ b/src/gallium/drivers/asahi/agx_state.c
+@@ -963,6 +963,10 @@ agx_upload_viewport_scissor(struct agx_pool *pool, struct agx_batch *batch,
+    unsigned index = batch->scissor.size / AGX_SCISSOR_LENGTH;
+    struct agx_scissor_packed *scissors =
+       util_dynarray_grow_bytes(&batch->scissor, count, AGX_SCISSOR_LENGTH);
++   if (!scissors) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
+ 
+    unsigned minx[AGX_MAX_VIEWPORTS], miny[AGX_MAX_VIEWPORTS];
+    unsigned maxx[AGX_MAX_VIEWPORTS], maxy[AGX_MAX_VIEWPORTS];
+@@ -994,8 +998,12 @@ agx_upload_viewport_scissor(struct agx_pool *pool, struct agx_batch *batch,
+    };
+ 
+    size_t size = agx_ppp_update_size(&present);
+-   struct agx_ptr T =
+-      agx_pool_alloc_aligned(&batch->pool, size, AGX_PPP_HEADER_ALIGN);
++   struct agx_ptr T;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, size, AGX_PPP_HEADER_ALIGN,
++                                   &T)) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
+    struct agx_ppp_update ppp = agx_new_ppp_update(T, size, &present);
+ 
+    agx_ppp_push(&ppp, DEPTH_BIAS_SCISSOR, cfg) {
+@@ -3549,8 +3557,13 @@ agx_upload_textures(struct agx_batch *batch, struct agx_compiled_shader *cs,
+    unsigned nr_tex_descriptors = agx_nr_tex_descriptors(batch, cs);
+    unsigned nr_images = cs->so->info.nr_bindful_images;
+ 
+-   struct agx_ptr T_tex = agx_pool_alloc_aligned(
+-      &batch->pool, AGX_TEXTURE_LENGTH * nr_tex_descriptors, 64);
++   struct agx_ptr T_tex;
++   if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                   AGX_TEXTURE_LENGTH * nr_tex_descriptors,
++                                   64, &T_tex)) {
++      ctx->batch_discarded = true;
++      return;
++   }
+ 
+    struct agx_texture_packed *textures = T_tex.cpu;
+ 
+@@ -3626,9 +3639,9 @@ agx_upload_textures(struct agx_batch *batch, struct agx_compiled_shader *cs,
+    batch->stage_uniforms[stage].texture_base = T_tex.gpu;
+ }
+ 
+-uint16_t
++bool
+ agx_sampler_heap_add(struct agx_device *dev, struct agx_sampler_heap *heap,
+-                     struct agx_sampler_packed *sampler)
++                     struct agx_sampler_packed *sampler, uint16_t *index)
+ {
+    /* Allocate (maximally sized) BO if we haven't already */
+    if (!heap->bo) {
+@@ -3636,16 +3649,22 @@ agx_sampler_heap_add(struct agx_device *dev, struct agx_sampler_heap *heap,
+                                0, AGX_BO_WRITEBACK, "Sampler heap");
+ 
+       assert(heap->count == 0);
++      if (!heap->bo)
++         return false;
+    }
+ 
+    /* TODO search */
+ 
+    /* Precondition: there is room in the heap */
+-   assert(heap->count < AGX_SAMPLER_HEAP_SIZE);
++   if (heap->count >= AGX_SAMPLER_HEAP_SIZE)
++      return false;
+    struct agx_sampler_packed *samplers = agx_bo_map(heap->bo);
++   if (!samplers)
++      return false;
+    memcpy(samplers + heap->count, sampler, sizeof(*sampler));
+ 
+-   return heap->count++;
++   *index = heap->count++;
++   return true;
+ }
+ 
+ static void
+@@ -3660,8 +3679,12 @@ agx_upload_samplers(struct agx_batch *batch, struct agx_compiled_shader *cs,
+    size_t sampler_length =
+       AGX_SAMPLER_LENGTH + (custom_borders ? AGX_BORDER_LENGTH : 0);
+ 
+-   struct agx_ptr T =
+-      agx_pool_alloc_aligned(&batch->pool, sampler_length * nr_samplers, 64);
++   struct agx_ptr T;
++   if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                   sampler_length * nr_samplers, 64, &T)) {
++      ctx->batch_discarded = true;
++      return;
++   }
+ 
+    /* Sampler #0 is reserved for txf */
+    agx_pack_txf_sampler(T.cpu);
+@@ -3698,7 +3721,7 @@ static void
+ agx_update_descriptors(struct agx_batch *batch, struct agx_compiled_shader *cs)
+ {
+    struct agx_context *ctx = batch->ctx;
+-   if (!cs)
++   if (!cs || ctx->batch_discarded)
+       return;
+ 
+    mesa_shader_stage stage = cs->stage;
+@@ -3711,19 +3734,32 @@ agx_update_descriptors(struct agx_batch *batch, struct agx_compiled_shader *cs)
+    if (ctx->stage[stage].dirty & AGX_STAGE_DIRTY_SSBO)
+       agx_set_ssbo_uniforms(batch, stage);
+ 
++   if (ctx->batch_discarded)
++      return;
+    if (ctx->stage[stage].dirty & AGX_STAGE_DIRTY_IMAGE)
+       agx_upload_textures(batch, cs, stage);
+ 
++   if (ctx->batch_discarded)
++      return;
+    if (ctx->stage[stage].dirty & AGX_STAGE_DIRTY_SAMPLER)
+       agx_set_sampler_uniforms(batch, stage);
+ 
++   if (ctx->batch_discarded)
++      return;
+    if (ctx->stage[stage].dirty & AGX_STAGE_DIRTY_SAMPLER)
+       agx_upload_samplers(batch, cs, stage);
++   if (ctx->batch_discarded)
++      return;
+ 
+    struct agx_stage_uniforms *unif = &batch->stage_uniforms[stage];
+ 
+-   batch->uniforms.tables[AGX_SYSVAL_STAGE(stage)] =
+-      agx_pool_upload_aligned(&batch->pool, unif, sizeof(*unif), 16);
++   struct agx_ptr table;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(*unif), 16, &table)) {
++      ctx->batch_discarded = true;
++      return;
++   }
++   memcpy(table.cpu, unif, sizeof(*unif));
++   batch->uniforms.tables[AGX_SYSVAL_STAGE(stage)] = table.gpu;
+ }
+ 
+ static uint32_t
+@@ -3739,8 +3775,11 @@ agx_build_pipeline(struct agx_batch *batch, struct agx_compiled_shader *cs,
+    size_t usc_size =
+       agx_usc_size(constant_push_ranges + cs->push_range_count + 2);
+ 
+-   struct agx_ptr t =
+-      agx_pool_alloc_aligned(&batch->pipeline_pool, usc_size, 64);
++   struct agx_ptr t;
++   if (!agx_pool_try_alloc_aligned(&batch->pipeline_pool, usc_size, 64, &t)) {
++      ctx->batch_discarded = true;
++      return 0;
++   }
+ 
+    struct agx_usc_builder b = agx_usc_builder(t.cpu, usc_size);
+ 
+@@ -3791,19 +3830,31 @@ agx_build_pipeline(struct agx_batch *batch, struct agx_compiled_shader *cs,
+ 
+       switch (phys_stage) {
+       case MESA_SHADER_FRAGMENT:
+-         agx_scratch_alloc(&ctx->scratch_fs, max_scratch_size, max_subgroups);
++         if (!agx_scratch_try_alloc(&ctx->scratch_fs, max_scratch_size,
++                                    max_subgroups)) {
++            ctx->batch_discarded = true;
++            return 0;
++         }
+          batch->fs_scratch = true;
+          batch->fs_preamble_scratch =
+             MAX2(batch->fs_preamble_scratch, preamble_size);
+          break;
+       case MESA_SHADER_VERTEX:
+-         agx_scratch_alloc(&ctx->scratch_vs, max_scratch_size, max_subgroups);
++         if (!agx_scratch_try_alloc(&ctx->scratch_vs, max_scratch_size,
++                                    max_subgroups)) {
++            ctx->batch_discarded = true;
++            return 0;
++         }
+          batch->vs_scratch = true;
+          batch->vs_preamble_scratch =
+             MAX2(batch->vs_preamble_scratch, preamble_size);
+          break;
+       default:
+-         agx_scratch_alloc(&ctx->scratch_cs, max_scratch_size, max_subgroups);
++         if (!agx_scratch_try_alloc(&ctx->scratch_cs, max_scratch_size,
++                                    max_subgroups)) {
++            ctx->batch_discarded = true;
++            return 0;
++         }
+          batch->cs_scratch = true;
+          batch->cs_preamble_scratch =
+             MAX2(batch->cs_preamble_scratch, preamble_size);
+@@ -3887,14 +3938,18 @@ agx_launch_internal(struct agx_batch *batch, struct agx_grid grid,
+       agx_flush_batch_for_reason(ctx, batch, "CDM overfull");
+ }
+ 
+-static void
++static bool
+ agx_ensure_cmdbuf_has_space(struct agx_batch *batch, struct agx_encoder *enc,
+                            size_t space);
+ 
+ static uint64_t
+ agx_apple9_indirect_local_groups(struct agx_batch *batch, uint64_t grid)
+ {
+-   struct agx_ptr groups = agx_pool_alloc_aligned(&batch->pool, 12, 4);
++   struct agx_ptr groups;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, 12, 4, &groups)) {
++      batch->ctx->batch_discarded = true;
++      return 0;
++   }
+    libagx_workgroups_from_threads(batch, agx_1d(1), AGX_BARRIER_ALL,
+                                    groups.gpu, grid);
+    return groups.gpu;
+@@ -3908,6 +3963,8 @@ agx_apple9_launch_compute(struct agx_batch *batch, struct agx_grid grid,
+                          uint64_t textures, uint64_t samplers,
+                          uint64_t group_counts)
+ {
++   if (batch->ctx->batch_discarded)
++      return;
+    struct agx_device *dev = agx_device(batch->ctx->base.screen);
+    struct agx_apple9_compute_geometry geometry = {
+       .mode = grid.mode == AGX_CDM_MODE_DIRECT
+@@ -3926,13 +3983,15 @@ agx_apple9_launch_compute(struct agx_batch *batch, struct agx_grid grid,
+           profile->preamble_size ? bo->va->addr + profile->preamble_offset : 0,
+           &launch)) {
+       fprintf(stderr, "Apple9 pre-rasterization launch state is invalid\n");
+-      abort();
++      batch->ctx->batch_discarded = true;
++      return;
+    }
+    bool indirect_local = grid.mode == AGX_CDM_MODE_INDIRECT_LOCAL;
+    unsigned size = indirect_local ? AGX_APPLE9_COMPUTE_INDIRECT_LOCAL_CDM_RECORD_SIZE
+                    : indirect ? AGX_APPLE9_COMPUTE_INDIRECT_CDM_RECORD_SIZE
+                               : AGX_APPLE9_COMPUTE_CDM_RECORD_SIZE;
+-   agx_ensure_cmdbuf_has_space(batch, &batch->cdm, size + 4);
++   if (!agx_ensure_cmdbuf_has_space(batch, &batch->cdm, size + 4))
++      return;
+    bool ok = indirect
+       ? agx_apple9_emit_indirect_dispatch(batch->cdm.current, launch, grid.ptr,
+                                          geometry.local, indirect_local, profile)
+@@ -3951,12 +4010,23 @@ agx_launch_precomp(struct agx_batch *batch, struct agx_grid grid,
+                    enum agx_barrier barrier, enum libagx_program program,
+                    void *args, size_t arg_size)
+ {
++   if (batch->ctx->batch_discarded)
++      return;
+    struct agx_device *dev = agx_device(batch->ctx->base.screen);
+    struct agx_precompiled_shader *cs =
+-      agx_get_precompiled(&batch->ctx->bg_eot, program);
++      agx_try_get_precompiled(&batch->ctx->bg_eot, program);
++   if (!cs) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
+ 
+-   uint64_t uploaded_data =
+-      agx_pool_upload_aligned(&batch->pool, args, arg_size, 8);
++   struct agx_ptr uploaded;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, arg_size, 8, &uploaded)) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
++   memcpy(uploaded.cpu, args, arg_size);
++   uint64_t uploaded_data = uploaded.gpu;
+ 
+    if (cs->apple9) {
+       const struct agx_apple9_compute_profile *profile = &cs->apple9_profile;
+@@ -3978,8 +4048,12 @@ agx_launch_precomp(struct agx_batch *batch, struct agx_grid grid,
+       return;
+    }
+ 
+-   struct agx_ptr t =
+-      agx_pool_alloc_aligned(&batch->pipeline_pool, agx_usc_size(15), 64);
++   struct agx_ptr t;
++   if (!agx_pool_try_alloc_aligned(&batch->pipeline_pool, agx_usc_size(15),
++                                   64, &t)) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
+ 
+    uint32_t usc = agx_usc_addr(dev, t.gpu);
+    agx_usc_words_precomp(t.cpu, &cs->b, uploaded_data, arg_size);
+@@ -4037,8 +4111,9 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+ 
+    /* Begin building the pipeline */
+    size_t usc_size = agx_usc_size(3 + PIPE_MAX_COLOR_BUFS);
+-   struct agx_ptr t =
+-      agx_pool_alloc_aligned(&batch->pipeline_pool, usc_size, 64);
++   struct agx_ptr t;
++   if (!agx_pool_try_alloc_aligned(&batch->pipeline_pool, usc_size, 64, &t))
++      goto allocation_failed;
+    struct agx_usc_builder b = agx_usc_builder(t.cpu, usc_size);
+ 
+    bool needs_sampler = false;
+@@ -4054,8 +4129,10 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+          if (needs_textures_for_spilled_rts)
+             continue;
+ 
+-         struct agx_ptr texture =
+-            agx_pool_alloc_aligned(&batch->pool, AGX_TEXTURE_LENGTH, 64);
++         struct agx_ptr texture;
++         if (!agx_pool_try_alloc_aligned(&batch->pool, AGX_TEXTURE_LENGTH,
++                                         64, &texture))
++            goto allocation_failed;
+          const struct pipe_surface *surf = &batch->key.cbufs[rt];
+          assert(surf->texture != NULL && "cannot load nonexistent attachment");
+ 
+@@ -4079,8 +4156,10 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+       } else if (key.op[rt] == AGX_EOT_STORE) {
+          struct pipe_image_view view =
+             image_view_for_surface(&batch->key.cbufs[rt]);
+-         struct agx_ptr pbe =
+-            agx_pool_alloc_aligned(&batch->pool, AGX_PBE_LENGTH, 256);
++         struct agx_ptr pbe;
++         if (!agx_pool_try_alloc_aligned(&batch->pool, AGX_PBE_LENGTH,
++                                         256, &pbe))
++            goto allocation_failed;
+ 
+          /* The tilebuffer is already in sRGB space if needed. Do not convert */
+          view.format = util_format_linear(view.format);
+@@ -4103,8 +4182,11 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+       /* Upload texture/PBE descriptors for each render target so we can clear
+        * spilled render targets.
+        */
+-      struct agx_ptr descs = agx_pool_alloc_aligned(
+-         &batch->pool, AGX_TEXTURE_LENGTH * 2 * batch->key.nr_cbufs, 64);
++      struct agx_ptr descs;
++      if (!agx_pool_try_alloc_aligned(
++             &batch->pool, AGX_TEXTURE_LENGTH * 2 * batch->key.nr_cbufs,
++             64, &descs))
++         goto allocation_failed;
+       agx_upload_spilled_rt_descriptors(descs.cpu, batch);
+ 
+       agx_usc_pack(&b, TEXTURE, cfg) {
+@@ -4116,15 +4198,21 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+       nr_tex = MAX2(nr_tex, 2 * batch->key.nr_cbufs);
+ 
+       /* Bind the base as u0_u1 for bindless access */
+-      agx_usc_uniform(&b, 0, 4,
+-                      agx_pool_upload_aligned(&batch->pool, &descs.gpu, 8, 8));
++      struct agx_ptr desc_address;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(descs.gpu), 8,
++                                      &desc_address))
++         goto allocation_failed;
++      memcpy(desc_address.cpu, &descs.gpu, sizeof(descs.gpu));
++      agx_usc_uniform(&b, 0, 4, desc_address.gpu);
+       uniforms = MAX2(uniforms, 4);
+    }
+ 
+    /* All render targets share a sampler */
+    if (needs_sampler) {
+-      struct agx_ptr sampler =
+-         agx_pool_alloc_aligned(&batch->pool, AGX_SAMPLER_LENGTH, 64);
++      struct agx_ptr sampler;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, AGX_SAMPLER_LENGTH,
++                                      64, &sampler))
++         goto allocation_failed;
+ 
+       agx_pack(sampler.cpu, SAMPLER, cfg) {
+          cfg.minimum_lod = 0.0f;
+@@ -4151,7 +4239,10 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+    /* Get the shader */
+    key.reserved_preamble = uniforms;
+    struct agx_device *dev = agx_device(ctx->base.screen);
+-   struct agx_bg_eot_shader *shader = agx_get_bg_eot_shader(&ctx->bg_eot, &key);
++   struct agx_bg_eot_shader *shader =
++      agx_try_get_bg_eot_shader(&ctx->bg_eot, &key);
++   if (!shader)
++      goto allocation_failed;
+    agx_batch_add_bo(batch, shader->bo);
+    assert(shader->info.rodata.size_16 == 0);
+ 
+@@ -4187,6 +4278,10 @@ agx_build_bg_eot(struct agx_batch *batch, bool store, bool partial_render)
+    }
+ 
+    return ret;
++
++allocation_failed:
++   ctx->batch_discarded = true;
++   return (struct asahi_bg_eot){0};
+ }
+ 
+ 
+@@ -4263,8 +4358,12 @@ agx_batch_init_state(struct agx_batch *batch)
+       };
+ 
+       size_t size = agx_ppp_update_size(&present);
+-      struct agx_ptr T =
+-         agx_pool_alloc_aligned(&batch->pool, size, AGX_PPP_HEADER_ALIGN);
++      struct agx_ptr T;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, size,
++                                      AGX_PPP_HEADER_ALIGN, &T)) {
++         batch->ctx->batch_discarded = true;
++         return;
++      }
+       struct agx_ppp_update ppp = agx_new_ppp_update(T, size, &present);
+ 
+       /* clang-format off */
+@@ -4336,6 +4435,8 @@ agx_batch_init_state(struct agx_batch *batch)
+ 
+          if (true || (rsrc->base.bind & PIPE_BIND_SHARED)) {
+             agx_decompress_inplace(batch, surf, "Render target spilled");
++            if (batch->ctx->batch_discarded)
++               return;
+          } else {
+             agx_decompress(batch->ctx, rsrc, "Render target spilled");
+          }
+@@ -4408,8 +4509,12 @@ agx_encode_state(struct agx_batch *batch, uint8_t *out)
+          size_t linkage_size =
+             AGX_CF_BINDING_HEADER_LENGTH + (bindings * AGX_CF_BINDING_LENGTH);
+ 
+-         struct agx_ptr t =
+-            agx_pool_alloc_aligned(&batch->pipeline_pool, linkage_size, 16);
++         struct agx_ptr t;
++         if (!agx_pool_try_alloc_aligned(&batch->pipeline_pool, linkage_size,
++                                         16, &t)) {
++            ctx->batch_discarded = true;
++            return out;
++         }
+ 
+          agx_link_varyings_vs_fs(t.cpu, &batch->linked_varyings,
+                                  vs->uvs.user_size, &ctx->linked.fs->cf,
+@@ -4449,6 +4554,8 @@ agx_encode_state(struct agx_batch *batch, uint8_t *out)
+             agx_build_pipeline(batch, vs, ctx->gs ? NULL : ctx->linked.vs,
+                                MESA_SHADER_VERTEX, 0, 0);
+       }
++      if (ctx->batch_discarded)
++         return out;
+ 
+       agx_push_packed(out, vs->uvs.vdm, VDM_STATE_VERTEX_OUTPUTS);
+ 
+@@ -4480,6 +4587,8 @@ agx_encode_state(struct agx_batch *batch, uint8_t *out)
+                                   ctx->rast->base.scissor ? ctx->scissor : NULL,
+                                   ctx->rast->base.clip_halfz,
+                                   vs->b.info.nonzero_viewport);
++      if (ctx->batch_discarded)
++         return out;
+    }
+ 
+    bool is_points = batch->reduced_prim == MESA_PRIM_POINTS;
+@@ -4520,8 +4629,12 @@ agx_encode_state(struct agx_batch *batch, uint8_t *out)
+    };
+ 
+    size_t size = agx_ppp_update_size(&dirty);
+-   struct agx_ptr T =
+-      agx_pool_alloc_aligned(&batch->pool, size, AGX_PPP_HEADER_ALIGN);
++   struct agx_ptr T;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, size, AGX_PPP_HEADER_ALIGN,
++                                   &T)) {
++      ctx->batch_discarded = true;
++      return out;
++   }
+    struct agx_ppp_update ppp = agx_new_ppp_update(T, size, &dirty);
+ 
+    if (dirty.fragment_control) {
+@@ -4641,6 +4754,8 @@ agx_encode_state(struct agx_batch *batch, uint8_t *out)
+          cfg.pipeline = agx_build_pipeline(batch, ctx->fs, ctx->linked.fs,
+                                            MESA_SHADER_FRAGMENT, 0, 0);
+       }
++      if (ctx->batch_discarded)
++         return out;
+ 
+       agx_ppp_push(&ppp, FRAGMENT_SHADER_WORD_2, cfg) {
+          cfg.cf_bindings = batch->varyings;
+@@ -4732,9 +4847,14 @@ agx_index_buffer_direct_ptr(struct agx_batch *batch,
+       struct agx_pool *pool =
+          agx_apple9_direct_render_enabled(agx_device(batch->ctx->base.screen))
+             ? &batch->pipeline_pool : &batch->pool;
+-      return agx_pool_upload_aligned(pool,
+-                                     ((uint8_t *)info->index.user) + offset,
+-                                     draw->count * info->index_size, 64);
++      size_t size = draw->count * info->index_size;
++      struct agx_ptr upload;
++      if (!agx_pool_try_alloc_aligned(pool, size, 64, &upload)) {
++         batch->ctx->batch_discarded = true;
++         return 0;
++      }
++      memcpy(upload.cpu, ((uint8_t *)info->index.user) + offset, size);
++      return upload.gpu;
+    }
+ }
+ 
+@@ -4749,7 +4869,7 @@ agx_index_buffer_ptr(struct agx_batch *batch, const struct pipe_draw_info *info,
+       return agx_index_buffer_rsrc_ptr(batch, info, extent);
+ }
+ 
+-static void
++static bool
+ agx_ensure_cmdbuf_has_space(struct agx_batch *batch, struct agx_encoder *enc,
+                             size_t space)
+ {
+@@ -4771,7 +4891,7 @@ agx_ensure_cmdbuf_has_space(struct agx_batch *batch, struct agx_encoder *enc,
+ 
+    /* If there is room in the command buffer, we're done */
+    if (likely((enc->end - enc->current) >= space))
+-      return;
++      return true;
+ 
+    /* Otherwise, we need to allocate a new command buffer. We use memory owned
+     * by the batch to simplify lifetime management for the BO.
+@@ -4780,7 +4900,11 @@ agx_ensure_cmdbuf_has_space(struct agx_batch *batch, struct agx_encoder *enc,
+    bool context_relative = enc->bo->flags & AGX_BO_CONTEXT;
+    struct agx_pool *pool = context_relative ? &batch->apple9_context_pool
+                                           : &batch->pool;
+-   struct agx_ptr T = agx_pool_alloc_aligned(pool, size, 256);
++   struct agx_ptr T;
++   if (!agx_pool_try_alloc_aligned(pool, size, 256, &T)) {
++      batch->ctx->batch_discarded = true;
++      return false;
++   }
+ 
+    /* Apple9 VDM links use a 32-bit render-context offset, like the stream
+     * base and PPP records. Keep every continuation in that same heap.
+@@ -4797,6 +4921,7 @@ agx_ensure_cmdbuf_has_space(struct agx_batch *batch, struct agx_encoder *enc,
+    /* Swap out the command buffer */
+    enc->current = T.cpu;
+    enc->end = enc->current + size;
++   return true;
+ }
+ 
+ static void
+@@ -4806,9 +4931,8 @@ agx_ia_update(struct agx_batch *batch, const struct pipe_draw_info *info,
+    struct agx_context *ctx = batch->ctx;
+    struct agx_device *dev = agx_device(ctx->base.screen);
+ 
+-   if (!batch->cdm.bo) {
+-      batch->cdm = agx_encoder_allocate(dev, false);
+-   }
++   if (!agx_batch_ensure_compute_encoder(batch))
++      return;
+ 
+    uint64_t ia_vertices = agx_get_query_address(
+       batch, ctx->pipeline_statistics[PIPE_STAT_QUERY_IA_VERTICES]);
+@@ -4865,6 +4989,10 @@ agx_batch_heap(struct agx_batch *batch)
+       if (!ctx->heap) {
+          ctx->heap = pipe_buffer_create(ctx->base.screen, PIPE_BIND_GLOBAL,
+                                         PIPE_USAGE_DEFAULT, size);
++         if (!ctx->heap) {
++            ctx->batch_discarded = true;
++            return 0;
++         }
+       }
+ 
+       struct poly_heap heap = {
+@@ -4874,13 +5002,32 @@ agx_batch_heap(struct agx_batch *batch)
+ 
+       agx_batch_writes(batch, agx_resource(ctx->heap), 0);
+ 
+-      batch->heap =
+-         agx_pool_upload_aligned(&batch->pool, &heap, sizeof(heap), 8);
++      struct agx_ptr upload;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(heap), 8, &upload)) {
++         ctx->batch_discarded = true;
++         return 0;
++      }
++      memcpy(upload.cpu, &heap, sizeof(heap));
++      batch->heap = upload.gpu;
+    }
+ 
+    return batch->heap;
+ }
+ 
++static bool
++agx_batch_try_pool_alloc(struct agx_batch *batch, struct agx_pool *pool,
++                         size_t size, unsigned align, struct agx_ptr *ptr,
++                         struct agx_bo **bo)
++{
++   if (!agx_pool_try_alloc_aligned(pool, size, align, ptr)) {
++      batch->ctx->batch_discarded = true;
++      return false;
++   }
++   if (bo)
++      *bo = pool->transient_bo;
++   return true;
++}
++
+ static uint64_t
+ agx_batch_geometry_params(struct agx_batch *batch, uint64_t input_index_buffer,
+                           size_t index_buffer_size_B,
+@@ -4960,7 +5107,9 @@ agx_batch_geometry_params(struct agx_batch *batch, uint64_t input_index_buffer,
+ 
+    bool prefix_sum = batch->ctx->gs->gs.prefix_sum;
+    if (!prefix_sum && params.count_buffer_stride) {
+-      struct agx_ptr T = agx_pool_alloc_aligned(&batch->pool, 16, 4);
++      struct agx_ptr T;
++      if (!agx_batch_try_pool_alloc(batch, &batch->pool, 16, 4, &T, NULL))
++         return 0;
+       memset(T.cpu, 0, 16);
+       params.count_buffer = T.gpu;
+    }
+@@ -4978,13 +5127,17 @@ agx_batch_geometry_params(struct agx_batch *batch, uint64_t input_index_buffer,
+       unsigned size = params.input_primitives * params.count_buffer_stride;
+ 
+       if (size && prefix_sum) {
+-         params.count_buffer =
+-            agx_pool_alloc_aligned(&batch->pool, size, 4).gpu;
++         struct agx_ptr T;
++         if (!agx_batch_try_pool_alloc(batch, &batch->pool, size, 4, &T, NULL))
++            return 0;
++         params.count_buffer = T.gpu;
+       }
+ 
+       if (vb_size) {
+-         vp.output_buffer =
+-            agx_pool_alloc_aligned(&batch->pool, vb_size, 4).gpu;
++         struct agx_ptr T;
++         if (!agx_batch_try_pool_alloc(batch, &batch->pool, vb_size, 4, &T, NULL))
++            return 0;
++         vp.output_buffer = T.gpu;
+       }
+ 
+       if (gsi->shape == POLY_GS_SHAPE_DYNAMIC_INDEXED) {
+@@ -4995,19 +5148,25 @@ agx_batch_geometry_params(struct agx_batch *batch, uint64_t input_index_buffer,
+          struct agx_pool *index_pool =
+             agx_apple9_direct_render_enabled(agx_device(batch->ctx->base.screen))
+                ? &batch->pipeline_pool : &batch->pool;
+-         params.output_index_buffer =
+-            agx_pool_alloc_aligned_with_bo(index_pool, idx_size * 4, 4,
+-                                           &batch->geom_index_bo)
+-               .gpu;
++         struct agx_ptr T;
++         if (!agx_batch_try_pool_alloc(batch, index_pool, idx_size * 4, 4, &T,
++                                       &batch->geom_index_bo))
++            return 0;
++         params.output_index_buffer = T.gpu;
+          batch->geom_index = params.output_index_buffer;
+       }
+    }
+ 
+-   batch->uniforms.vertex_params =
+-      agx_pool_upload_aligned(&batch->pool, &vp, sizeof(vp), 8);
+-
+-   return agx_pool_upload_aligned_with_bo(&batch->pool, &params, sizeof(params),
+-                                          8, &batch->geom_params_bo);
++   struct agx_ptr vertex, geometry;
++   if (!agx_batch_try_pool_alloc(batch, &batch->pool, sizeof(vp), 8, &vertex,
++                                 NULL) ||
++       !agx_batch_try_pool_alloc(batch, &batch->pool, sizeof(params), 8,
++                                 &geometry, &batch->geom_params_bo))
++      return 0;
++   memcpy(vertex.cpu, &vp, sizeof(vp));
++   memcpy(geometry.cpu, &params, sizeof(params));
++   batch->uniforms.vertex_params = vertex.gpu;
++   return geometry.gpu;
+ }
+ 
+ static uint64_t
+@@ -5039,16 +5198,16 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+    /* This is a graphics batch, so it may not have had a CDM encoder allocated
+     * yet. Allocate that so we can start enqueueing compute work.
+     */
+-   if (!batch->cdm.bo) {
+-      batch->cdm = agx_encoder_allocate(dev, false);
+-   }
++   if (!agx_batch_ensure_compute_encoder(batch))
++      return;
+ 
+-   agx_ensure_cmdbuf_has_space(
++   if (!agx_ensure_cmdbuf_has_space(
+       batch, &batch->cdm,
+       8 * (AGX_CDM_LAUNCH_WORD_0_LENGTH + AGX_CDM_LAUNCH_WORD_1_LENGTH +
+            AGX_CDM_UNK_G14X_LENGTH + AGX_CDM_INDIRECT_LENGTH +
+            AGX_CDM_GLOBAL_SIZE_LENGTH + AGX_CDM_LOCAL_SIZE_LENGTH +
+-           AGX_CDM_BARRIER_LENGTH));
++           AGX_CDM_BARRIER_LENGTH)))
++      return;
+ 
+    assert(!info->primitive_restart && "should have been lowered");
+ 
+@@ -5065,6 +5224,8 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+       if (info->index_size) {
+          ib = agx_index_buffer_ptr(batch, info, indirect ? NULL : draws,
+                                    &ib_extent);
++         if (ctx->batch_discarded)
++            return;
+       }
+ 
+       struct libagx_gs_setup_indirect_args gsi = {
+@@ -5081,8 +5242,12 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+          .max_indices = gs->gs.max_indices,
+          .shape = gs->gs.shape,
+       };
++      if (ctx->batch_discarded)
++         return;
+ 
+       libagx_gs_setup_indirect_struct(batch, agx_1d(1), AGX_BARRIER_ALL, gsi);
++      if (ctx->batch_discarded)
++         return;
+ 
+       grid_vs = agx_grid_indirect_local(
+          vp + offsetof(struct poly_vertex_params, grid));
+@@ -5099,6 +5264,8 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+ 
+    /* Launch the vertex shader first */
+    agx_launch(batch, grid_vs, wg, ctx->vs, ctx->linked.vs, ctx->vs->stage, 0);
++   if (ctx->batch_discarded)
++      return;
+ 
+    /* Transform feedback and various queries require extra dispatching,
+     * determine if we need that here.
+@@ -5125,11 +5292,15 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+       perf_debug(dev, "Geometry shader count");
+       agx_launch(batch, grid_gs, wg, gs->gs_count, NULL, MESA_SHADER_GEOMETRY,
+                  0);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    if (gs->gs.prefix_sum) {
+       libagx_prefix_sum_geom(batch, agx_1d(1024 * gs->gs.count_words),
+                              AGX_BARRIER_ALL, gp);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    /* Pre-GS shader */
+@@ -5137,6 +5308,8 @@ agx_launch_gs_prerast(struct agx_batch *batch,
+       perf_debug(dev, "Geometry shader transform feedback / query program");
+       agx_launch(batch, agx_1d(1), agx_workgroup(1, 1, 1), gs->pre_gs, NULL,
+                  MESA_SHADER_COMPUTE, 0);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    /* Pre-rast geometry shader */
+@@ -5156,6 +5329,8 @@ agx_draw_without_restart(struct agx_batch *batch,
+    perf_debug(dev, "Unrolling primitive restart due to GS/XFB");
+ 
+    agx_batch_init_state(batch);
++   if (ctx->batch_discarded)
++      return;
+ 
+    size_t ib_extent = 0;
+    uint64_t ib;
+@@ -5169,6 +5344,8 @@ agx_draw_without_restart(struct agx_batch *batch,
+    if (!indirect) {
+       /* Adds in the offset so set to 0 in the desc */
+       ib = agx_index_buffer_direct_ptr(batch, draw, info, &ib_extent);
++      if (ctx->batch_discarded)
++         return;
+ 
+       uint32_t desc[5] = {draw->count, info->instance_count, 0,
+                           draw->index_bias, info->start_instance};
+@@ -5184,14 +5361,21 @@ agx_draw_without_restart(struct agx_batch *batch,
+    }
+ 
+    /* Next, we unroll the index buffer used by the indirect draw */
+-   if (!batch->cdm.bo)
+-      batch->cdm = agx_encoder_allocate(dev, false);
++   if (!agx_batch_ensure_compute_encoder(batch)) {
++      pipe_resource_reference(&indirect_synthesized.buffer, NULL);
++      return;
++   }
+ 
+    /* Allocate output indirect draw descriptors. This is exact. */
+    struct agx_resource out_draws_rsrc = {0};
+    unsigned out_size = 5 * sizeof(uint32_t) * indirect->draw_count;
+-   struct agx_ptr out_draws = agx_pool_alloc_aligned_with_bo(
+-      &batch->pool, out_size, 4, &out_draws_rsrc.bo);
++   struct agx_ptr out_draws;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, out_size, 4, &out_draws)) {
++      ctx->batch_discarded = true;
++      pipe_resource_reference(&indirect_synthesized.buffer, NULL);
++      return;
++   }
++   out_draws_rsrc.bo = batch->pool.transient_bo;
+ 
+    struct libagx_unroll_restart_args unroll = {
+       .heap = agx_batch_heap(batch),
+@@ -5203,11 +5387,19 @@ agx_draw_without_restart(struct agx_batch *batch,
+       .flatshade_first = batch->ctx->rast->base.flatshade_first,
+       .in_draw = agx_indirect_buffer_ptr(batch, indirect),
+    };
++   if (ctx->batch_discarded) {
++      pipe_resource_reference(&indirect_synthesized.buffer, NULL);
++      return;
++   }
+ 
+    /* Unroll the index buffer for each draw */
+    libagx_unroll_restart_struct(batch, agx_1d(1024 * indirect->draw_count),
+                                 AGX_BARRIER_ALL, unroll,
+                                 poly_compact_prim(info->mode));
++   if (ctx->batch_discarded) {
++      pipe_resource_reference(&indirect_synthesized.buffer, NULL);
++      return;
++   }
+ 
+    /* Now draw the results without restart */
+    struct pipe_draw_info new_info = {
+@@ -5442,8 +5634,14 @@ agx_upload_draw_params(struct agx_batch *batch,
+          info->start_instance,
+       };
+ 
+-      batch->uniforms.tables[AGX_SYSVAL_TABLE_PARAMS] =
+-         agx_pool_upload_aligned(&batch->pool, params, sizeof(params), 4);
++      struct agx_ptr uploaded;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(params), 4,
++                                      &uploaded)) {
++         batch->ctx->batch_discarded = true;
++         return;
++      }
++      memcpy(uploaded.cpu, params, sizeof(params));
++      batch->uniforms.tables[AGX_SYSVAL_TABLE_PARAMS] = uploaded.gpu;
+    }
+ }
+ 
+@@ -5519,13 +5717,30 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+    size_t draw_stride = 5 * sizeof(uint32_t);
+ 
+    struct agx_batch *batch = agx_get_batch(ctx);
++   if (!batch) {
++      if (unbind_tcs_when_done)
++         ctx->base.bind_tcs_state(&ctx->base, NULL);
++      return;
++   }
+    agx_batch_init_state(batch);
++   if (ctx->batch_discarded) {
++      if (unbind_tcs_when_done)
++         ctx->base.bind_tcs_state(&ctx->base, NULL);
++      return;
++   }
+ 
+-   if (!batch->cdm.bo) {
+-      batch->cdm = agx_encoder_allocate(dev, false);
++   if (!agx_batch_ensure_compute_encoder(batch)) {
++      if (unbind_tcs_when_done)
++         ctx->base.bind_tcs_state(&ctx->base, NULL);
++      return;
+    }
+ 
+    agx_upload_draw_params(batch, indirect, draws, info);
++   if (ctx->batch_discarded) {
++      if (unbind_tcs_when_done)
++         ctx->base.bind_tcs_state(&ctx->base, NULL);
++      return;
++   }
+    agx_upload_vbos(batch);
+    agx_update_vs(batch, info->index_size);
+    agx_update_tcs(ctx, info);
+@@ -5534,6 +5749,11 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+    ctx->stage[MESA_SHADER_TESS_EVAL].dirty = ~0;
+    agx_update_descriptors(batch, ctx->vs);
+    agx_update_descriptors(batch, ctx->tcs);
++   if (ctx->batch_discarded) {
++      if (unbind_tcs_when_done)
++         ctx->base.bind_tcs_state(&ctx->base, NULL);
++      return;
++   }
+ 
+    batch->uniforms.vertex_outputs = ctx->vs->b.info.outputs;
+ 
+@@ -5546,11 +5766,15 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+       size_t ib_extent = 0;
+       vp.index_size_B = info->index_size;
+       vp.index_buffer = agx_index_buffer_ptr(batch, info, draws, &ib_extent);
++      if (ctx->batch_discarded)
++         goto tess_cleanup;
+       vp.index_buffer_range_el = ib_extent;
+    }
+ 
+    /* Setup parameters */
+    uint64_t heap = agx_batch_heap(batch);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+    assert((tcs->tess.output_stride & 3) == 0 && "must be aligned");
+ 
+    struct poly_tess_params params = {
+@@ -5584,7 +5808,7 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+ 
+       unsigned in_patches = draws->count / patch_vertices;
+       if (in_patches == 0)
+-         return;
++         goto tess_cleanup;
+ 
+       /* TCS invocation counter increments once per-patch */
+       agx_query_increment_cpu(
+@@ -5606,8 +5830,10 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+       uint32_t draw_offs = alloc;
+       alloc += draw_stride;
+ 
+-      struct agx_ptr blob =
+-         agx_pool_alloc_aligned_with_bo(&batch->pool, alloc, 4, &draw_bo);
++      struct agx_ptr blob;
++      if (!agx_batch_try_pool_alloc(batch, &batch->pool, alloc, 4, &blob,
++                                    &draw_bo))
++         goto tess_cleanup;
+ 
+       params.tcs_buffer = blob.gpu + tcs_out_offs;
+       params.patches_per_instance = in_patches;
+@@ -5618,7 +5844,11 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+ 
+       unsigned vb_size = poly_tcs_in_size(draws->count * info->instance_count,
+                                           batch->uniforms.vertex_outputs);
+-      vp.output_buffer = agx_pool_alloc_aligned(&batch->pool, vb_size, 4).gpu;
++      struct agx_ptr output;
++      if (!agx_batch_try_pool_alloc(batch, &batch->pool, vb_size, 4, &output,
++                                    NULL))
++         goto tess_cleanup;
++      vp.output_buffer = output.gpu;
+ 
+       vs_grid = agx_3d(draws->count, info->instance_count, 1);
+       tcs_grid = agx_3d(in_patches * tcs->tess.output_patch_size,
+@@ -5626,17 +5856,24 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+ 
+       tess_grid = agx_1d(unrolled_patches);
+    } else if (indirect) {
+-      params.out_draws =
+-         agx_pool_alloc_aligned_with_bo(&batch->pool, draw_stride, 4, &draw_bo)
+-            .gpu;
+-   }
+-
+-   uint64_t vertex_state =
+-      agx_pool_upload_aligned(&batch->pool, &vp, sizeof(vp), 8);
++      struct agx_ptr output;
++      if (!agx_batch_try_pool_alloc(batch, &batch->pool, draw_stride, 4,
++                                    &output, &draw_bo))
++         goto tess_cleanup;
++      params.out_draws = output.gpu;
++   }
++
++   struct agx_ptr vertex_upload, params_upload;
++   if (!agx_batch_try_pool_alloc(batch, &batch->pool, sizeof(vp), 8,
++                                 &vertex_upload, NULL) ||
++       !agx_batch_try_pool_alloc(batch, &batch->pool, sizeof(params), 4,
++                                 &params_upload, NULL))
++      goto tess_cleanup;
++   memcpy(vertex_upload.cpu, &vp, sizeof(vp));
++   memcpy(params_upload.cpu, &params, sizeof(params));
++   uint64_t vertex_state = vertex_upload.gpu;
++   uint64_t state = params_upload.gpu;
+    batch->uniforms.vertex_params = vertex_state;
+-
+-   uint64_t state =
+-      agx_pool_upload_aligned(&batch->pool, &params, sizeof(params), 4);
+    batch->uniforms.tess_params = state;
+ 
+    if (indirect) {
+@@ -5650,13 +5887,18 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+          batch, ctx->pipeline_statistics[PIPE_STAT_QUERY_HS_INVOCATIONS]);
+ 
+       /* Allocate 3x indirect global+local grids for VS/TCS/tess */
+-      uint64_t grids =
+-         agx_pool_alloc_aligned(&batch->pool, grid_stride * 3, 4).gpu;
++      struct agx_ptr grids_upload;
++      if (!agx_batch_try_pool_alloc(batch, &batch->pool, grid_stride * 3, 4,
++                                    &grids_upload, NULL))
++         goto tess_cleanup;
++      uint64_t grids = grids_upload.gpu;
+ 
+       libagx_tess_setup_indirect(batch, agx_1d(1), AGX_BARRIER_ALL, state,
+                                  grids, vertex_state, indirect_ptr, 0, 0,
+                                  0 /* XXX: Index buffer */,
+                                  ctx->vs->b.info.outputs, tcs_statistic);
++      if (ctx->batch_discarded)
++         goto tess_cleanup;
+ 
+       vs_grid = agx_grid_indirect_local(grids + 0 * grid_stride);
+       tcs_grid = agx_grid_indirect_local(grids + 1 * grid_stride);
+@@ -5665,9 +5907,13 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+ 
+    agx_launch(batch, vs_grid, agx_workgroup(64, 1, 1), ctx->vs, ctx->linked.vs,
+               MESA_SHADER_VERTEX, 0);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+ 
+    agx_launch(batch, tcs_grid, agx_workgroup(tcs->tess.output_patch_size, 1, 1),
+               ctx->tcs, NULL, MESA_SHADER_TESS_CTRL, 0);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+ 
+    uint64_t c_prims = agx_get_query_address(
+       batch, ctx->pipeline_statistics[PIPE_STAT_QUERY_C_PRIMITIVES]);
+@@ -5685,10 +5931,16 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+    /* Generate counts, then prefix sum them, then finally tessellate. */
+    libagx_tessellate(batch, tess_grid, AGX_BARRIER_ALL, mode,
+                      POLY_TESS_MODE_COUNT, state);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+    libagx_prefix_sum_tess(batch, agx_1d(1024), AGX_BARRIER_ALL, state, c_prims,
+                           c_invs, c_prims || c_invs);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+    libagx_tessellate(batch, tess_grid, AGX_BARRIER_ALL, mode,
+                      POLY_TESS_MODE_WITH_COUNTS, state);
++   if (ctx->batch_discarded)
++      goto tess_cleanup;
+ 
+    /* Face culling state needs to be specialized for tess */
+    ctx->dirty |= AGX_DIRTY_RS;
+@@ -5722,6 +5974,7 @@ agx_draw_patches(struct agx_context *ctx, const struct pipe_draw_info *info,
+    ctx->base.bind_vs_state(&ctx->base, vs_cso);
+    ctx->in_tess = false;
+ 
++tess_cleanup:
+    if (unbind_tcs_when_done) {
+       ctx->base.bind_tcs_state(&ctx->base, NULL);
+    }
+@@ -5767,6 +6020,8 @@ agx_legalize_feedback_loop_surf(struct agx_context *ctx,
+    /* Decompress if we can and shadow if we can't. */
+    if (rsrc->base.bind & PIPE_BIND_SHARED) {
+       struct agx_batch *batch = agx_get_batch(ctx);
++      if (!batch)
++         return;
+ 
+       /* If we already did in-place decompression for this one */
+       if (batch->feedback & bit)
+@@ -5776,6 +6031,8 @@ agx_legalize_feedback_loop_surf(struct agx_context *ctx,
+        * this buffer, that will have been flushed above.
+        */
+       agx_decompress_inplace(batch, surf, "Texture feedback loop");
++      if (ctx->batch_discarded)
++         return;
+ 
+       /* Mark it as a feedback cbuf, so it will be written to
+        * uncompressed despite having a compressed layout.
+@@ -6018,8 +6275,13 @@ agx_apple9_upload_graphics_sysvals(
+    const struct agx_apple9_texture_mapping *mapping)
+ {
+    struct agx_context *ctx = batch->ctx;
+-   struct agx_ptr sysvals = agx_pool_alloc_aligned(
+-      &batch->pool, AGX_APPLE9_GRAPHICS_SYSVAL_SIZE, 16);
++   struct agx_ptr sysvals;
++   if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                   AGX_APPLE9_GRAPHICS_SYSVAL_SIZE, 16,
++                                   &sysvals)) {
++      ctx->batch_discarded = true;
++      return 0;
++   }
+    memcpy(sysvals.cpu, ctx->blend_color.color, 16);
+    /* Compute texture operations share this table without raster state. */
+    float point_size = !ctx->rast || ctx->rast->base.point_size_per_vertex
+@@ -6072,16 +6334,18 @@ agx_apple9_upload_textures(struct agx_batch *batch, struct agx_stage *shader,
+    *texture_table = *sampler_table = 0;
+    if (!rs->texture_mask && !rs->image_mask)
+       return;
+-   struct agx_ptr textures = agx_pool_alloc_aligned(
+-      &batch->pool,
+-      (util_bitcount(rs->texture_mask) + util_bitcount(rs->image_mask)) *
+-         AGX_APPLE9_TEXTURE_TABLE_STRIDE,
+-      64);
+-   struct agx_ptr samplers = agx_pool_alloc_aligned(
+-      &batch->pool,
+-      (util_bitcount(rs->sampler_mask) +
+-       rs->uses_texel_fetch) * AGX_APPLE9_SAMPLER_TABLE_STRIDE,
+-      64);
++   struct agx_ptr textures, samplers;
++   if (!agx_pool_try_alloc_aligned(
++          &batch->pool,
++          (util_bitcount(rs->texture_mask) + util_bitcount(rs->image_mask)) *
++             AGX_APPLE9_TEXTURE_TABLE_STRIDE, 64, &textures) ||
++       !agx_pool_try_alloc_aligned(
++          &batch->pool,
++          (util_bitcount(rs->sampler_mask) + rs->uses_texel_fetch) *
++             AGX_APPLE9_SAMPLER_TABLE_STRIDE, 64, &samplers)) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
+    *texture_table = textures.gpu;
+    *sampler_table = samplers.gpu;
+    unsigned slot = 0;
+@@ -6381,9 +6645,19 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+       if (!patched)
+          return;
+       struct agx_batch *batch = agx_get_batch(ctx);
++      if (!batch) {
++         pipe_resource_reference(&patched, NULL);
++         return;
++      }
+       agx_batch_init_state(batch);
+-      if (!batch->cdm.bo)
+-         batch->cdm = agx_encoder_allocate(dev, false);
++      if (ctx->batch_discarded) {
++         pipe_resource_reference(&patched, NULL);
++         return;
++      }
++      if (!agx_batch_ensure_compute_encoder(batch)) {
++         pipe_resource_reference(&patched, NULL);
++         return;
++      }
+       struct agx_resource *count = agx_resource(indirect->indirect_draw_count);
+       agx_batch_reads(batch, count);
+       agx_batch_writes(batch, agx_resource(patched), 0);
+@@ -6393,6 +6667,10 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+          agx_indirect_buffer_ptr(batch, indirect),
+          agx_map_gpu(count) + indirect->indirect_draw_count_offset,
+          (indirect->stride ?: stride) / sizeof(uint32_t), !!info->index_size);
++      if (ctx->batch_discarded) {
++         pipe_resource_reference(&patched, NULL);
++         return;
++      }
+       struct pipe_draw_indirect_info predicated = *indirect;
+       predicated.indirect_draw_count = NULL;
+       predicated.buffer = patched;
+@@ -6507,12 +6785,16 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+    agx_legalize_xfb(ctx);
+ 
+    struct agx_batch *batch = agx_get_batch(ctx);
++   if (!batch)
++      return;
+    uint64_t ib = 0;
+    size_t ib_extent = 0;
+ 
+    if (info->index_size) {
+       ib =
+          agx_index_buffer_ptr(batch, info, indirect ? NULL : draws, &ib_extent);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    /* Increment IA statistics before lowering tessellation. This ensures we
+@@ -6533,11 +6815,21 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+          ptr = agx_indirect_buffer_ptr(batch, indirect);
+       } else {
+          uint32_t desc[] = {draws->count, info->instance_count, 0};
+-         ptr = agx_pool_upload(&batch->pool, &desc, sizeof(desc));
++         struct agx_ptr upload;
++         if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(desc),
++                                         util_next_power_of_two(sizeof(desc)),
++                                         &upload)) {
++            ctx->batch_discarded = true;
++            return;
++         }
++         memcpy(upload.cpu, desc, sizeof(desc));
++         ptr = upload.gpu;
+       }
+ 
+       agx_ia_update(batch, info, ptr, ib,
+                     info->index_size ? ib_extent / info->index_size : 1);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    if (info->mode == MESA_PRIM_PATCHES) {
+@@ -6568,6 +6860,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+ #endif
+ 
+    agx_batch_init_state(batch);
++   if (ctx->batch_discarded)
++      return;
+    if (agx_apple9_direct_render_enabled(dev) && !agx_apple9_reload_color(batch))
+       return;
+ 
+@@ -6601,6 +6895,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+    if (ctx->gs) {
+       batch->uniforms.geometry_params =
+          agx_batch_geometry_params(batch, ib, ib_extent, info, draws, indirect);
++      if (ctx->batch_discarded)
++         return;
+ 
+       if (ctx->gs->bo)
+          agx_batch_add_bo(batch, ctx->gs->bo);
+@@ -6661,6 +6957,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+    if (apple9_draw_params ||
+        (ctx->linked.vs && ctx->linked.vs->uses_base_param) || ctx->gs) {
+       agx_upload_draw_params(batch, indirect, draws, info);
++      if (ctx->batch_discarded)
++         return;
+ 
+       batch->uniforms.is_indexed_draw = (info->index_size > 0);
+       ctx->dirty |= AGX_DIRTY_VS;
+@@ -6669,6 +6967,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+    agx_update_descriptors(batch, ctx->vs);
+    agx_update_descriptors(batch, ctx->gs);
+    agx_update_descriptors(batch, ctx->fs);
++   if (ctx->batch_discarded)
++      return;
+ 
+    if (IS_DIRTY(VS) || IS_DIRTY(FS) || ctx->gs || IS_DIRTY(VERTEX) ||
+        IS_DIRTY(BLEND_COLOR) || IS_DIRTY(QUERY) || IS_DIRTY(POLY_STIPPLE) ||
+@@ -6704,11 +7004,20 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+       if (IS_DIRTY(POLY_STIPPLE)) {
+          STATIC_ASSERT(sizeof(ctx->poly_stipple) == 32 * 4);
+ 
+-         batch->uniforms.polygon_stipple = agx_pool_upload_aligned(
+-            &batch->pool, ctx->poly_stipple, sizeof(ctx->poly_stipple), 4);
++         struct agx_ptr upload;
++         if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                         sizeof(ctx->poly_stipple), 4,
++                                         &upload)) {
++            ctx->batch_discarded = true;
++            return;
++         }
++         memcpy(upload.cpu, ctx->poly_stipple, sizeof(ctx->poly_stipple));
++         batch->uniforms.polygon_stipple = upload.gpu;
+       }
+ 
+       agx_upload_uniforms(batch);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    struct pipe_draw_info info_gs;
+@@ -6722,6 +7031,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+    if (ctx->gs) {
+       /* Launch the pre-rasterization parts of the geometry shader */
+       agx_launch_gs_prerast(batch, info, draws, indirect);
++      if (ctx->batch_discarded)
++         return;
+ 
+       /* Setup to rasterize the GS results */
+       struct poly_gs_info *gsi = &ctx->gs->gs;
+@@ -6775,7 +7086,15 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+       } else if (gsi->shape == POLY_GS_SHAPE_STATIC_INDEXED) {
+          struct agx_pool *index_pool = agx_apple9_direct_render_enabled(dev)
+             ? &batch->pipeline_pool : &batch->pool;
+-         ib = agx_pool_upload(index_pool, gsi->topology, gsi->max_indices);
++         struct agx_ptr upload;
++         if (!agx_pool_try_alloc_aligned(
++                index_pool, gsi->max_indices,
++                util_next_power_of_two(gsi->max_indices), &upload)) {
++            ctx->batch_discarded = true;
++            return;
++         }
++         memcpy(upload.cpu, gsi->topology, gsi->max_indices);
++         ib = upload.gpu;
+          ib_extent = gsi->max_indices;
+       }
+ 
+@@ -6783,6 +7102,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+        * between the GS prepass and the GS rast program.
+        */
+       agx_update_descriptors(batch, ctx->gs->gs_copy);
++      if (ctx->batch_discarded)
++         return;
+    }
+ 
+    assert((!indirect || !indirect->indirect_draw_count) && "multidraw handled");
+@@ -6804,7 +7125,7 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+     * We only need to do this once per draw as long as we conservatively
+     * estimate the maximum bytes of VDM commands that this draw will emit.
+     */
+-   agx_ensure_cmdbuf_has_space(
++   if (!agx_ensure_cmdbuf_has_space(
+       batch, &batch->vdm,
+       (AGX_VDM_STATE_LENGTH * 2) + (AGX_PPP_STATE_LENGTH * MAX_PPP_UPDATES) +
+          AGX_VDM_STATE_RESTART_INDEX_LENGTH +
+@@ -6814,7 +7135,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+          AGX_VDM_STATE_VERTEX_UNKNOWN_LENGTH + 4 /* padding */ +
+          AGX_INDEX_LIST_LENGTH + AGX_INDEX_LIST_BUFFER_LO_LENGTH +
+          AGX_INDEX_LIST_COUNT_LENGTH + AGX_INDEX_LIST_INSTANCES_LENGTH +
+-         AGX_INDEX_LIST_START_LENGTH + AGX_INDEX_LIST_BUFFER_SIZE_LENGTH);
++         AGX_INDEX_LIST_START_LENGTH + AGX_INDEX_LIST_BUFFER_SIZE_LENGTH))
++      return;
+ 
+    uint8_t *out;
+ 
+@@ -6980,6 +7302,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+             } else if (binding == AGX_APPLE9_GRAPHICS_SYSVAL_BINDING) {
+                address = agx_apple9_upload_graphics_sysvals(
+                   batch, &ctx->stage[shader], &rs->texture_mapping);
++               if (ctx->batch_discarded)
++                  return;
+             } else if (binding >= AGX_APPLE9_SYSVAL_UBO_BASE &&
+                        binding < AGX_APPLE9_SYSVAL_UBO_BASE + AGX_NUM_SYSVAL_TABLES) {
+                address = batch->uniforms.tables[binding - AGX_APPLE9_SYSVAL_UBO_BASE];
+@@ -7010,12 +7334,19 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+          for (unsigned slot = 0; reuse && slot < rs->resource_count; slot++)
+             reuse =
+                previous->buffers[stage][slot] == record->buffers[stage][slot];
+-         uint64_t address =
+-            reuse ? (stage ? previous->fragment_table : previous->vertex_table)
+-            : rs->resource_count ? agx_pool_upload_aligned(
+-                                      &batch->pool, record->buffers[stage],
+-                                      rs->resource_count * sizeof(uint64_t), 64)
+-                                 : 0;
++         uint64_t address = 0;
++         if (reuse) {
++            address = stage ? previous->fragment_table : previous->vertex_table;
++         } else if (rs->resource_count) {
++            size_t size = rs->resource_count * sizeof(uint64_t);
++            struct agx_ptr table;
++            if (!agx_pool_try_alloc_aligned(&batch->pool, size, 64, &table)) {
++               ctx->batch_discarded = true;
++               return;
++            }
++            memcpy(table.cpu, record->buffers[stage], size);
++            address = table.gpu;
++         }
+          if (stage)
+             record->fragment_table = address;
+          else
+@@ -7030,6 +7361,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+          agx_apple9_upload_textures(batch, shader, rs, stage != 0,
+                                     &record->texture_table[stage],
+                                     &record->sampler_table[stage]);
++         if (ctx->batch_discarded)
++            return;
+       }
+       pipeline.flatshade_first = ctx->rast->base.flatshade_first;
+       pipeline.index_size = info->index_size;
+@@ -7045,7 +7378,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+                                    &pipeline,
+                                    record, previous)) {
+          fprintf(stderr, "Failed to encode Apple9 draw state\n");
+-         abort();
++         ctx->batch_discarded = true;
++         return;
+       }
+       batch->apple9_previous_draw = *record;
+       ++batch->apple9_draw_count;
+@@ -7073,6 +7407,8 @@ agx_draw_vbo(struct pipe_context *pctx, const struct pipe_draw_info *info,
+       agx_batch_add_bo(batch, dev->apple9_entries);
+    } else {
+       out = agx_encode_state(batch, batch->vdm.current);
++      if (ctx->batch_discarded)
++         return;
+ 
+       if (info->index_size && info->primitive_restart) {
+          agx_push(out, VDM_STATE, cfg)
+@@ -7184,6 +7520,8 @@ agx_apple9_launch_prerast(struct agx_batch *batch, struct agx_grid grid,
+       } else if (binding == AGX_APPLE9_GRAPHICS_SYSVAL_BINDING) {
+          addresses[i] = agx_apple9_upload_graphics_sysvals(
+             batch, stage, &cs->apple9_compute_textures);
++         if (ctx->batch_discarded)
++            return;
+          continue;
+       } else if (binding >= AGX_APPLE9_SYSVAL_UBO_BASE &&
+                  binding < AGX_APPLE9_SYSVAL_UBO_BASE + AGX_NUM_SYSVAL_TABLES) {
+@@ -7209,6 +7547,8 @@ agx_apple9_launch_prerast(struct agx_batch *batch, struct agx_grid grid,
+ 
+    uint64_t textures, samplers;
+    agx_apple9_upload_compute_textures(batch, cs, &textures, &samplers);
++   if (ctx->batch_discarded)
++      return;
+    agx_apple9_launch_compute(batch, grid, wg, cs->bo, profile, addresses, count,
+                               textures, samplers,
+                               batch->uniforms.tables[AGX_SYSVAL_TABLE_GRID]);
+@@ -7221,6 +7561,8 @@ agx_launch(struct agx_batch *batch, struct agx_grid grid,
+            unsigned variable_shared_mem)
+ {
+    struct agx_context *ctx = batch->ctx;
++   if (ctx->batch_discarded)
++      return;
+    if (!linked && agx_is_shader_empty(&cs->b))
+       return;
+ 
+@@ -7235,14 +7577,22 @@ agx_launch(struct agx_batch *batch, struct agx_grid grid,
+          grid.count[2] / wg.z,
+       };
+ 
+-      batch->uniforms.tables[AGX_SYSVAL_TABLE_GRID] =
+-         agx_pool_upload_aligned(&batch->pool, groups, sizeof(groups), 4);
++      struct agx_ptr upload;
++      if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(groups), 4,
++                                      &upload)) {
++         ctx->batch_discarded = true;
++         return;
++      }
++      memcpy(upload.cpu, groups, sizeof(groups));
++      batch->uniforms.tables[AGX_SYSVAL_TABLE_GRID] = upload.gpu;
+    } else if (cs->apple9_tiny && grid.mode == AGX_CDM_MODE_INDIRECT_LOCAL) {
+       batch->uniforms.tables[AGX_SYSVAL_TABLE_GRID] =
+          agx_apple9_indirect_local_groups(batch, grid.ptr);
+    } else {
+       batch->uniforms.tables[AGX_SYSVAL_TABLE_GRID] = grid.ptr;
+    }
++   if (ctx->batch_discarded)
++      return;
+ 
+    util_dynarray_foreach(&ctx->global_buffers, struct pipe_resource *, res) {
+       if (!*res)
+@@ -7254,7 +7604,11 @@ agx_launch(struct agx_batch *batch, struct agx_grid grid,
+    }
+ 
+    agx_update_descriptors(batch, cs);
++   if (ctx->batch_discarded)
++      return;
+    agx_upload_uniforms(batch);
++   if (ctx->batch_discarded)
++      return;
+ 
+    if (cs->apple9_tiny) {
+       agx_apple9_launch_prerast(batch, grid, wg, cs);
+@@ -7276,6 +7630,8 @@ agx_launch(struct agx_batch *batch, struct agx_grid grid,
+ 
+    uint32_t usc = agx_build_pipeline(batch, cs, linked, MESA_SHADER_COMPUTE,
+                                      variable_shared_mem, subgroups_per_core);
++   if (ctx->batch_discarded)
++      return;
+ 
+    if (cs)
+       agx_batch_add_bo(batch, cs->bo);
+@@ -7380,10 +7736,14 @@ agx_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
+    }
+ 
+    struct agx_batch *batch = agx_get_compute_batch(ctx);
++   if (!batch)
++      return;
+    if (cs->apple9_tiny &&
+        batch->cdm.current + AGX_APPLE9_COMPUTE_CDM_RECORD_SIZE + 4 > batch->cdm.end) {
+       agx_flush_batch_for_reason(ctx, batch, "Apple9 compute stream full");
+       batch = agx_get_compute_batch(ctx);
++      if (!batch)
++         return;
+    }
+ 
+    uint64_t indirect = 0;
+@@ -7484,8 +7844,12 @@ agx_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
+       }
+    }
+ 
++   if (ctx->batch_discarded)
++      return;
+    agx_batch_add_timestamp_query(batch, ctx->time_elapsed);
+    agx_batch_init_state(batch);
++   if (ctx->batch_discarded)
++      return;
+ 
+    if (cs->apple9_tiny) {
+       struct agx_stage *stage = &ctx->stage[MESA_SHADER_COMPUTE];
+@@ -7536,6 +7900,8 @@ agx_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
+             if (binding == AGX_APPLE9_GRAPHICS_SYSVAL_BINDING) {
+                resource_addresses[i] = agx_apple9_upload_graphics_sysvals(
+                   batch, stage, &cs->apple9_compute_textures);
++               if (ctx->batch_discarded)
++                  return;
+                continue;
+             }
+             if (binding >= PIPE_MAX_CONSTANT_BUFFERS ||
+@@ -7570,6 +7936,8 @@ agx_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
+       }
+       uint64_t textures, samplers;
+       agx_apple9_upload_compute_textures(batch, cs, &textures, &samplers);
++      if (ctx->batch_discarded)
++         return;
+       uint64_t launch_address;
+       if (!agx_apple9_prepare_compute_dispatch(
+              dev, &batch->pipeline_pool, cs->bo, &cs->apple9_compute_profile,
+@@ -7578,7 +7946,8 @@ agx_launch_grid(struct pipe_context *pipe, const struct pipe_grid_info *info)
+                 ? cs->bo->va->addr + cs->apple9_compute_profile.preamble_offset : 0,
+              &launch_address)) {
+          fprintf(stderr, "Failed to encode Apple9 compute dispatch state\n");
+-         abort();
++         ctx->batch_discarded = true;
++         return;
+       }
+ 
+       const unsigned cdm_record_size =
+@@ -7691,11 +8060,16 @@ agx_decompress_inplace(struct agx_batch *batch, struct pipe_surface *surf,
+ 
+    perf_debug(dev, "Decompressing in-place due to: %s", reason);
+ 
+-   if (!batch->cdm.bo)
+-      batch->cdm = agx_encoder_allocate(dev, false);
++   if (!agx_batch_ensure_compute_encoder(batch))
++      return;
+ 
+-   struct agx_ptr images = agx_pool_alloc_aligned(
+-      &batch->pool, sizeof(struct libagx_decompress_images), 64);
++   struct agx_ptr images;
++   if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                   sizeof(struct libagx_decompress_images),
++                                   64, &images)) {
++      ctx->batch_discarded = true;
++      return;
++   }
+    struct libagx_decompress_images *img = images.cpu;
+ 
+    struct pipe_sampler_view sampler_view = sampler_view_for_surface(surf);
+diff --git a/src/gallium/drivers/asahi/agx_state.h b/src/gallium/drivers/asahi/agx_state.h
+index 3015c43..d0a5202 100644
+--- a/src/gallium/drivers/asahi/agx_state.h
++++ b/src/gallium/drivers/asahi/agx_state.h
+@@ -387,9 +387,10 @@ struct agx_sampler_heap {
+    uint16_t count;
+ };
+ 
+-uint16_t agx_sampler_heap_add(struct agx_device *dev,
+-                              struct agx_sampler_heap *heap,
+-                              struct agx_sampler_packed *sampler);
++bool agx_sampler_heap_add(struct agx_device *dev,
++                          struct agx_sampler_heap *heap,
++                          struct agx_sampler_packed *sampler,
++                          uint16_t *index);
+ 
+ /* Command fetch can read past the terminator. Every encoder allocation must
+  * preserve this mapped tail, even if no more commands will be added.
+@@ -752,6 +753,7 @@ struct agx_context {
+    struct agx_bg_eot_cache bg_eot;
+ 
+    bool any_faults;
++   bool batch_discarded;
+ 
+    uint32_t syncobj;
+    uint32_t dummy_syncobj;
+@@ -1261,7 +1263,7 @@ void agx_resource_copy_region(struct pipe_context *pctx,
+ 
+ /* Batch logic */
+ 
+-struct agx_encoder agx_encoder_allocate(struct agx_device *dev, bool vdm);
++bool agx_batch_ensure_compute_encoder(struct agx_batch *batch);
+ 
+ void agx_batch_init_state(struct agx_batch *batch);
+ 
+@@ -1279,6 +1281,7 @@ uint64_t agx_get_query_address(struct agx_batch *batch,
+                                struct agx_query *query);
+ uint64_t agx_get_occlusion_heap(struct agx_batch *batch);
+ 
++void agx_cancel_batch_queries(struct agx_batch *batch);
+ void agx_finish_batch_queries(struct agx_batch *batch, uint64_t begin_ts,
+                               uint64_t end_ts);
+ 
+diff --git a/src/gallium/drivers/asahi/agx_streamout.c b/src/gallium/drivers/asahi/agx_streamout.c
+index c245f80..d29c546 100644
+--- a/src/gallium/drivers/asahi/agx_streamout.c
++++ b/src/gallium/drivers/asahi/agx_streamout.c
+@@ -568,13 +568,17 @@ agx_apple9_capture_streamout(struct pipe_context *pctx,
+          struct pipe_draw_start_count_bias range = {.count = chunk};
+          pctx->draw_vbo(pctx, &capture, 0, NULL, &range, 1);
+          pipe_resource_reference(&buffers[0].buffer, NULL);
++         if (ctx->batch_discarded)
++            break;
+          done += chunk;
+       }
+       /* Capture outputs can be the next draw's vertex or uniform inputs.
+        * End this producer batch so the ordinary resource tracker orders that
+        * consumer; draws within one Apple9 VDM batch lack a memory barrier. */
+-      agx_flush_batch_for_reason(ctx, agx_get_batch(ctx),
+-                                 "Transform feedback producer");
++      struct agx_batch *capture_batch = agx_get_batch(ctx);
++      if (capture_batch)
++         agx_flush_batch_for_reason(ctx, capture_batch,
++                                    "Transform feedback producer");
+       ctx->apple9_xfb_capture = NULL;
+       ctx->active_queries = saved_queries;
+       pctx->set_shader_buffers(pctx, MESA_SHADER_VERTEX, AGX_APPLE9_XFB_PARAMS,
+diff --git a/src/gallium/drivers/asahi/agx_uniforms.c b/src/gallium/drivers/asahi/agx_uniforms.c
+index 503f989..cc2ded6 100644
+--- a/src/gallium/drivers/asahi/agx_uniforms.c
++++ b/src/gallium/drivers/asahi/agx_uniforms.c
+@@ -65,8 +65,13 @@ agx_upload_uniforms(struct agx_batch *batch)
+ {
+    struct agx_context *ctx = batch->ctx;
+ 
+-   struct agx_ptr root_ptr = agx_pool_alloc_aligned(
+-      &batch->pool, sizeof(struct agx_draw_uniforms), 16);
++   struct agx_ptr root_ptr;
++   if (!agx_pool_try_alloc_aligned(&batch->pool,
++                                   sizeof(struct agx_draw_uniforms), 16,
++                                   &root_ptr)) {
++      ctx->batch_discarded = true;
++      return;
++   }
+ 
+    batch->uniforms.tables[AGX_SYSVAL_TABLE_ROOT] = root_ptr.gpu;
+    batch->uniforms.sample_mask = ctx->sample_mask;
+@@ -98,10 +103,14 @@ agx_set_sampler_uniforms(struct agx_batch *batch, mesa_shader_stage stage)
+    /* If we use bindless samplers, insert sampler into the heap */
+    if (st->shader && st->shader->uses_bindless_samplers) {
+       u_foreach_bit(s, st->valid_samplers) {
+-         unif->sampler_handle[s] =
+-            28 +
+-            agx_sampler_heap_add(dev, &batch->sampler_heap,
+-                                 &st->samplers[s]->desc_without_custom_border);
++         uint16_t index;
++         if (!agx_sampler_heap_add(dev, &batch->sampler_heap,
++                                   &st->samplers[s]->desc_without_custom_border,
++                                   &index)) {
++            ctx->batch_discarded = true;
++            return;
++         }
++         unif->sampler_handle[s] = 28 + index;
+       }
+    }
+ }
+@@ -126,7 +135,14 @@ agx_set_ssbo_uniforms(struct agx_batch *batch, mesa_shader_stage stage)
+ 
+    /* Single element sink. TODO: Optimize with soft fault. */
+    uint32_t zeroes[4] = {0};
+-   uint64_t sink = agx_pool_upload_aligned(&batch->pool, &zeroes, 16, 16);
++   struct agx_ptr sink_ptr;
++   if (!agx_pool_try_alloc_aligned(&batch->pool, sizeof(zeroes), 16,
++                                   &sink_ptr)) {
++      batch->ctx->batch_discarded = true;
++      return;
++   }
++   memcpy(sink_ptr.cpu, zeroes, sizeof(zeroes));
++   uint64_t sink = sink_ptr.gpu;
+ 
+    /* Consider all shader buffers, needed to avoid faults with
+     * e.g. arb_shader_storage_buffer_object-array-ssbo-binding.
+diff --git a/src/vulkan/runtime/vk_queue.c b/src/vulkan/runtime/vk_queue.c
+index 78439db..edf7549 100644
+--- a/src/vulkan/runtime/vk_queue.c
++++ b/src/vulkan/runtime/vk_queue.c
+@@ -25,6 +25,7 @@
+ 
+ #include "util/perf/cpu_trace.h"
+ #include "util/u_debug.h"
++#include "util/os_time.h"
+ #include <inttypes.h>
+ 
+ #include "vk_alloc.h"
+@@ -568,7 +569,18 @@ vk_queue_drain(struct vk_queue *queue)
+          break;
+       }
+ 
+-      int ret = cnd_wait(&queue->submit.pop, &queue->submit.mutex);
++      /* Device loss can originate on another queue without signalling this
++       * condition. Periodic wakeups only recheck loss; they do not time out
++       * otherwise valid submissions. */
++      struct timespec deadline;
++      timespec_get(&deadline, TIME_UTC);
++      deadline.tv_nsec += 100000000;
++      if (deadline.tv_nsec >= 1000000000) {
++         deadline.tv_sec++;
++         deadline.tv_nsec -= 1000000000;
++      }
++      int ret = cnd_timedwait(&queue->submit.pop, &queue->submit.mutex,
++                              &deadline);
+       if (ret == thrd_error) {
+          result = vk_queue_set_lost(queue, "cnd_wait failed");
+          break;
+@@ -758,17 +770,37 @@ vk_queue_submit_thread_func(void *_data)
+       /* Drop the lock while we wait */
+       mtx_unlock(&queue->submit.mutex);
+ 
+-      result = vk_sync_wait_many(queue->base.device,
+-                                 submit->wait_count, submit->waits,
+-                                 VK_SYNC_WAIT_PENDING, UINT64_MAX);
+-      if (unlikely(result != VK_SUCCESS)) {
++      /* A pending wait need not ever resolve after loss on another queue.
++       * Poll loss with bounded waits, preserving the configured overall Mesa
++       * timeout and continuing indefinitely for healthy work by default. */
++      uint64_t max_deadline = vk_sync_get_max_abs_timeout_ns();
++      do {
++         if (vk_device_is_lost_no_report(queue->base.device)) {
++            result = VK_ERROR_DEVICE_LOST;
++            break;
++         }
++         uint64_t slice = os_time_get_absolute_timeout(100000000ull);
++         result = vk_sync_wait_many(queue->base.device,
++                                    submit->wait_count, submit->waits,
++                                    VK_SYNC_WAIT_PENDING,
++                                    MIN2(slice, max_deadline));
++         if (result == VK_TIMEOUT && max_deadline != UINT64_MAX &&
++             os_time_get_nano() >= max_deadline) {
++            result = vk_device_set_lost(queue->base.device,
++                                        "Maximum timeout exceeded!");
++         }
++      } while (result == VK_TIMEOUT);
++      if (unlikely(result != VK_SUCCESS ||
++                   vk_device_is_lost_no_report(queue->base.device))) {
+          vk_queue_set_lost(queue, "Wait for time points failed");
++         cnd_broadcast(&queue->submit.pop);
+          return 1;
+       }
+ 
+       result = vk_queue_submit_final(queue, submit);
+       if (unlikely(result != VK_SUCCESS)) {
+          vk_queue_set_lost(queue, "queue::driver_submit failed");
++         cnd_broadcast(&queue->submit.pop);
+          return 1;
+       }
+ 
+@@ -825,7 +857,10 @@ vk_queue_stop_submit_thread(struct vk_queue *queue)
+ 
+    thrd_join(queue->submit.thread, NULL);
+ 
+-   assert(list_is_empty(&queue->submit.submits));
++   /* On device loss the worker may exit with unprocessed submits; finish()
++    * destroys them after the thread has stopped. */
++   assert(list_is_empty(&queue->submit.submits) ||
++          vk_device_is_lost_no_report(queue->base.device));
+    queue->submit.mode = VK_QUEUE_SUBMIT_MODE_IMMEDIATE;
+ }
+ 
+diff --git a/src/vulkan/runtime/vk_sync.c b/src/vulkan/runtime/vk_sync.c
+index e5eb134..69353a6 100644
+--- a/src/vulkan/runtime/vk_sync.c
++++ b/src/vulkan/runtime/vk_sync.c
+@@ -303,8 +303,8 @@ assert_valid_wait(struct vk_sync *sync,
+       assert(sync->type->features & VK_SYNC_FEATURE_WAIT_PENDING);
+ }
+ 
+-static uint64_t
+-get_max_abs_timeout_ns(void)
++uint64_t
++vk_sync_get_max_abs_timeout_ns(void)
+ {
+    static int max_timeout_ms = -1;
+    if (max_timeout_ms < 0)
+@@ -349,7 +349,7 @@ vk_sync_wait(struct vk_device *device,
+              enum vk_sync_wait_flags wait_flags,
+              uint64_t abs_timeout_ns)
+ {
+-   uint64_t max_abs_timeout_ns = get_max_abs_timeout_ns();
++   uint64_t max_abs_timeout_ns = vk_sync_get_max_abs_timeout_ns();
+    if (abs_timeout_ns > max_abs_timeout_ns) {
+       VkResult result =
+          __vk_sync_wait(device, sync, wait_value, wait_flags,
+@@ -444,7 +444,7 @@ vk_sync_wait_many(struct vk_device *device,
+                   enum vk_sync_wait_flags wait_flags,
+                   uint64_t abs_timeout_ns)
+ {
+-   uint64_t max_abs_timeout_ns = get_max_abs_timeout_ns();
++   uint64_t max_abs_timeout_ns = vk_sync_get_max_abs_timeout_ns();
+    if (abs_timeout_ns > max_abs_timeout_ns) {
+       VkResult result =
+          __vk_sync_wait_many(device, wait_count, waits, wait_flags,
+diff --git a/src/vulkan/runtime/vk_sync.h b/src/vulkan/runtime/vk_sync.h
+index bc9f1ba..37cf32e 100644
+--- a/src/vulkan/runtime/vk_sync.h
++++ b/src/vulkan/runtime/vk_sync.h
+@@ -384,6 +384,9 @@ VkResult MUST_CHECK vk_sync_wait(struct vk_device *device,
+                                  enum vk_sync_wait_flags wait_flags,
+                                  uint64_t abs_timeout_ns);
+ 
++/* Absolute deadline derived from MESA_VK_MAX_TIMEOUT, or UINT64_MAX. */
++uint64_t vk_sync_get_max_abs_timeout_ns(void);
++
+ VkResult MUST_CHECK vk_sync_wait_many(struct vk_device *device,
+                                       uint32_t wait_count,
+                                       const struct vk_sync_wait *waits,

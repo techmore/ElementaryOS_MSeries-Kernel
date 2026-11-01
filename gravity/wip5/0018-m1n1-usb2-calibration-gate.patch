@@ -1,0 +1,97 @@
+diff --git a/src/kboot_atc.c b/src/kboot_atc.c
+index efe37e2..ae25bd4 100644
+--- a/src/kboot_atc.c
++++ b/src/kboot_atc.c
+@@ -803,6 +803,18 @@ cleanup:
+     printf("FDT: T8132 USB3 calibration incomplete; preserving USB2 fallback\n");
+ }
+-
++
++/* On the mini, the two-bank T8132 USB2 profile consumes no USB3
++ * calibration. Do not apply T8122-format lane/fuse lists to these banks.
++ */
++static bool j773g_usb2_only_phy(void *dt, int node)
++{
++    return chip_id == T8132 && !fdt_node_check_compatible(dt, 0, "apple,j773g") &&
++           !fdt_node_check_compatible(dt, node, "apple,t8132-atcphy") &&
++           fdt_stringlist_count(dt, node, "reg-names") == 2 &&
++           fdt_stringlist_search(dt, node, "reg-names", "usb2phy") == 0 &&
++           fdt_stringlist_search(dt, node, "reg-names", "pipehandler") == 1;
++}
++
+ static void dt_copy_atc_tunables(void *dt, const char *adt_path, const char *dt_alias, int port)
+ {
+     int ret;
+@@ -821,6 +833,9 @@ static void dt_copy_atc_tunables(void *dt, const char *adt_path, const char *dt_
+         return;
+     }
+-
++
++    if (j773g_usb2_only_phy(dt, fdt_node))
++        return;
++
+     int adt_node = adt_path_offset(adt, adt_path);
+     dt_export_j700_atc(dt, adt_node, fdt_node);
+     if (adt_node < 0)
+diff --git a/tests/python/test_j773g_usb2_calibration_skip.py b/tests/python/test_j773g_usb2_calibration_skip.py
+new file mode 100644
+index 0000000..5745be2
+--- /dev/null
++++ b/tests/python/test_j773g_usb2_calibration_skip.py
+@@ -0,0 +1,56 @@
++# SPDX-License-Identifier: GPL-2.0-only OR MIT
++"""Host-only check of the mini's two-bank USB2 calibration gate."""
++from pathlib import Path
++import subprocess
++import tempfile
++
++
++def test_j773g_usb2_calibration_gate(tmp_path):
++    repo = Path(__file__).resolve().parents[2]
++    source = (repo / 'src/kboot_atc.c').read_text()
++    start = source.index('static bool j773g_usb2_only_phy(')
++    end = source.index('static void dt_copy_atc_tunables(', start)
++    helper = source[start:end]
++    harness = r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "libfdt.h"
++#define T8132 0x8132
++static unsigned chip_id = T8132;
++''' + helper + r'''
++int main(void) {
++ for (int mode=0; mode<7; mode++) {
++  char dt[8192]; assert(!fdt_create_empty_tree(dt,sizeof(dt)));
++  assert(!fdt_setprop_string(dt,0,"compatible",mode==1?"apple,j713":"apple,j773g"));
++  int node=fdt_add_subnode(dt,0,"phy"); assert(node>=0);
++  assert(!fdt_setprop_string(dt,node,"compatible",mode==2?"apple,t8122-atcphy":"apple,t8132-atcphy"));
++  node=fdt_path_offset(dt,"/phy");
++  const char valid[]="usb2phy\0pipehandler";
++  const char reversed[]="pipehandler\0usb2phy";
++  const char extra[]="usb2phy\0pipehandler\0core";
++  if(mode!=5) assert(!fdt_setprop(dt,node,"reg-names",mode==3?reversed:mode==4?extra:valid,
++                                  mode==3?sizeof(reversed):mode==4?sizeof(extra):sizeof(valid)));
++  chip_id=mode==6?0x8140:T8132; node=fdt_path_offset(dt,"/phy");
++  assert(j773g_usb2_only_phy(dt,node)==(mode==0));
++ }
++ puts("J773g two-bank USB2 gate and six negative profiles PASS");
++ return 0;
++}
++'''
++    file = tmp_path / 'usb2.c'
++    file.write_text(harness)
++    libfdt = repo / 'src/libfdt'
++    names = ['fdt', 'fdt_ro', 'fdt_rw', 'fdt_sw', 'fdt_wip', 'fdt_empty_tree',
++             'fdt_check', 'fdt_strerror', 'fdt_addresses']
++    binary = tmp_path / 'usb2'
++    subprocess.run(['cc', '-D_GNU_SOURCE', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
++                    '-I', str(libfdt), str(file), *[str(libfdt / (n + '.c')) for n in names],
++                    '-o', str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
++
++
++if __name__ == '__main__':
++    with tempfile.TemporaryDirectory(prefix='j773g-usb2-') as tmp:
++        test_j773g_usb2_calibration_gate(Path(tmp))

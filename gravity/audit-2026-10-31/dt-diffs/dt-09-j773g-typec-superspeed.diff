@@ -1,0 +1,68 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -364,6 +364,64 @@
+ 	};
+ };
+ 
++/* SuperSpeed on the rear ports, using the J713 ATC1 bank layout. */
++&atcphy0 {
++	/* SuperSpeed banks inside ADT atc-phy0 apertures; display crossbar (+0x4c000) excluded. */
++	reg = <0x4 0x02a90000 0x0 0x4000>,
++	      <0x4 0x02a84000 0x0 0x4000>,
++	      <0x4 0x03000000 0x0 0x24000>,
++	      <0x4 0x00000000 0x0 0x8000>,
++	      <0x4 0x00020000 0x0 0x4000>,
++	      <0x4 0x03044000 0x0 0x4000>,
++	      <0x4 0x03050000 0x0 0x4000>;
++	reg-names = "usb2phy", "pipehandler", "core", "axi2af", "lioa",
++		    "fabric", "common-config";
++};
++
++&dwc3_0 {
++	maximum-speed = "super-speed";
++	phys = <&atcphy0 PHY_TYPE_USB2>, <&atcphy0 PHY_TYPE_USB3>;
++	phy-names = "usb2-phy", "usb3-phy";
++};
++
++&atcphy1 {
++	/* SuperSpeed banks inside ADT atc-phy1 apertures; display crossbar (+0x4c000) excluded. */
++	reg = <0x4 0x0aa90000 0x0 0x4000>,
++	      <0x4 0x0aa84000 0x0 0x4000>,
++	      <0x4 0x0b000000 0x0 0x24000>,
++	      <0x4 0x08000000 0x0 0x8000>,
++	      <0x4 0x08020000 0x0 0x4000>,
++	      <0x4 0x0b044000 0x0 0x4000>,
++	      <0x4 0x0b050000 0x0 0x4000>;
++	reg-names = "usb2phy", "pipehandler", "core", "axi2af", "lioa",
++		    "fabric", "common-config";
++};
++
++&dwc3_1 {
++	maximum-speed = "super-speed";
++	phys = <&atcphy1 PHY_TYPE_USB2>, <&atcphy1 PHY_TYPE_USB3>;
++	phy-names = "usb2-phy", "usb3-phy";
++};
++
++&atcphy3 {
++	/* SuperSpeed banks inside ADT atc-phy3 apertures; display crossbar (+0x4c000) excluded. */
++	reg = <0x4 0x1aa90000 0x0 0x4000>,
++	      <0x4 0x1aa84000 0x0 0x4000>,
++	      <0x4 0x1b000000 0x0 0x24000>,
++	      <0x4 0x18000000 0x0 0x8000>,
++	      <0x4 0x18020000 0x0 0x4000>,
++	      <0x4 0x1b044000 0x0 0x4000>,
++	      <0x4 0x1b050000 0x0 0x4000>;
++	reg-names = "usb2phy", "pipehandler", "core", "axi2af", "lioa",
++		    "fabric", "common-config";
++};
++
++&dwc3_3 {
++	maximum-speed = "super-speed";
++	phys = <&atcphy3 PHY_TYPE_USB2>, <&atcphy3 PHY_TYPE_USB3>;
++	phy-names = "usb2-phy", "usb3-phy";
++};
++
+ /*
+  * The two front ports sit behind a permanently attached GL3590 hub on ATC2
+  * (ADT usb3hub-fw: reset GPIO 0xc6, flash OE GPIO 0x65). No Type-C

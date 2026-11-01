@@ -1,0 +1,48 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -569,6 +569,44 @@
+ 	status = "okay";
+ };
+ 
++#include "t8132-usb4.dtsi"
++
++/* Back-left port (hpm1, ADT acio-parent 117 = acio1). */
++&usb4_1_mbox {
++	status = "okay";
++};
++
++&usb4_1_acio {
++	status = "okay";
++
++	ports {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		port@1 {
++			reg = <1>;
++			usb4_1_typec: endpoint {
++				remote-endpoint = <&typec1_usb4>;
++			};
++		};
++	};
++};
++
++&apciec1 {
++	status = "okay";
++};
++
++&typec1 {
++	ports {
++		port@2 {
++			reg = <2>;
++			typec1_usb4: endpoint {
++				remote-endpoint = <&usb4_1_typec>;
++			};
++		};
++	};
++};
++
+ #include "hwmon-common.dtsi"
+ #include "hwmon-mini.dtsi"
+ 

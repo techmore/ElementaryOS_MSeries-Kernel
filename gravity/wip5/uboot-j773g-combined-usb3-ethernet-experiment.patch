@@ -1,0 +1,129 @@
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -973,6 +973,117 @@
+ /* Import only the storage handoff for an explicitly opted-in J773g tree.
+  * All edits occur on a scratch FDT; no J713 input or display policy is used.
+  */
++/* Opt-in data transfer only; this does not enable the front controller. */
++static int j773_fixed_usb3_tunables(void *dst, const void *src)
++{
++	static const char *const banks[] = { "usb2phy", "pipehandler", "core", "axi2af",
++					    "lioa", "fabric", "common-config" };
++	static const char *const required[] = {
++		"apple,tunable-usb3-axi2af", "apple,tunable-usb3-lioa",
++		"apple,tunable-usb3-fabric", "apple,tunable-usb3-config",
++		"apple,tunable-usb3-common", "apple,tunable-usb3-efuse",
++		"apple,tunable-lane0-usb", "apple,tunable-lane1-usb",
++	};
++	const void *mark, *sreg, *dreg;
++	const char *status;
++	int chosen = fdt_path_offset(dst, "/chosen"), dn, sn, len, slen, dlen;
++	unsigned int i;
++
++	if (chosen < 0)
++		return -EINVAL;
++	mark = fdt_getprop(dst, chosen, "u-boot,j773g-usb3-calibration", &len);
++	if (!mark)
++		return len == -FDT_ERR_NOTFOUND ? 0 : -EINVAL;
++	if (len)
++		return -EINVAL;
++	dn = j713_alias_node(dst, "atcphy2");
++	sn = j713_alias_node(src, "atcphy2");
++	if (dn < 0 || sn < 0 ||
++	    fdt_node_check_compatible(dst, dn, "apple,t8132-atcphy") ||
++	    fdt_node_check_compatible(src, sn, "apple,t8132-atcphy"))
++		return -EINVAL;
++	status = fdt_getprop(dst, dn, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	if (!fdt_getprop(dst, dn, "apple,fixed-usb3", &len) || len ||
++	    !fdt_getprop(src, sn, "apple,fixed-usb3", &len) || len ||
++	    fdt_stringlist_count(dst, dn, "reg-names") != (int)ARRAY_SIZE(banks) ||
++	    fdt_stringlist_count(src, sn, "reg-names") != (int)ARRAY_SIZE(banks))
++		return -EINVAL;
++	for (i = 0; i < ARRAY_SIZE(banks); i++)
++		if (fdt_stringlist_search(dst, dn, "reg-names", banks[i]) != (int)i ||
++		    fdt_stringlist_search(src, sn, "reg-names", banks[i]) != (int)i)
++			return -EINVAL;
++	sreg = fdt_getprop(src, sn, "reg", &slen);
++	dreg = fdt_getprop(dst, dn, "reg", &dlen);
++	if (!sreg || !dreg || slen != 112 || dlen != slen || memcmp(sreg, dreg, slen) ||
++	    j713_check_ranges(src, sn, "reg", 112))
++		return -EINVAL;
++	for (i = 0; i < ARRAY_SIZE(required); i++) {
++		const void *value = fdt_getprop(src, sn, required[i], &len);
++
++		if (!value || len <= 0 || len > J713_FDT_MAX_SOURCE || len % 12)
++			return -EINVAL;
++	}
++	return j713_atc_tunables(dst, src, "atcphy2");
++}
++
++/* Optional data-only transfer; PCIe and DART remain disabled. */
++static int j773_ethernet_mac(void *dst, const void *src)
++{
++	const char *path = "/soc/pcie@1cb0000000/pci@2,0/ethernet@0,0";
++	const unsigned char *mac, *mark;
++	const fdt32_t *sr, *dr;
++	const char *status;
++	int chosen, sn, dn, shost, dhost, sport, dport, len, slen, dlen;
++	unsigned int i;
++	bool any = false;
++
++	chosen = fdt_path_offset(dst, "/chosen");
++	if (chosen < 0)
++		return -EINVAL;
++	mark = fdt_getprop(dst, chosen, "u-boot,j773g-ethernet-mac", &len);
++	if (!mark)
++		return len == -FDT_ERR_NOTFOUND ? 0 : -EINVAL;
++	if (len)
++		return -EINVAL;
++	sn = fdt_path_offset(src, path);
++	dn = fdt_path_offset(dst, path);
++	if (sn < 0 || dn < 0)
++		return -EINVAL;
++	sport = fdt_parent_offset(src, sn);
++	dport = fdt_parent_offset(dst, dn);
++	shost = sport < 0 ? sport : fdt_parent_offset(src, sport);
++	dhost = dport < 0 ? dport : fdt_parent_offset(dst, dport);
++	if (shost < 0 || dhost < 0 ||
++	    fdt_node_check_compatible(src, shost, "apple,t8132-pcie") ||
++	    fdt_node_check_compatible(dst, dhost, "apple,t8132-pcie") ||
++	    fdt_node_check_compatible(src, sport, "pciclass,0604") ||
++	    fdt_node_check_compatible(dst, dport, "pciclass,0604"))
++		return -EINVAL;
++	sr = fdt_getprop(src, sport, "reg", &slen);
++	dr = fdt_getprop(dst, dport, "reg", &dlen);
++	if (!sr || !dr || slen != 20 || dlen != slen || memcmp(sr, dr, slen) ||
++	    fdt32_to_cpu(sr[0]) != 0x1000 || sr[1] || sr[2] || sr[3] || sr[4])
++		return -EINVAL;
++	status = fdt_getprop(dst, dn, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	sr = fdt_getprop(src, sn, "reg", &slen);
++	dr = fdt_getprop(dst, dn, "reg", &dlen);
++	if (!sr || !dr || slen != 20 || dlen != slen || memcmp(sr, dr, slen) ||
++	    fdt32_to_cpu(sr[0]) != 0x20000 || sr[1] || sr[2] || sr[3] || sr[4])
++		return -EINVAL;
++	mac = fdt_getprop(src, sn, "local-mac-address", &len);
++	if (!mac || len != 6 || (mac[0] & 1))
++		return -EINVAL;
++	for (i = 0; i < 6; i++)
++		any |= mac[i] != 0;
++	if (!any)
++		return -EINVAL;
++	return fdt_setprop(dst, dn, "local-mac-address", mac, 6);
++}
++
+ int apple_j773_import_fdt(void *blob, const void *source)
+ {
+ 	static const char * const aliases[] = { "ans", "ans-mbox", "sart-ans" };
+@@ -1055,6 +1166,8 @@
+ 			ret = -EINVAL;
+ 	}
+ 	ret = ret ?: j773_gpu_handoff(scratch, source);
++	ret = ret ?: j773_ethernet_mac(scratch, source);
++	ret = ret ?: j773_fixed_usb3_tunables(scratch, source);
+ 	ret = ret ?: j713_chosen(scratch, source, true);
+ 	if (!ret)
+ 		memcpy(blob, scratch, capacity);

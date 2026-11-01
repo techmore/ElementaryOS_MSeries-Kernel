@@ -1,0 +1,42 @@
+diff --git a/image-builder/builder/candidate-trust/policy.json b/image-builder/builder/candidate-trust/policy.json
+index aeb64e7..82f44f0 100644
+--- a/image-builder/builder/candidate-trust/policy.json
++++ b/image-builder/builder/candidate-trust/policy.json
+@@ -116,6 +116,7 @@
+     "t8122-j504",
+     "t8122-j613",
+     "t8122-j615",
+-    "t8140-j700"
++    "t8140-j700",
++    "t8132-j773g"
+   ]
+ }
+diff --git a/image-builder/builder/inspection.py b/image-builder/builder/inspection.py
+index 596ce52..d0a6e5e 100644
+--- a/image-builder/builder/inspection.py
++++ b/image-builder/builder/inspection.py
+@@ -304,6 +304,10 @@ def check_installed_payloads(root: Path, candidates: Candidates) -> str:
+     require(stage2.is_file() and not stage2.is_symlink()
+             and stage2.read_bytes() == (root / "boot/efi/m1n1/boot.bin").read_bytes(),
+             "the J700 Stage 2 does not match the inspected common bundle")
++    j773g = root / "boot/efi/aurora/stage1-j773g.bin"
++    require(j773g.is_file() and not j773g.is_symlink()
++            and j773g.read_bytes() == stage1.read_bytes(),
++            "the J773g Stage 1 does not match the authenticated m1n1-aurora package")
+     return f"m1n1, U-Boot, the kernel and {len(candidates.dtbs())} device trees match the set's archives"
+ 
+ 
+diff --git a/image-builder/bin/build-mac-image b/image-builder/bin/build-mac-image
+index bc445da..6f29dfa 100755
+--- a/image-builder/bin/build-mac-image
++++ b/image-builder/bin/build-mac-image
+@@ -1343,6 +1358,9 @@ stage_board_boot_payloads() {
+   mkdir -p "$target/boot/efi/aurora" "$target/boot/efi/m1n1"
+   install -m 0644 "$stage1" "$target/boot/efi/aurora/stage1-j700.bin"
+   install -m 0644 "$stage2" "$target/boot/efi/m1n1/boot-j700.bin"
++  # The M4 Mac mini (BOARD_STAGE1 j773gap, 26.6.2 only) boots the same raw
++  # Stage 1 and the common m1n1/boot.bin, which carries t8132-j773g.dtb.
++  install -m 0644 "$stage1" "$target/boot/efi/aurora/stage1-j773g.bin"
+ }
+ 
+ # Repository names in pacman configuration FILE, in its order.

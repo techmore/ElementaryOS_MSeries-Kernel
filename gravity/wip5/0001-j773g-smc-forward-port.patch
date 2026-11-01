@@ -1,0 +1,65 @@
+diff --git a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+index 8d66dc77c..7e7644c17 100644
+--- a/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
++++ b/Documentation/devicetree/bindings/mailbox/apple,mailbox.yaml
+@@ -31,6 +31,7 @@ properties:
+               - apple,t8103-asc-mailbox
+               - apple,t8112-asc-mailbox
+               - apple,t8122-asc-mailbox
++              - apple,t8132-asc-mailbox
+               - apple,t8140-asc-mailbox
+               - apple,t8142-asc-mailbox
+               - apple,t6000-asc-mailbox
+diff --git a/Documentation/devicetree/bindings/mfd/apple,smc.yaml b/Documentation/devicetree/bindings/mfd/apple,smc.yaml
+index 31d1940f9..ff42e94cf 100644
+--- a/Documentation/devicetree/bindings/mfd/apple,smc.yaml
++++ b/Documentation/devicetree/bindings/mfd/apple,smc.yaml
+@@ -20,6 +20,7 @@ properties:
+           - enum:
+               - apple,t6020-smc
+               - apple,t8122-smc
++              - apple,t8132-smc
+               - apple,t8140-smc
+               - apple,t8142-smc
+           - const: apple,t8103-smc
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index 0583cb9d1..2ea9a0614 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -17,6 +17,36 @@ / {
+ 	model = "Apple Mac mini (M4, 2024)";
+ };
+ 
++/* The Mac mini's SMC mailbox. */
++&soc {
++	smc_mbox: mailbox@38c608000 {
++		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x3 0x8c608000 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 561 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 562 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 563 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 564 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty",
++		                  "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++	};
++
++	smc: smc@38c600000 {
++		compatible = "apple,t8132-smc", "apple,t8103-smc";
++		reg = <0x3 0x8c600000 0x0 0x4000>,
++		      <0x3 0x8de00000 0x0 0x100000>;
++		reg-names = "smc", "sram";
++		mboxes = <&smc_mbox>;
++
++		smc_gpio: gpio {
++			compatible = "apple,smc-gpio";
++			gpio-controller;
++			#gpio-cells = <2>;
++		};
++	};
++};
++
+ /*
+  * Keep the power-domains used for the HDMI port on.
+  */

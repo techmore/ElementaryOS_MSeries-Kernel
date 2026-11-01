@@ -1,0 +1,102 @@
+diff -ru a/linux-aurora/PKGBUILD b/linux-aurora/PKGBUILD
+--- a/linux-aurora/PKGBUILD	2026-10-31 09:25:09
++++ b/linux-aurora/PKGBUILD	2026-10-31 09:25:31
+@@ -9,13 +9,15 @@
+ # cold-boot qualification on M1 and M2.
+ 
+ _auroraver=7.2.11
+-_aurorarel=12
++_aurorarel=90
+ pkgrel=1
+ 
+-# Immutable pin on omacom/linux-aurora (branch integration/aurora). Every bump is a
+-# PR that moves _commit; its cold-boot qualification is recorded in
+-# the PR's attached qualification evidence before channel publication.
+-_commit=360cf6aba55ea6af401e5f2d7dbbb8e8f8206dfa
++# Fork: techmore/linux-m1pro-touchid elementaryos-mseries (Aurora aurora-wip plus
++# the J773g commits; brings arch/arm64/boot/dts/apple/t8132-j773g.dts). Same
++# pkgbase so the image builder, UKI name (omarchy_linux-aurora.efi) and
++# update-m1n1 need no change. Bump _aurorarel above the channel's so pacman
++# never "upgrades" back to omacom's build.
++_commit=cfd21dd36b579e723bff5a6de3a6baa411762186
+ 
+ # Any m1n1 1.6.1 loads these device trees. The Neo's own Stage 2 comes from the
+ # image, so the floor stays where M1 and M2 users' m1n1-aurora already meets it.
+@@ -28,7 +30,7 @@
+ pkgver="${_auroraver}.aurora${_aurorarel}"
+ arch=('aarch64')
+ groups=('omarchy-platform-apple-silicon')
+-url="https://github.com/omacom/linux-aurora"
++url="https://github.com/techmore/linux-m1pro-touchid"
+ license=('GPL2')
+ 
+ makedepends=(
+@@ -36,7 +38,7 @@
+   tar xz xmlto python git patch
+ )
+ options=('!strip')
+-source=(validate-config.py configure.sh "linux::git+https://github.com/omacom/linux-aurora.git#commit=${_commit}"
++source=(validate-config.py configure.sh "linux::git+https://github.com/techmore/linux-m1pro-touchid.git#commit=${_commit}"
+         rust-toolchain.toml bindgen-kernel.py config)
+ sha256sums=('aca7420a18139474da62a81c77fc6e5c3f25001f872b6e11e18605cd892aa4c3'
+             'b95c0f0ddf106f3861e0e62a746af6a881fb8e0f356a892961f9e86062877400'
+diff -ru a/m1n1-aurora/PKGBUILD b/m1n1-aurora/PKGBUILD
+--- a/m1n1-aurora/PKGBUILD	2026-10-31 09:25:09
++++ b/m1n1-aurora/PKGBUILD	2026-10-31 09:25:31
+@@ -1,11 +1,11 @@
+ # omacom/m1n1; ordinary updates refresh ESP Stage 2, never enroll Stage 1.
+ pkgname=m1n1-aurora
+-pkgver=1.6.1.aurora22
++pkgver=1.6.1.aurora90
+ pkgrel=1
+ pkgdesc='Omarchy Apple Silicon bootloader from omacom/m1n1'
+ arch=('aarch64')
+ groups=('omarchy-platform-apple-silicon')
+-url='https://github.com/omacom/m1n1'
++url='https://github.com/techmore/m1n1'
+ license=('MIT' 'GPL-2.0-only' 'CC0-1.0' 'OFL-1.1-RFN' 'Zlib' 'BSD-2-Clause OR GPL-2.0-or-later' 'BSD-3-Clause OR GPL-2.0-or-later' 'MIT OR Apache-2.0')
+ provides=("m1n1=$pkgver" "m1n1-neo=$pkgver")
+ conflicts=('m1n1' 'aura' 'm1n1-neo')
+@@ -13,7 +13,9 @@
+ replaces=('aura' 'm1n1-neo')
+ makedepends=('git' 'clang' 'lld' 'llvm' 'rustup' 'make' 'python')
+ options=('!strip' '!debug')
+-_commit=bc79acc434e612ffcb95bfc7cb2fd7543afac5f2
++# techmore/m1n1 elementaryos-mseries: Aurora m1n1 + J773g GPU/NVMe/PMP handoff.
++# build-qualification.json source_commit must be moved to the same commit.
++_commit=d896f4ebcaacedbc30cb85a7e2163485beb310ed
+ source=("m1n1::git+$url.git#commit=$_commit"
+         build-qualification.json validate-qualification.py
+         bootlogo_48.bin bootlogo_128.bin bootlogo_256.bin)
+diff -ru a/mesa-aurora/PKGBUILD b/mesa-aurora/PKGBUILD
+--- a/mesa-aurora/PKGBUILD	2026-10-31 09:25:09
++++ b/mesa-aurora/PKGBUILD	2026-10-31 09:25:31
+@@ -3,20 +3,24 @@
+ epoch=1
+ # Development versions sort by real UTC date, full reachable commit count,
+ # then source hash. Hash-only same-day repins can downgrade existing packages.
+-pkgver=26.3.0_devel.20261029.231476.672657e05e6
++pkgver=26.3.0_devel.20261031.0.68e7b677bf8
+ pkgrel=2
+ pkgdesc='Aurora Asahi Gallium, Zink and Honeykrisp'
+ arch=('aarch64')
+ groups=('omarchy-platform-apple-silicon')
+-url='https://github.com/omacom/mesa'
++url='https://github.com/aurora-silicon/mesa'
+ license=('MIT')
+ # integration/aurora after omacom/mesa#19: the upstream Mesa and aurora-wip sync,
+ # with M3 occlusion availability kept on the queued store.
+ # Full-history `git rev-list --count` for this pin is 231476 (not first-parent).
+ # Its G15 occlusion fix was checked on M3 Pro with a reproducer, not this package's
+ # build or hardware qualification.
+-_commit=672657e05e6b382a0203975f7a26c46f9a674973
+-_src=mesa-omacom
++# aurora-silicon/mesa aurora-wip: has 662048cacc83 "asahi: enable native G16G on
++# the shared AGX3 path". omacom/mesa 672657e (the channel's pin) still returns
++# false for chip_id 0x8132 in agx_params_driver_supported(), so the M4 GPU would
++# fall back to llvmpipe. Must match the DRM UAPI of the kernel above.
++_commit=68e7b677bf831e067cfc2998fda05049aacd1bc3
++_src=mesa-aurora-silicon
+ # Matched to the DRM UAPI in omacom/linux-aurora integration/aurora.
+ # The drivers never link SPIRV-Tools, which Arch Linux ARM moves without a
+ # versioned soname. Asahi needs LLVM only to precompile its CL shaders, so a

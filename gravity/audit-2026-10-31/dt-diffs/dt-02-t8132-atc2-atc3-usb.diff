@@ -1,0 +1,121 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132.dtsi b/arch/arm64/boot/dts/apple/t8132.dtsi
+--- a/arch/arm64/boot/dts/apple/t8132.dtsi
++++ b/arch/arm64/boot/dts/apple/t8132.dtsi
+@@ -1032,6 +1032,117 @@
+ 
+ 	};
+ 
++	/* ATC2 and ATC3 (J773g ADT atc-phy2/3, dart-usb2/3, usb-drd2/3). */
++	atcphy2: phy@412a90000 {
++		status = "disabled";
++		compatible = "apple,t8132-atcphy";
++		reg = <0x4 0x12a90000 0x0 0x4000>,
++		      <0x4 0x12a84000 0x0 0x4000>;
++		reg-names = "usb2phy", "pipehandler";
++
++		#phy-cells = <1>;
++		#reset-cells = <0>;
++		power-domains = <&ps_atc2_usb>;
++		orientation-switch;
++		mode-switch;
++	};
++
++	dwc3_2_dart_0: iommu@412f00000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x12f00000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1407 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_atc2_usb>;
++	};
++
++	dwc3_2_dart_1: iommu@412f80000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x12f80000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1407 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_atc2_usb>;
++	};
++
++	dwc3_2: usb@412280000 {
++		status = "disabled";
++		compatible = "apple,t8132-dwc3";
++		reg = <0x4 0x12280000 0x0 0xcd00>,
++		      <0x4 0x1228cd00 0x0 0x3200>;
++		reg-names = "dwc3-core", "dwc3-apple";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1403 IRQ_TYPE_LEVEL_HIGH>;
++
++		dr_mode = "otg";
++		maximum-speed = "high-speed";
++		usb-role-switch;
++		role-switch-default-mode = "host";
++
++		iommus = <&dwc3_2_dart_0 0>, <&dwc3_2_dart_1 1>;
++		power-domains = <&ps_atc2_usb>;
++		resets = <&atcphy2>;
++		phys = <&atcphy2 PHY_TYPE_USB2>;
++		phy-names = "usb2-phy";
++	};
++
++	atcphy3: phy@41aa90000 {
++		status = "disabled";
++		compatible = "apple,t8132-atcphy";
++		reg = <0x4 0x1aa90000 0x0 0x4000>,
++		      <0x4 0x1aa84000 0x0 0x4000>;
++		reg-names = "usb2phy", "pipehandler";
++
++		#phy-cells = <1>;
++		#reset-cells = <0>;
++		power-domains = <&ps_atc3_usb>;
++		orientation-switch;
++		mode-switch;
++	};
++
++	dwc3_3_dart_0: iommu@41af00000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x1af00000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1469 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_atc3_usb>;
++	};
++
++	dwc3_3_dart_1: iommu@41af80000 {
++		status = "disabled";
++		compatible = "apple,t8132-dart", "apple,t8110-dart";
++		reg = <0x4 0x1af80000 0x0 0xc000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1469 IRQ_TYPE_LEVEL_HIGH>;
++		#iommu-cells = <1>;
++		power-domains = <&ps_atc3_usb>;
++	};
++
++	dwc3_3: usb@41a280000 {
++		status = "disabled";
++		compatible = "apple,t8132-dwc3";
++		reg = <0x4 0x1a280000 0x0 0xcd00>,
++		      <0x4 0x1a28cd00 0x0 0x3200>;
++		reg-names = "dwc3-core", "dwc3-apple";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1465 IRQ_TYPE_LEVEL_HIGH>;
++
++		dr_mode = "otg";
++		maximum-speed = "high-speed";
++		usb-role-switch;
++		role-switch-default-mode = "host";
++
++		iommus = <&dwc3_3_dart_0 0>, <&dwc3_3_dart_1 1>;
++		power-domains = <&ps_atc3_usb>;
++		resets = <&atcphy3>;
++		phys = <&atcphy3 PHY_TYPE_USB2>;
++		phy-names = "usb2-phy";
++	};
++
+ 	dart_apcie0: iommu@490000000 {
+ 		status = "disabled";
+ 		compatible = "apple,t8132-dart", "apple,t8110-dart";

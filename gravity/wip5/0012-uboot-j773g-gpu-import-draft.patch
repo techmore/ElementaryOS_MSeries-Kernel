@@ -1,0 +1,251 @@
+diff --git a/arch/arm/mach-apple/j713_fdt.c b/arch/arm/mach-apple/j713_fdt.c
+index 8dfc6a1..611cf1d 100644
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -856,6 +856,120 @@ static int j713_chosen(void *dst, const void *src, bool mini)
+-	return j713_copy_string(dst, 0, src, 0, "serial-number", 128, true);
++	return j713_copy_string(dst, 0, src, 0, "serial-number", 128, true);
+ }
+-
++
++static bool j773_reserved(const void *fdt, u64 base, u64 size)
++{
++	int count = fdt_num_mem_rsv(fdt);
++
++	if (count < 0 || count > 128)
++		return false;
++	for (int i = 0; i < count; i++) {
++		u64 start, len;
++
++		if (fdt_get_mem_rsv(fdt, i, &start, &len))
++			return false;
++		if (len && start + len > start && start <= base &&
++		    start + len >= base + size)
++			return true;
++	}
++	return false;
++}
++
++/* Copy a validated, explicitly opted-in J773g GPU resource epoch. The GPU
++ * remains disabled: this does not authorize firmware execution or power-on.
++ * j713_reservations() has already copied all source reservation properties.
++ */
++static int j773_gpu_handoff(void *dst, const void *src)
++{
++	static const char *const paths[] = {
++		"/reserved-memory/uat-ttbs", "/reserved-memory/uat-pagetables",
++		"/reserved-memory/uat-handoff", "/reserved-memory/uat-shared-l2",
++		"/reserved-memory/gpu-fw-text", "/reserved-memory/gpu-fw-data",
++	};
++	static const char *const names[] = {
++		"ttbs", "pagetables", "handoff", "shared-l2", "fw-text", "fw-data",
++	};
++	const char *const marker = "apple,j773g-gpu-handoff-draft";
++	const fdt32_t *srefs, *drefs, *version, *flags;
++	const fdt64_t *vas, *reg;
++	const char *status;
++	u64 bases[6], sizes[6];
++	int s, d, len, slen, dlen, ret;
++
++	d = j713_alias_node(dst, "gpu");
++	if (d < 0 || !fdt_getprop(dst, d, marker, &len))
++		return 0;
++	if (len || fdt_node_check_compatible(dst, d, "apple,agx-t8132"))
++		return -EINVAL;
++	status = fdt_getprop(dst, d, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	s = j713_alias_node(src, "gpu");
++	if (s < 0 || fdt_node_check_compatible(src, s, "apple,agx-t8132") ||
++	    !fdt_getprop(src, s, marker, &len) || len)
++		return -EINVAL;
++	status = fdt_getprop(src, s, "status", &len);
++	if (!status || len != 9 || memcmp(status, "disabled", 9))
++		return -EINVAL;
++	version = fdt_getprop(src, s, "apple,g16-handoff-version", &len);
++	if (!version || len != 4 || fdt32_to_cpu(*version) != 1)
++		return -EINVAL;
++	vas = fdt_getprop(src, s, "apple,firmware-segment-vas", &len);
++	if (!vas || len != 16 || fdt64_ld(&vas[0]) != 0xfffffc0000000000ULL ||
++	    fdt64_ld(&vas[1]) != 0xfffffc0000060000ULL)
++		return -EINVAL;
++	flags = fdt_getprop(src, s, "apple,firmware-segment-flags", &len);
++	if (!flags || len != 8 || fdt32_to_cpu(flags[0]) != 1 || fdt32_to_cpu(flags[1]))
++		return -EINVAL;
++	srefs = fdt_getprop(src, s, "memory-region", &slen);
++	drefs = fdt_getprop(dst, d, "memory-region", &dlen);
++	if (!srefs || !drefs || slen != 24 || dlen != 24 ||
++	    fdt_stringlist_count(src, s, "memory-region-names") != 6 ||
++	    fdt_stringlist_count(dst, d, "memory-region-names") != 6)
++		return -EINVAL;
++	for (int i = 0; i < 6; i++) {
++		int sn = fdt_path_offset(src, paths[i]);
++		int dn = fdt_path_offset(dst, paths[i]);
++		if (sn < 0 || dn < 0 ||
++		    fdt_node_offset_by_phandle(src, fdt32_to_cpu(srefs[i])) != sn ||
++		    fdt_node_offset_by_phandle(dst, fdt32_to_cpu(drefs[i])) != dn ||
++		    fdt_stringlist_search(src, s, "memory-region-names", names[i]) != i ||
++		    fdt_stringlist_search(dst, d, "memory-region-names", names[i]) != i)
++			return -EINVAL;
++		reg = fdt_getprop(src, sn, "reg", &len);
++		if (!reg || len != 16 || !fdt_getprop(src, sn, "no-map", &slen) || slen ||
++		    !fdt_getprop(dst, dn, "no-map", &dlen) || dlen)
++			return -EINVAL;
++		bases[i] = fdt64_ld(&reg[0]);
++		sizes[i] = fdt64_ld(&reg[1]);
++		if (!bases[i] || !sizes[i] || (bases[i] | sizes[i]) & 0x3fff ||
++		    bases[i] + sizes[i] <= bases[i] || bases[i] + sizes[i] > (1ULL << 42) ||
++		    !j773_reserved(src, bases[i], sizes[i]) ||
++		    !j773_reserved(dst, bases[i], sizes[i]))
++			return -EINVAL;
++		status = fdt_getprop(src, sn, "status", &len);
++		if (!status || len != 5 || memcmp(status, "okay", 5))
++			return -EINVAL;
++		reg = fdt_getprop(dst, dn, "reg", &len);
++		if (!reg || len != 16 || fdt64_ld(&reg[0]) != bases[i] ||
++		    fdt64_ld(&reg[1]) != sizes[i])
++			return -EINVAL;
++		status = fdt_getprop(dst, dn, "status", &len);
++		if (!status || len != 5 || memcmp(status, "okay", 5))
++			return -EINVAL;
++		for (int j = 0; j < i; j++)
++			if (bases[i] < bases[j] + sizes[j] && bases[j] < bases[i] + sizes[i])
++				return -EINVAL;
++	}
++	if (sizes[4] != 0x60000 || sizes[5] != 0x13c000)
++		return -EINVAL;
++	/* Relocate d after every change: libfdt offsets can move. */
++	ret = j713_copy_prop(dst, d, src, s, "apple,g16-handoff-version", 4);
++	d = j713_alias_node(dst, "gpu");
++	ret = ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-vas", 16);
++	d = j713_alias_node(dst, "gpu");
++	return ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-flags", 8);
++}
++
+ /* Import only the storage handoff for an explicitly opted-in J773g tree.
+  * All edits occur on a scratch FDT; no J713 input or display policy is used.
+  */
+@@ -940,6 +1054,7 @@ int apple_j773_import_fdt(void *blob, const void *source)
+-		if (!ret && (!status || status_len != 5 || memcmp(status, "okay", 5)))
++		if (!ret && (!status || status_len != 5 || memcmp(status, "okay", 5)))
+-			ret = -EINVAL;
++			ret = -EINVAL;
+-	}
++	}
++	ret = ret ?: j773_gpu_handoff(scratch, source);
+-	ret = ret ?: j713_chosen(scratch, source, true);
++	ret = ret ?: j713_chosen(scratch, source, true);
+-	if (!ret)
++	if (!ret)
+-		memcpy(blob, scratch, capacity);
++		memcpy(blob, scratch, capacity);
+diff --git a/test/py/tests/test_apple_j773_gpu_fdt.py b/test/py/tests/test_apple_j773_gpu_fdt.py
+new file mode 100644
+index 0000000..3d88ad7
+--- /dev/null
++++ b/test/py/tests/test_apple_j773_gpu_fdt.py
+@@ -0,0 +1,45 @@
++import importlib.util,pathlib,subprocess,tempfile
++repo=pathlib.Path(__file__).resolve().parents[3]; spec=importlib.util.spec_from_file_location('t',repo/'test/py/tests/test_apple_j713_fdt.py');t=importlib.util.module_from_spec(spec);spec.loader.exec_module(t)
++t.HARNESS=t.HARNESS.split('static void check_references')[0]+r'''
++static void init(void *fdt, int src, int fault) {
++ const char *names[] = {"uat-ttbs","uat-pagetables","uat-handoff","uat-shared-l2","gpu-fw-text","gpu-fw-data"};
++ const char name_list[]="ttbs\0pagetables\0handoff\0shared-l2\0fw-text\0fw-data";
++ fdt32_t refs[6], flags[2]={cpu_to_fdt32(1),0};
++ fdt64_t vas[2]; fdt64_st(&vas[0],0xfffffc0000000000ULL); fdt64_st(&vas[1],0xfffffc0000060000ULL);
++ int soc=fdt_path_offset(fdt,"/soc"); assert(soc>=0); int g=fdt_add_subnode(fdt,soc,"gpu"); assert(g>=0);
++ assert(!fdt_setprop_string(fdt,g,"compatible","apple,agx-t8132"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); assert(!fdt_setprop_string(fdt,g,"status",((fault==4&&!src)||(fault==5&&src))?"okay":"disabled"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(src||fault!=1)assert(!fdt_setprop_empty(fdt,g,"apple,j773g-gpu-handoff-draft"));
++ int aliases=fdt_path_offset(fdt,"/aliases"); assert(!fdt_setprop_string(fdt,aliases,"gpu","/soc/gpu"));
++ for(int i=0;i<6;i++){
++  int reserved=fdt_path_offset(fdt,"/reserved-memory");int n=fdt_add_subnode(fdt,reserved,names[i]); assert(n>=0);
++  u64 base=0x800000000ULL+(u64)i*0x200000; u64 size=i==4?0x60000:i==5?0x13c000:0x4000;
++  if(fault==3&&i==1)base=0x800000000ULL;
++  if(fault==8&&!src&&i==1)base+=0x4000;
++  fdt64_t reg[2]; fdt64_st(&reg[0],base);fdt64_st(&reg[1],size);
++  assert(!fdt_setprop(fdt,n,"reg",reg,sizeof(reg)));
++  if(!(fault==9 && src && i==3))assert(!fdt_add_mem_rsv(fdt,base,size));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_empty(fdt,n,"no-map"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_string(fdt,n,"status","okay"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);u32 phandle=(src?600:700)+i;assert(!fdt_setprop_u32(fdt,n,"phandle",phandle));refs[i]=cpu_to_fdt32(phandle);
++ }
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(fault==7&&src) refs[0]=cpu_to_fdt32(9999);assert(!fdt_setprop(fdt,g,"memory-region",refs,sizeof(refs)));
++ g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"memory-region-names",name_list,sizeof(name_list)));
++ if(src){g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop_u32(fdt,g,"apple,g16-handoff-version",fault==2?2:1));
++  g=fdt_path_offset(fdt,"/soc/gpu");if(fault==6)fdt64_st(&vas[1],0);assert(!fdt_setprop(fdt,g,"apple,firmware-segment-vas",vas,sizeof(vas)));
++  g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"apple,firmware-segment-flags",flags,sizeof(flags)));}
++}
++int main(int argc,char **argv){assert(argc==3);for(int fault=0;fault<=9;fault++){
++ void *s=load(argv[1],128*1024),*d=load(argv[2],1024*1024);init(s,1,fault);init(d,0,fault);
++ int result=j773_gpu_handoff(d,s); if(fault==0||fault==1){assert(!result);int g=fdt_path_offset(d,"/soc/gpu"),len;const fdt32_t *v=fdt_getprop(d,g,"apple,g16-handoff-version",&len);if(fault==0){assert(v&&len==4&&fdt32_to_cpu(*v)==1);const char *st=fdt_getprop(d,g,"status",0);assert(st&&!strcmp(st,"disabled"));}else assert(!v);}else assert(result<0);
++ free(s);free(d);}puts("J773g GPU handoff validation, disabled state, and rejection cases PASS");return 0;}
++'''
++def test_j773_gpu_handoff(tmp_path):
++ b=t.build_importer(tmp_path)
++ s=t.compile_tree(tmp_path, 'source', t.fixture_tree(True, graphics=False))
++ d=t.compile_tree(tmp_path, 'target', t.fixture_tree(False, graphics=False))
++ subprocess.run([str(b), str(s), str(d)], check=True)
++
++if __name__ == '__main__':
++ with tempfile.TemporaryDirectory(prefix='j773g-gpu-import-') as tmp:
++  test_j773_gpu_handoff(pathlib.Path(tmp))
+diff --git a/test/py/tests/test_apple_j773_gpu_integration.py b/test/py/tests/test_apple_j773_gpu_integration.py
+new file mode 100644
+index 0000000..215eaa4
+--- /dev/null
++++ b/test/py/tests/test_apple_j773_gpu_integration.py
+@@ -0,0 +1,53 @@
++import importlib.util,pathlib,subprocess,tempfile
++repo=pathlib.Path(__file__).resolve().parents[3]; spec=importlib.util.spec_from_file_location('t',repo/'test/py/tests/test_apple_j713_fdt.py');t=importlib.util.module_from_spec(spec);spec.loader.exec_module(t)
++t.HARNESS=t.HARNESS.split('static void check_references')[0]+r'''
++static void init(void *fdt, int src, int fault) {
++ const char *names[] = {"uat-ttbs","uat-pagetables","uat-handoff","uat-shared-l2","gpu-fw-text","gpu-fw-data"};
++ const char name_list[]="ttbs\0pagetables\0handoff\0shared-l2\0fw-text\0fw-data";
++ fdt32_t refs[6], flags[2]={cpu_to_fdt32(1),0};
++ fdt64_t vas[2]; fdt64_st(&vas[0],0xfffffc0000000000ULL); fdt64_st(&vas[1],0xfffffc0000060000ULL);
++ int soc=fdt_path_offset(fdt,"/soc"); assert(soc>=0); int g=fdt_add_subnode(fdt,soc,"gpu"); assert(g>=0);
++ assert(!fdt_setprop_string(fdt,g,"compatible","apple,agx-t8132"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); assert(!fdt_setprop_string(fdt,g,"status",((fault==4&&!src)||(fault==5&&src))?"okay":"disabled"));
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(src||fault!=1)assert(!fdt_setprop_empty(fdt,g,"apple,j773g-gpu-handoff-draft"));
++ int aliases=fdt_path_offset(fdt,"/aliases"); assert(!fdt_setprop_string(fdt,aliases,"gpu","/soc/gpu"));
++ for(int i=0;i<6;i++){
++  int reserved=fdt_path_offset(fdt,"/reserved-memory");int n=fdt_add_subnode(fdt,reserved,names[i]); assert(n>=0);
++  u64 base=0x800000000ULL+(u64)i*0x200000; u64 size=i==4?0x60000:i==5?0x13c000:0x4000;
++  if(fault==3&&i==1)base=0x800000000ULL;
++  if(fault==8&&!src&&i==1)base+=0x4000;
++  fdt64_t reg[2]; fdt64_st(&reg[0],base);fdt64_st(&reg[1],size);
++  assert(!fdt_setprop(fdt,n,"reg",reg,sizeof(reg)));
++  assert(!fdt_add_mem_rsv(fdt,base,size)); reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_empty(fdt,n,"no-map"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);assert(!fdt_setprop_string(fdt,n,"status","okay"));
++  reserved=fdt_path_offset(fdt,"/reserved-memory");n=fdt_subnode_offset(fdt,reserved,names[i]);u32 phandle=(src?600:700)+i;assert(!fdt_setprop_u32(fdt,n,"phandle",phandle));refs[i]=cpu_to_fdt32(phandle);
++ }
++ g=fdt_path_offset(fdt,"/soc/gpu"); if(fault==7&&src) refs[0]=cpu_to_fdt32(9999);assert(!fdt_setprop(fdt,g,"memory-region",refs,sizeof(refs)));
++ g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"memory-region-names",name_list,sizeof(name_list)));
++ if(src){g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop_u32(fdt,g,"apple,g16-handoff-version",fault==2?2:1));
++  g=fdt_path_offset(fdt,"/soc/gpu");if(fault==6)fdt64_st(&vas[1],0);assert(!fdt_setprop(fdt,g,"apple,firmware-segment-vas",vas,sizeof(vas)));
++  g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"apple,firmware-segment-flags",flags,sizeof(flags)));}
++}
++int main(int argc,char **argv){assert(argc==3);for(int fault=0;fault<=1;fault++){
++ void *s=load(argv[1],128*1024),*d=load(argv[2],1024*1024);init(s,1,fault?3:0);init(d,0,0);
++ const char compat[]="apple,j773g\0apple,t8132";const char names[]="nvme\0nvmmu\0ans";
++ assert(!fdt_setprop(s,0,"compatible",compat,sizeof(compat)));assert(!fdt_setprop(d,0,"compatible",compat,sizeof(compat)));
++ int chosen=fdt_path_offset(d,"/chosen");assert(!fdt_setprop_string(d,chosen,"u-boot,j773g-dtb-source","0123456789012345678901234567890123456789"));
++ const char *aliases[]={"ans","ans-mbox","sart-ans"};const char *types[]={"apple,t8132-nvme-ans2","apple,asc-mailbox-v4","apple,t6000-sart"};
++ for(int i=0;i<3;i++){int n=fdt_path_offset(s,aliases[i]);assert(n>=0);assert(!fdt_setprop_string(s,n,"compatible",types[i]));n=fdt_path_offset(s,aliases[i]);assert(!fdt_setprop_string(s,n,"status","okay"));}
++ int n=fdt_path_offset(s,"ans");assert(!fdt_setprop(s,n,"reg-names",names,sizeof(names)));n=fdt_path_offset(d,"ans");assert(!fdt_setprop(d,n,"reg-names",names,sizeof(names)));
++ n=fdt_path_offset(s,"/reserved-memory/asc-firmware@900000000");if(n>=0)assert(!fdt_del_node(s,n));n=fdt_path_offset(s,"/reserved-memory/flash@900080000");if(n>=0)assert(!fdt_del_node(s,n));
++ while(fdt_num_mem_rsv(d)>0)assert(!fdt_del_mem_rsv(d,0));
++ void *before=malloc(1024*1024);assert(before);memcpy(before,d,1024*1024);
++ int result=apple_j773_import_fdt(d,s);if(!fault){assert(result==1);int g=fdt_path_offset(d,"/soc/gpu"),len;const fdt32_t *v=fdt_getprop(d,g,"apple,g16-handoff-version",&len);assert(v&&len==4&&fdt32_to_cpu(*v)==1);const char *st=fdt_getprop(d,g,"status",0);assert(st&&!strcmp(st,"disabled"));assert(fdt_num_mem_rsv(d)>=6);}else {assert(result<0);assert(!memcmp(before,d,1024*1024));}
++ free(before);free(s);free(d);}puts("Full mini storage+GPU import and transactional rejection PASS");return 0;}
++'''
++def test_j773_gpu_handoff(tmp_path):
++ b=t.build_importer(tmp_path)
++ s=t.compile_tree(tmp_path, 'source', t.fixture_tree(True, graphics=False))
++ d=t.compile_tree(tmp_path, 'target', t.fixture_tree(False, graphics=False))
++ subprocess.run([str(b), str(s), str(d)], check=True)
++
++if __name__ == '__main__':
++ with tempfile.TemporaryDirectory(prefix='j773g-gpu-import-') as tmp:
++  test_j773_gpu_handoff(pathlib.Path(tmp))

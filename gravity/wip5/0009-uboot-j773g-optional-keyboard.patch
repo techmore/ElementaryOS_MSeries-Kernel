@@ -1,0 +1,39 @@
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -753,7 +753,7 @@
+ 	return 0;
+ }
+ 
+-static int j713_chosen(void *dst, const void *src)
++static int j713_chosen(void *dst, const void *src, bool mini)
+ {
+ 	static const char * const strings[] = {
+ 		"asahi,iboot1-version", "asahi,iboot2-version", "asahi,system-fw-version",
+@@ -807,7 +807,8 @@
+ 	}
+ 	dn = fdt_path_offset(dst, "/chosen");
+ 	sn = fdt_path_offset(src, "/chosen");
+-	ret = j713_copy_prop(dst, dn, src, sn, "asahi,kblang-code", 4);
++	ret = mini ? j713_copy_optional(dst, dn, src, sn, "asahi,kblang-code", 4) :
++		j713_copy_prop(dst, dn, src, sn, "asahi,kblang-code", 4);
+ 	if (ret)
+ 		return ret;
+ 	/* These are from this m1n1 boot, never from a saved Linux FDT. Generic
+@@ -939,7 +940,7 @@
+ 		if (!ret && (!status || status_len != 5 || memcmp(status, "okay", 5)))
+ 			ret = -EINVAL;
+ 	}
+-	ret = ret ?: j713_chosen(scratch, source);
++	ret = ret ?: j713_chosen(scratch, source, true);
+ 	if (!ret)
+ 		memcpy(blob, scratch, capacity);
+ out_j773:
+@@ -1010,7 +1011,7 @@
+ 	ret = ret ?: j713_atc_tunables(scratch, source, "atcphy1");
+ 	ret = ret ?: j713_pcie_admission(scratch, source);
+ 	ret = ret ?: j713_display_refs(scratch, source);
+-	ret = ret ?: j713_chosen(scratch, source);
++	ret = ret ?: j713_chosen(scratch, source, false);
+ 	if (!ret) {
+ 		/* All helper paths must resolve before its real hardware fixup runs. */
+ 		const char *compatible = "apple,t8132-rtk-helper-asc4";

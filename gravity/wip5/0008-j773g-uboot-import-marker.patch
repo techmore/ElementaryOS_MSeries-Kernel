@@ -1,0 +1,13 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index cee1c6490..7b527b83f 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -100,3 +100,8 @@ smc_gpio: gpio {
+ &framebuffer0 {
+ 	power-domains = <&ps_dispext0_fe>, <&ps_dptx_phy>;
+ };
++
++&{/chosen} {
++	/* Explicitly request J773g runtime import from a matching U-Boot. */
++	u-boot,j773g-dtb-source = "2f725546d6ac6afe0bd5abfa1a844971519f0076";
++};

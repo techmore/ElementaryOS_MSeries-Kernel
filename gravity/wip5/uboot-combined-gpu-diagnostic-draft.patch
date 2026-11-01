@@ -1,0 +1,119 @@
+--- a/arch/arm/mach-apple/j713_fdt.c
++++ b/arch/arm/mach-apple/j713_fdt.c
+@@ -874,6 +874,68 @@
+ 	return false;
+ }
+ 
++/* Import only the size and comparison; never transfer an additional address.
++ * Diagnostics are optional and have their own transaction inside the outer
++ * import transaction, so absence, malformed data or ENOSPC cannot block it.
++ */
++static void j773_gpu_diagnostic(void *dst, const void *src, int sn)
++{
++	const char *const comparison_name = "apple,j773g-gpu-data-comparison";
++	const char *const size_name = "apple,j773g-sgx-data-size";
++	const char *comparison;
++	const fdt64_t *size;
++	void *scratch;
++	int dn, len, size_len, ret;
++	bool available;
++
++	dn = j713_alias_node(dst, "gpu");
++	if (dn < 0)
++		return;
++	/* The enclosing transaction prevents an incomplete tree from escaping. */
++	ret = fdt_delprop(dst, dn, comparison_name);
++	if (ret && ret != -FDT_ERR_NOTFOUND)
++		return;
++	dn = j713_alias_node(dst, "gpu");
++	ret = fdt_delprop(dst, dn, size_name);
++	if (ret && ret != -FDT_ERR_NOTFOUND)
++		return;
++	comparison = fdt_getprop(src, sn, comparison_name, &len);
++	size = fdt_getprop(src, sn, size_name, &size_len);
++	if (!comparison)
++		return;
++	available = (len == sizeof("match") && !memcmp(comparison, "match", len)) ||
++		    (len == sizeof("mismatch") && !memcmp(comparison, "mismatch", len));
++	if (!available && (len != sizeof("unavailable") || memcmp(comparison, "unavailable", len)))
++		return;
++	if (available) {
++		u64 value;
++
++		if (!size || size_len != sizeof(*size))
++			return;
++		value = fdt64_ld(size);
++		if (!value || (value & 0x3fff) || value > (1ULL << 42))
++			return;
++	} else if (size) {
++		return;
++	}
++	scratch = malloc(fdt_totalsize(dst));
++	if (!scratch)
++		return;
++	ret = fdt_open_into(dst, scratch, fdt_totalsize(dst));
++	dn = ret ? -1 : j713_alias_node(scratch, "gpu");
++	if (dn < 0)
++		goto out;
++	ret = fdt_setprop(scratch, dn, comparison_name, comparison, len);
++	if (!ret && available) {
++		dn = j713_alias_node(scratch, "gpu");
++		ret = dn < 0 ? dn : fdt_setprop(scratch, dn, size_name, size, size_len);
++	}
++	if (!ret)
++		memcpy(dst, scratch, fdt_totalsize(dst));
++out:
++	free(scratch);
++}
++
+ /* Copy a validated, explicitly opted-in J773g GPU resource epoch. The GPU
+  * remains disabled: this does not authorize firmware execution or power-on.
+  * j713_reservations() has already copied all source reservation properties.
+@@ -967,7 +1029,10 @@
+ 	d = j713_alias_node(dst, "gpu");
+ 	ret = ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-vas", 16);
+ 	d = j713_alias_node(dst, "gpu");
+-	return ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-flags", 8);
++	ret = ret ?: j713_copy_prop(dst, d, src, s, "apple,firmware-segment-flags", 8);
++	if (!ret)
++		j773_gpu_diagnostic(dst, src, s);
++	return ret;
+ }
+ 
+ /* Import only the storage handoff for an explicitly opted-in J773g tree.
+--- a/test/py/tests/test_apple_j773_gpu_fdt.py
++++ b/test/py/tests/test_apple_j773_gpu_fdt.py
+@@ -25,13 +25,31 @@
+  }
+  g=fdt_path_offset(fdt,"/soc/gpu"); if(fault==7&&src) refs[0]=cpu_to_fdt32(9999);assert(!fdt_setprop(fdt,g,"memory-region",refs,sizeof(refs)));
+  g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"memory-region-names",name_list,sizeof(name_list)));
++ if(fault >= 10) {
++  g=fdt_path_offset(fdt,"/soc/gpu");
++  if (!src) { assert(!fdt_setprop_string(fdt,g,"apple,j773g-gpu-data-comparison","stale")); g=fdt_path_offset(fdt,"/soc/gpu"); assert(!fdt_setprop_u64(fdt,g,"apple,j773g-sgx-data-size",0x4000)); }
++  else if (fault != 10) {
++   const char *v=fault==11 ? "match" : fault==12 ? "mismatch" : fault==13 ? "unavailable" : fault==14 ? "malformed" : "match";
++   assert(!fdt_setprop_string(fdt,g,"apple,j773g-gpu-data-comparison",v)); g=fdt_path_offset(fdt,"/soc/gpu");
++   if (fault != 13 && fault != 16) {
++    if(fault == 15) assert(!fdt_setprop_u32(fdt,g,"apple,j773g-sgx-data-size",0x4000));
++    else assert(!fdt_setprop_u64(fdt,g,"apple,j773g-sgx-data-size",fault==17?0x4001:0x13c000));
++   }
++  }
++ }
+  if(src){g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop_u32(fdt,g,"apple,g16-handoff-version",fault==2?2:1));
+   g=fdt_path_offset(fdt,"/soc/gpu");if(fault==6)fdt64_st(&vas[1],0);assert(!fdt_setprop(fdt,g,"apple,firmware-segment-vas",vas,sizeof(vas)));
+   g=fdt_path_offset(fdt,"/soc/gpu");assert(!fdt_setprop(fdt,g,"apple,firmware-segment-flags",flags,sizeof(flags)));}
+ }
+-int main(int argc,char **argv){assert(argc==3);for(int fault=0;fault<=9;fault++){
++int main(int argc,char **argv){assert(argc==3);for(int fault=0;fault<=17;fault++){
+  void *s=load(argv[1],128*1024),*d=load(argv[2],1024*1024);init(s,1,fault);init(d,0,fault);
+- int result=j773_gpu_handoff(d,s); if(fault==0||fault==1){assert(!result);int g=fdt_path_offset(d,"/soc/gpu"),len;const fdt32_t *v=fdt_getprop(d,g,"apple,g16-handoff-version",&len);if(fault==0){assert(v&&len==4&&fdt32_to_cpu(*v)==1);const char *st=fdt_getprop(d,g,"status",0);assert(st&&!strcmp(st,"disabled"));}else assert(!v);}else assert(result<0);
++ int result=j773_gpu_handoff(d,s); if(fault==0||fault==1||fault>=10){assert(!result);int g=fdt_path_offset(d,"/soc/gpu"),len;const fdt32_t *v=fdt_getprop(d,g,"apple,g16-handoff-version",&len);if(fault==0||fault>=10){assert(v&&len==4&&fdt32_to_cpu(*v)==1);const char *st=fdt_getprop(d,g,"status",0);assert(st&&!strcmp(st,"disabled"));
++ if (fault>=10) { const char *c=fdt_getprop(d,g,"apple,j773g-gpu-data-comparison",&len); const fdt64_t *sz=fdt_getprop(d,g,"apple,j773g-sgx-data-size",&len);
++ if(fault==11||fault==12){assert(c&&!strcmp(c,fault==11?"match":"mismatch"));assert(sz && len==8 && fdt64_ld(sz)==0x13c000);}
++ else if(fault==13) assert(c&&!strcmp(c,"unavailable")&&!sz);
++ else assert(!c&&!sz);
++ }
++ }else assert(!v);}else assert(result<0);
+  free(s);free(d);}puts("J773g GPU handoff validation, disabled state, and rejection cases PASS");return 0;}
+ '''
+ def test_j773_gpu_handoff(tmp_path):

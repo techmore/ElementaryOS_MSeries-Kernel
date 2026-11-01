@@ -1,0 +1,64 @@
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -33,6 +33,14 @@
+ 		wifi0 = &wifi0;
+ 	};
+ 
++	/* Protected mono internal speaker with headphone jack. */
++	speaker-audio {
++		compatible = "apple,j773g-speaker";
++		apple,mca = <&mca>;
++		apple,codec = <&speaker_amp>;
++		apple,headphone-codec = <&jack_codec>;
++	};
++
+ 	chosen {
+ 		linux-enablement-mac,dapf-handoff = "/arm-io/pmp";
+ 		linux-enablement-mac,dapf-power-on-handoff = "/arm-io/pmp";
+@@ -485,6 +493,45 @@
+ };
+ 
+ &smc_mbox {
++	status = "okay";
++};
++
++/* ADT i2c3/audio-speaker: SN012776 at 0x38, reset gpio0 0xf. */
++&i2c3 {
++	status = "okay";
++
++	speaker_amp: amplifier@38 {
++		compatible = "ti,sn012776";
++		reg = <0x38>;
++		#sound-dai-cells = <0>;
++		shutdown-gpios = <&pinctrl_ap 15 GPIO_ACTIVE_HIGH>;
++	};
++};
++
++/* ADT i2c1/audio-codec-output: CS42L84 at 0x4b, reset nub-gpio 0x11, IRQ gpio0 98. */
++&i2c1 {
++	status = "okay";
++
++	jack_codec: codec@4b {
++		compatible = "cirrus,cs42l84";
++		reg = <0x4b>;
++		reset-gpios = <&pinctrl_nub 17 GPIO_ACTIVE_HIGH>;
++		interrupt-parent = <&pinctrl_ap>;
++		interrupts = <98 IRQ_TYPE_LEVEL_LOW>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "Jack";
++	};
++};
++
++&dart_audio {
++	status = "okay";
++};
++
++&admac {
++	status = "okay";
++};
++
++&mca {
+ 	status = "okay";
+ };
+ 

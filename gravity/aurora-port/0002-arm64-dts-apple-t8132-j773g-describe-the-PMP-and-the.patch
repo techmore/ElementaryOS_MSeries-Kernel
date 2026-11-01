@@ -1,0 +1,81 @@
+From dff9147d9a3341d30d868f4a5f82cd682aa8e60a Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Sat, 31 Oct 2026 09:02:20 -0400
+Subject: [PATCH 2/3] arm64: dts: apple: t8132-j773g: describe the PMP and the
+ G16 GPU
+
+Give the Mac mini the PMP pieces J713 has (the pmp alias, the DAPF
+handoff hints for /arm-io/pmp, and the PMP DART, report and mailbox) and
+include the shared T8132 GPU nodes.
+
+The J773g ADT (macOS 26.6.2) matches what the J713 GPU handoff checks:
+sgx at 0x300000000 (size 0x4000000), gfx-asc at 0x302600000 (size
+0x88000), interrupts 994, 993, 996, 995, __TEXT/__DATA firmware segments
+at IOVA 0xfffffc0000000000, the four GPU region base/size pairs, and a
+34-entry PMP table with the GFX record at entry 12 and DISP at entry 15.
+
+The GPU stays disabled at boot until m1n1 and the kernel admit J773g:
+both currently accept only apple,j713.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/apple/t8132-j773g.dts | 39 +++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index 0583cb9d19f6..5b1ad5f848a0 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -15,6 +15,43 @@
+ / {
+ 	compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+ 	model = "Apple Mac mini (M4, 2024)";
++
++	aliases {
++		pmp = &pmp;
++	};
++
++	chosen {
++		linux-enablement-mac,dapf-handoff = "/arm-io/pmp";
++		linux-enablement-mac,dapf-power-on-handoff = "/arm-io/pmp";
++	};
++};
++
++/*
++ * The GPU's power votes go through the existing PMP. The J773g ADT carries the
++ * same 34-entry PMP table as J713 (GFX at entry 12, DISP at entry 15), and the
++ * same GPU apertures, interrupts and firmware segments.
++ */
++&pmp_dart {
++	status = "okay";
++};
++
++&pmp_report {
++	status = "okay";
++};
++
++&pmp_mbox {
++	status = "okay";
++};
++
++/* Same memory-controller settings as J713 (static-voters copied, unverified on J773g). */
++&mcc {
++	status = "okay";
++	apple,boot-dma-devices = <&pmp>;
++};
++
++&pmc {
++	status = "okay";
++	apple,static-voters = <3>;
+ };
+ 
+ /*
+@@ -23,3 +60,5 @@ / {
+ &framebuffer0 {
+ 	power-domains = <&ps_dispext0_fe>, <&ps_dptx_phy>;
+ };
++
++#include "t8132-gpu.dtsi"
+-- 
+2.50.1 (Apple Git-155)
+

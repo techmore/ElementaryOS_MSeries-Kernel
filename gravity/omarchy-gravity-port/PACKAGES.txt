@@ -1,0 +1,17 @@
+# Gravity Linux packages used for the Omarchy M4 boot port (2026-10-31)
+# Source: https://download.copr.fedorainfracloud.org/results/adevwithanidea/gravity/fedora-44-aarch64/
+# Signing key: adevwithanidea_gravity (COPR) 6CBE BC85 D891 B94E EF48  EA61 1597 4442 C879 3EE4
+# rpmkeys --checksig: digests signatures OK for every package; sha256 matches repodata primary.xml
+7c15176a294f1494b4671196ab8af1309bedf4c1555252e277cf594a895305c6  dracut-gravity-20260915-102.gravity.fc44.noarch.rpm
+83da43c33ff3c94ddec4ee1b2270fc6c39f254dbc1da026d10a3cdccd24f065e  gravity-bootloader-1.6.1-110.gravity.fc44.noarch.rpm
+ac0f89a99cec9955ec202e6e02d37f30679e91389064098ea82e3f87a921e0d2  gravity-bootloader-stage1-1.6.1-110.gravity.fc44.noarch.rpm
+2e824c2c79a1a8532cb26b77446809627f9122bdba590be53a552a8520ad6ab7  kernel-16k-core-7.1.13-509.gravity.fc44.aarch64.rpm
+7613b3e61d004e98cf0a6fcc1bbdfc58f063fd356a8b82e0a7bc3bdbcbf0f31a  kernel-16k-modules-7.1.13-509.gravity.fc44.aarch64.rpm
+61bf9a5195c8c3d1c27c9572c9e9312aa6fedbdf7dc7c470460baf0db5da821b  kernel-16k-modules-core-7.1.13-509.gravity.fc44.aarch64.rpm
+06079912557c02eef2a31d3c2008f7bee6ef62ae75960859af97751b8608cf81  uboot-images-armv8-2026.07-203.gravity.fc44.noarch.rpm
+
+# Built outputs (build-gravity-boot.sh)
+9d881e7f808904265fedc4c39a57c6ecfba942ae636fd185c4416c4e53e91920  boot.bin
+dc26ff2c21d211db71d391546f807f2d1bb899162acfaaf87609102a0e1a5646  gravity-stage1.bin
+3b64991e96251a96ebcfd143213fa8325996892e3c4cc4286de2b0dd2ca26ae4  gravity.efi
+35cfd46676d24c72565b5411f1efce889d9d3440368dedd125c78c2975ad710a  initramfs-gravity.img

@@ -1,0 +1,74 @@
+diff --git a/Documentation/devicetree/bindings/iommu/apple,sart.yaml b/Documentation/devicetree/bindings/iommu/apple,sart.yaml
+index 472454c3d..e2e5da650 100644
+--- a/Documentation/devicetree/bindings/iommu/apple,sart.yaml
++++ b/Documentation/devicetree/bindings/iommu/apple,sart.yaml
+@@ -34,6 +34,7 @@ properties:
+               - apple,t6020-sart
+               - apple,t8112-sart
+               - apple,t8122-sart
++              - apple,t8132-sart
+               - apple,t8140-sart
+           - const: apple,t6000-sart
+       - enum:
+diff --git a/arch/arm64/boot/dts/apple/t8132-j773g.dts b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+index 2ea9a0614..cee1c6490 100644
+--- a/arch/arm64/boot/dts/apple/t8132-j773g.dts
++++ b/arch/arm64/boot/dts/apple/t8132-j773g.dts
+@@ -15,10 +15,57 @@
+ / {
+ 	compatible = "apple,j773g", "apple,t8132", "apple,arm-platform";
+ 	model = "Apple Mac mini (M4, 2024)";
++
++	aliases {
++		ans = &nvme;
++		ans-mbox = &ans_mbox;
++		sart-ans = &sart;
++	};
+ };
+ 
+ /* The Mac mini's SMC mailbox. */
+ &soc {
++	/* Placeholders must stay disabled until a J773g-aware loader supplies
++	 * the ANS resources and interrupts from the machine's live ADT.
++	 */
++	ans_mbox: mbox@0 {
++		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
++		reg = <0x0 0x0 0x0 0x4000>;
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 1 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 2 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 3 IRQ_TYPE_LEVEL_HIGH>,
++		             <AIC_IRQ 4 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "send-empty", "send-not-empty",
++		                  "recv-empty", "recv-not-empty";
++		#mbox-cells = <0>;
++		power-domains = <&ps_ans>;
++		status = "disabled";
++	};
++
++	sart: iommu@10000 {
++		compatible = "apple,t8132-sart", "apple,t6000-sart";
++		reg = <0x0 0x10000 0x0 0x10000>;
++		power-domains = <&ps_ans>;
++		status = "disabled";
++	};
++
++	nvme: nvme@40000 {
++		compatible = "apple,t8132-nvme-ans2";
++		reg = <0x0 0x40000 0x0 0x40000>,
++		      <0x0 0x80000 0x0 0x40000>,
++		      <0x0 0xc0000 0x0 0x4000>;
++		reg-names = "nvme", "nvmmu", "ans";
++		interrupt-parent = <&aic>;
++		interrupts = <AIC_IRQ 5 IRQ_TYPE_LEVEL_HIGH>;
++		mboxes = <&ans_mbox>;
++		apple,sart = <&sart>;
++		power-domains = <&ps_ans>, <&ps_apcie_sys_st>;
++		power-domain-names = "ans", "apcie0";
++		resets = <&ps_ans>;
++		status = "disabled";
++	};
++
+ 	smc_mbox: mailbox@38c608000 {
+ 		compatible = "apple,t8132-asc-mailbox", "apple,asc-mailbox-v4";
+ 		reg = <0x3 0x8c608000 0x0 0x4000>;

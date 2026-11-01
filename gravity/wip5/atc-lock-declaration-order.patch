@@ -1,0 +1,39 @@
+diff --git a/drivers/phy/apple/atc.c b/drivers/phy/apple/atc.c
+--- a/drivers/phy/apple/atc.c
++++ b/drivers/phy/apple/atc.c
+@@ -1237,6 +1237,17 @@
+ 	return ret;
+ }
+ 
++static int atcphy_pipehandler_lock(struct apple_atcphy *atcphy)
++{
++	/* The tests stand in for the controller that acknowledges the lock. */
++	if (IS_ENABLED(CONFIG_PHY_APPLE_ATC_KUNIT_TEST))
++		KUNIT_STATIC_STUB_REDIRECT(atcphy_pipehandler_lock, atcphy);
++
++	return atcphy_pipehandler_lock_timeout(atcphy,
++		atcphy->hw->gen == ATCPHY_GENERATION_T8132 ?
++		6000 : PIPEHANDLER_LOCK_ACK_TIMEOUT_US);
++}
++
+ /* Retry only a live legacy PIPE: USB4 and stopped parking cannot clock the ACK. */
+ static int atcphy_pipehandler_lock_live(struct apple_atcphy *atcphy)
+ {
+@@ -1251,17 +1262,6 @@
+ 			usleep_range(5000, 10000);
+ 	}
+ 	return ret;
+-}
+-
+-static int atcphy_pipehandler_lock(struct apple_atcphy *atcphy)
+-{
+-	/* The tests stand in for the controller that acknowledges the lock. */
+-	if (IS_ENABLED(CONFIG_PHY_APPLE_ATC_KUNIT_TEST))
+-		KUNIT_STATIC_STUB_REDIRECT(atcphy_pipehandler_lock, atcphy);
+-
+-	return atcphy_pipehandler_lock_timeout(atcphy,
+-		atcphy->hw->gen == ATCPHY_GENERATION_T8132 ?
+-		6000 : PIPEHANDLER_LOCK_ACK_TIMEOUT_US);
+ }
+ 
+ static int atcphy_pipehandler_unlock(struct apple_atcphy *atcphy)

@@ -1,0 +1,132 @@
+--- a/src/kboot_gpu_m4.c
++++ b/src/kboot_gpu_m4.c
+@@ -56,6 +56,40 @@
+     return fdt_add_mem_rsv(dt, range.base, range.size);
+ }
+ 
++/* Inspection only. Run before Air-specific resource admission so a mini can
++ * report a differing DATA handoff even when another admission check fails.
++ * Never publish an address or use this comparison to admit the GPU. */
++static void inspect_mini_gpu_data(void *dt, int sgx, int asc)
++{
++    struct gpu_m4_range sgx_data;
++    const char *comparison = "unavailable";
++    u32 len;
++    const char *names = adt_getprop(adt, asc, "segment-names", &len);
++    bool valid_names = names && len == sizeof("__TEXT;__DATA") &&
++                       !memcmp(names, "__TEXT;__DATA", len);
++    const struct adt_segment_ranges *segments = adt_getprop(adt, asc, "segment-ranges", &len);
++    bool valid_segments = segments && len == 2 * sizeof(*segments);
++    bool available = valid_names && valid_segments && !read_range(sgx, "gfx-data", &sgx_data);
++    if (available) {
++        struct gpu_m4_range asc_data = {segments[1].phys, segments[1].size};
++        available = valid_range(asc_data);
++        if (available)
++            comparison = sgx_data.base == asc_data.base && sgx_data.size == asc_data.size ?
++                             "match" : "mismatch";
++    }
++    int gpu = fdt_path_offset(dt, "gpu");
++    if (gpu < 0)
++        return;
++    if (available) {
++        fdt64_t size = cpu_to_fdt64(sgx_data.size);
++        if (fdt_setprop(dt, gpu, "apple,j773g-sgx-data-size", &size, sizeof(size)))
++            return;
++    }
++    gpu = fdt_path_offset(dt, "gpu");
++    if (gpu >= 0 && fdt_setprop_string(dt, gpu, "apple,j773g-gpu-data-comparison", comparison))
++        printf("FDT: GPU: data-range diagnostic unavailable\n");
++}
++
+ static int publish_gpu_m4(void *dt)
+ {
+     int gpu = fdt_path_offset(dt, "gpu");
+@@ -100,6 +134,8 @@
+     int asc = adt_path_offset_trace(adt, "/arm-io/gfx-asc", asc_path);
+     if (sgx < 0 || asc < 0)
+         return -1;
++    if (mini)
++        inspect_mini_gpu_data(dt, sgx, asc);
+     u64 base, size;
+     if (adt_get_reg(adt, sgx_path, "reg", 0, &base, &size) < 0 ||
+         base != 0x300000000 || size != 0x4000000 ||
+@@ -143,25 +179,6 @@
+         fdt64_st(&vas[i], segments[i].iova);
+         flags[i] = cpu_to_fdt32(segments[i].unk);
+     }
+-    /* Read-only mini diagnostic: the SGX gfx-data pair is independent of
+-     * gfx-asc's segment list. Publish only their comparison, never an address.
+-     * A missing, malformed or differing pair does not alter admission.
+-     */
+-    if (mini) {
+-        struct gpu_m4_range sgx_data;
+-        const char *comparison = "unavailable";
+-        if (!read_range(sgx, "gfx-data", &sgx_data)) {
+-            comparison = sgx_data.base == ranges[5].base && sgx_data.size == ranges[5].size ?
+-                             "match" : "mismatch";
+-            fdt64_t size = cpu_to_fdt64(sgx_data.size);
+-            gpu = fdt_path_offset(dt, "gpu");
+-            if (gpu >= 0 && fdt_setprop(dt, gpu, "apple,j773g-sgx-data-size", &size, sizeof(size)))
+-                printf("FDT: GPU: data-size diagnostic unavailable\n");
+-        }
+-        gpu = fdt_path_offset(dt, "gpu");
+-        if (gpu >= 0 && fdt_setprop_string(dt, gpu, "apple,j773g-gpu-data-comparison", comparison))
+-            printf("FDT: GPU: data-range diagnostic unavailable\n");
+-    }
+     if (segments[0].iova != 0xfffffc0000000000 ||
+         segments[1].iova != segments[0].iova + segments[0].size ||
+         segments[1].iova + segments[1].size <= segments[1].iova)
+--- a/tests/python/test_m4_gpu_handoff.py
++++ b/tests/python/test_m4_gpu_handoff.py
+@@ -32,7 +32,7 @@
+ {
+     *base = trace[0] == 1 ? 0x300000000 : 0x302600000;
+     *size = trace[0] == 1 ? 0x4000000 : 0x88000;
+-    if (fault == 1) *base += 0x4000;
++    if (fault == 1 || fault == 20) *base += 0x4000;
+     return 0;
+ }
+ static const void *adt_getprop(void *a, int n, const char *p, u32 *len)
+@@ -41,7 +41,7 @@
+     if (!strcmp(p, "gfx-data-base")) { *len = fault == 18 ? 4 : 8; return fault == 19 ? NULL : &gfx_data_base; }
+     if (!strcmp(p, "gfx-data-size")) { *len = 8; return &gfx_data_size; }
+     if (!strcmp(p, "interrupts")) { *len = sizeof(irqs); return irqs; }
+-    if (!strcmp(p, "segment-names")) { *len = sizeof("__TEXT;__DATA"); return "__TEXT;__DATA"; }
++    if (!strcmp(p, "segment-names")) { *len = sizeof("__TEXT;__DATA"); return fault == 22 ? "__WRONG;__DATA" : "__TEXT;__DATA"; }
+     if (!strcmp(p, "segment-ranges")) { *len = sizeof(segs); return segs; }
+     for (unsigned i = 0; i < 4; i++) {
+         char prop[64];
+@@ -57,7 +57,7 @@
+ {
+     char blob[32768];
+     const char *regions[] = {"uat-ttbs", "uat-pagetables", "uat-handoff", "uat-shared-l2", "gpu-fw-text", "gpu-fw-data"};
+-    for (fault = 0; fault <= 19; fault++) {
++    for (fault = 0; fault <= 22; fault++) {
+         assert(!fdt_create_empty_tree(blob, sizeof(blob)));
+         assert(!fdt_setprop_string(blob, 0, "compatible", "apple,j713"));
+         int gpu = fdt_add_subnode(blob, 0, "gpu"); assert(gpu >= 0);
+@@ -79,7 +79,7 @@
+         gfx_data_base = segs[1].phys; gfx_data_size = segs[1].size;
+         if (fault == 17) gfx_data_base += 0x4000;
+         irqs[0] = 994; irqs[1] = 993; irqs[2] = 996; irqs[3] = 995;
+-        if (fault == 2) irqs[0]++;
++        if (fault == 2 || fault == 21) irqs[0]++;
+         if (fault == 3) bases[1] = bases[0];
+         if (fault == 4) sizes[0] = 0;
+         if (fault == 5) segs[1].iova++;
+@@ -108,10 +108,14 @@
+         gpu = fdt_path_offset(blob, "/gpu");
+         int len;
+         const fdt32_t *version = fdt_getprop(blob, gpu, "apple,g16-handoff-version", &len);
+-        if (fault && fault != 13 && fault < 17) {
++        if ((fault && fault != 13 && fault < 17) || fault >= 20) {
+             assert(!result && !version && !fdt_num_mem_rsv(blob));
+             const char *status = fdt_getprop(blob, gpu, "status", NULL);
+             assert(status && !strcmp(status, "disabled"));
++            if (fault >= 20) {
++                const char *comparison = fdt_getprop(blob, gpu, "apple,j773g-gpu-data-comparison", &len);
++                assert(comparison && !strcmp(comparison, fault == 22 ? "unavailable" : "match"));
++            }
+         } else {
+             assert(!result && version && len == 4 && fdt32_to_cpu(*version) == 1);
+             if (fault == 13 || fault >= 17) {
